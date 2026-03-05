@@ -1,0 +1,26 @@
+[
+  {
+    "id": "230101",
+    "name": "张三",
+    "role": "student",
+    "password": "123456"
+  },
+  {
+    "id": "230102",
+    "name": "李四",
+    "role": "student",
+    "password": "123456"
+  },
+  {
+    "id": "T001",
+    "name": "王老师",
+    "role": "teacher",
+    "password": "123456"
+  },
+  {
+    "id": "admin",
+    "name": "管理员",
+    "role": "admin",
+    "password": "admin123"
+  }
+]

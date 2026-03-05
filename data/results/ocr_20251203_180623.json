@@ -1,0 +1,11 @@
+{
+  "202302/2025-12-03/001.png": {
+    "text": "2",
+    "student_id": null,
+    "status": "success"
+  },
+  "202302/2025-12-03/003.png": {
+    "error": "broken PNG file (chunk b'\\x00\\x00\\x00\\x00')",
+    "status": "error"
+  }
+}

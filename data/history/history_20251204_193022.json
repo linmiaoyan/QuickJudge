@@ -1,0 +1,10 @@
+{
+  "type": "ocr",
+  "result_file": "c:\\Users\\65789\\Pictures\\results\\ocr_20251204_193022.json",
+  "results": {
+    "2025-12-04/001.png": {
+      "error": "文件不存在"
+    }
+  },
+  "timestamp": "2025-12-04T19:30:22.859032"
+}

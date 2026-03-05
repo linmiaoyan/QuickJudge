@@ -1,0 +1,18 @@
+{
+  "individual_reports": {
+    "教技处/2025-12-05/scan1.1.png": {
+      "report": "以下是统计的人名及到场情况：\n\n1. Sarah - 到场\n2. Dand - 到场\n3. Leo - 到场\n4. Tom - 到场\n\n所有人名均已到场。",
+      "filename": "scan1.1.png",
+      "student_id": "scan1.1.png",
+      "status": "success"
+    },
+    "教技处/2025-12-05/scan1.2.png": {
+      "report": "根据提供的文本内容，以下是所有出现的人名：\n\n1. 韩小羊\n2. 习近平（Xi Jinping）\n3. 习仲勋（Xi Zhongxun）\n\n从名单上看，似乎没有其他人名出现。如果这是一个班级作业的提交情况统计，那么除了韩小羊之外，没有其他学生的姓名出现在作业中。因此，可以推断出以下学生没有提交作业：\n\n- 所有其他学生（除了韩小羊）\n\n请注意，由于文本中没有列出班级所有学生的完整名单，因此无法提供确切的未提交作业的学生名单。如果您有完整的班级学生名单，可以进行逐一比对以确定具体哪些学生没有提交作业。",
+      "filename": "scan1.2.png",
+      "student_id": "scan1.2.png",
+      "status": "success"
+    }
+  },
+  "class_evaluation": "",
+  "timestamp": "2025-12-05T08:54:40.454474"
+}

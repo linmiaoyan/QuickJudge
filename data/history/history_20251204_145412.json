@@ -1,0 +1,14 @@
+{
+  "type": "ocr",
+  "result_file": "c:\\Users\\65789\\Pictures\\results\\ocr_20251204_145412.json",
+  "results": {
+    "202501/2025-12-03/003.png": {
+      "text": "温科高 科乐马 路线图 瞿路 路",
+      "student_id": null,
+      "status": "success",
+      "auto_organized": false,
+      "auto_organize_info": null
+    }
+  },
+  "timestamp": "2025-12-04T14:54:12.522610"
+}
