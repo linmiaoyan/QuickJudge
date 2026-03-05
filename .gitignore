@@ -1,0 +1,17 @@
+# 环境变量（含 API 密钥，切勿提交）
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+.venv/
+*.egg-info/
+.eggs/
+
+# 本地数据（若不想提交）
+# data/
