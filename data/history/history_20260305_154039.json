@@ -1,0 +1,12 @@
+{
+  "type": "grade",
+  "result_file": "d:\\OneDrive\\09教育技术处\\QuickJudge\\data\\results\\grade_20260305_154039.json",
+  "individual_reports": {
+    "202302/2025-12-03/Snipaste_2025-12-03_13-45-38.png": {
+      "error": "OCR识别成功但文本为空，可能是图片中没有文字或图片质量不佳。请检查图片是否清晰，是否包含文字内容。",
+      "status": "error"
+    }
+  },
+  "class_evaluation": "",
+  "timestamp": "2026-03-05T15:40:39.071656"
+}

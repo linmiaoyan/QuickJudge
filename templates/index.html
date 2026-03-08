@@ -90,10 +90,10 @@
     <link rel="stylesheet" href="/static/css/scan.css">
 </head>
 <body>
-    <!-- 登录页（未登录时显示） -->
-    <div id="loginScreen" class="login-screen" style="display: none;">
+    <!-- 登录页（默认先显示，避免等待 /api/me 导致白屏慢） -->
+    <div id="loginScreen" class="login-screen" style="display: flex;">
         <div id="loginBox" class="login-box">
-            <h1 style="margin-bottom: 8px;">QuickJudge</h1>
+            <img src="/logo/4.png" alt="QuickJudge" class="login-logo" style="display: block; max-height: 64px; width: auto; margin: 0 auto 16px;">
             <p style="color: var(--text-secondary); margin-bottom: 24px; font-size: 0.95rem;">请使用学号/工号登录</p>
             <form id="loginForm" onsubmit="return doLogin(event)">
                 <div class="form-group">
@@ -142,9 +142,7 @@
     <!-- 顶栏 -->
     <nav class="top-navbar">
         <div class="nav-container" style="max-width: none; justify-content: space-between;">
-            <span style="font-weight: 700; font-size: 1.1rem;">QuickJudge</span>
             <div style="display: flex; align-items: center; gap: 1rem;">
-                <span id="navRoleHint" style="color: rgba(255,255,255,0.9); font-size: 0.9rem;">扫描 → 班级 → 文件 → 识别 → 批阅</span>
                 <span id="currentUserSpan" style="color: rgba(255,255,255,0.9); font-size: 0.9rem;"></span>
                 <button id="configBtn" onclick="openConfigModal()" class="btn" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 8px 16px;">⚙️ 配置</button>
                 <button id="logoutBtn" onclick="doLogout()" class="btn" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 8px 16px;">退出</button>
@@ -155,52 +153,52 @@
     <div class="admin-layout">
         <!-- 左侧导航 -->
         <aside class="admin-sidebar">
+            <div class="sidebar-logo-wrap" style="padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.15); margin-bottom: 8px;">
+                <img src="/logo/4.png" alt="QuickJudge" style="max-height: 40px; width: 100%; object-fit: contain; display: block;">
+            </div>
             <a href="javascript:void(0)" class="sidebar-item active" data-tab="home" onclick="switchTab('home', event)">首页</a>
+            <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="assign" onclick="switchTab('assign', event)">组卷布置</a>
             <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="files" onclick="switchTab('files', event)">文件管理</a>
             <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="ocr" onclick="switchTab('ocr', event)">智能阅卷</a>
             <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="grading" onclick="switchTab('grading', event)">阅卷管理</a>
             <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="center" onclick="switchTab('center', event)">班级中心</a>
-            <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="assign" onclick="switchTab('assign', event)">布置练习</a>
             <a href="javascript:void(0)" class="sidebar-item sidebar-student" data-tab="my-reports" onclick="switchTab('my-reports', event)" style="display: none;">我的报告</a>
         </aside>
 
         <main class="admin-content">
             <div id="alertArea"></div>
 
-            <!-- 首页 -->
+            <!-- 首页：最新试卷与改卷情况报表 -->
             <div id="tab-home" class="tab-content active">
                 <div class="section">
                     <h2>首页</h2>
-                    <p style="color: var(--text-secondary); margin-bottom: 1rem;">选择功能入口：</p>
-                    <!-- 学生：仅显示我的报告入口 -->
-                    <div id="homeStudentBlock" class="scan-dashboard-cards home-student-only" style="display: none;">
-                        <a href="javascript:void(0)" class="scan-dashboard-card" onclick="switchTab('my-reports', event)">
+                    <!-- 学生：仅显示我的报告 -->
+                    <div id="homeStudentBlock" class="home-student-only" style="display: none;">
+                        <p style="color: var(--text-secondary); margin-bottom: 1rem;">查看你的历次批阅记录。</p>
+                        <a href="javascript:void(0)" class="scan-dashboard-card" onclick="switchTab('my-reports', event)" style="display: inline-block;">
                             <h3>📋 我的报告</h3>
                             <p>查看我的历次作文批阅记录</p>
                         </a>
                     </div>
-                    <!-- 老师/管理员：全部功能入口 -->
-                    <div id="homeTeacherBlock" class="scan-dashboard-cards home-teacher-only">
-                        <a href="javascript:void(0)" class="scan-dashboard-card" onclick="switchTab('files', event)">
-                            <h3>📁 文件管理</h3>
-                            <p>扫描、归档、选择班级与图片文件</p>
-                        </a>
-                        <a href="javascript:void(0)" class="scan-dashboard-card" onclick="switchTab('ocr', event)">
-                            <h3>✏️ 智能阅卷</h3>
-                            <p>识别作文并生成批阅报告</p>
-                        </a>
-                        <a href="javascript:void(0)" class="scan-dashboard-card" onclick="switchTab('center', event)">
-                            <h3>🏫 班级中心</h3>
-                            <p>查看历次报告、导出、学号管理</p>
-                        </a>
-                        <a href="javascript:void(0)" class="scan-dashboard-card" onclick="switchTab('grading', event)">
-                            <h3>📝 阅卷管理</h3>
-                            <p>创建阅卷任务、我的阅卷、阅卷进度、打分批阅</p>
-                        </a>
-                        <a href="javascript:void(0)" class="scan-dashboard-card" onclick="switchTab('assign', event)">
-                            <h3>📋 布置练习</h3>
-                            <p>选择班级与学生布置任务</p>
-                        </a>
+                    <!-- 老师/管理员：最新试卷 + 改卷情况报表 -->
+                    <div id="homeTeacherBlock" class="home-teacher-only">
+                        <div style="margin-bottom: 1.5rem; padding: 12px 16px; background: var(--bg-white); border: 1px solid var(--border-color); border-radius: 10px; font-size: 13px; color: var(--text-secondary);">
+                            <strong style="color: var(--text-primary);">📌 使用流程：</strong> 在「组卷布置」选题并发布任务 → 在「阅卷管理」导出答题卡、上传试卷（可扫码归类）→ 在「智能阅卷」中识别并批阅 → 在「班级中心」查看报告与好词好句。
+                        </div>
+                        <div class="home-dashboard-section" style="margin-bottom: 2rem;">
+                            <h3 style="margin: 0 0 12px 0; color: var(--text-primary);">📄 最新试卷</h3>
+                            <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">最近扫描的试卷批次，点击可进入文件管理查看或归档。</p>
+                            <div id="homeLatestPapers" class="home-report-cards">
+                                <p style="color: var(--text-muted); font-size: 13px;">加载中...</p>
+                            </div>
+                        </div>
+                        <div class="home-dashboard-section">
+                            <h3 style="margin: 0 0 12px 0; color: var(--text-primary);">📊 改卷情况与报表</h3>
+                            <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">班级批阅概况与阅卷任务进度。</p>
+                            <div id="homeGradingReports" class="home-report-cards">
+                                <p style="color: var(--text-muted); font-size: 13px;">加载中...</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -289,10 +287,7 @@
                     </div>
                     <div class="action-buttons">
                         <button class="btn btn-info" onclick="showPromptTemplateEditor()" id="promptBtn">✏️ 编辑批阅提示词</button>
-                        <div style="display: flex; flex-direction: column; gap: 10px;">
-                            <button class="btn btn-success" onclick="recognizeAndGrade()" id="recognizeAndGradeBtn" style="font-size: 16px; padding: 12px 24px;" disabled>🚀 识别并批阅</button>
-                            <button class="btn btn-success" onclick="recognizeAndGradeWithClassReport()" id="recognizeAndGradeWithReportBtn" style="font-size: 16px; padding: 12px 24px;" disabled>📊 识别并批阅+班级报告</button>
-                        </div>
+                        <button class="btn btn-success" onclick="recognizeAndGrade()" id="recognizeAndGradeBtn" style="font-size: 16px; padding: 12px 24px;" disabled>🚀 识别并批阅</button>
                         <button class="btn btn-success" onclick="showStudentMapping()" id="mappingBtn" style="display: none;">👤 设置学号</button>
                         <button class="btn btn-warning" onclick="clearSelection()">清除选择</button>
                     </div>
@@ -313,11 +308,13 @@
                     <div id="gradingSubNav" style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
                         <button type="button" class="btn composition-type-tab active" id="gradingTabManage" onclick="setGradingSubTab('manage')">阅卷管理</button>
                         <button type="button" class="btn composition-type-tab" id="gradingTabMine" onclick="setGradingSubTab('mine')">我的阅卷</button>
+                        <input type="file" id="gradingUploadAutoInput" accept="image/*" style="display:none;" onchange="uploadPaperAuto(this)">
+                        <button type="button" class="btn btn-info" onclick="document.getElementById('gradingUploadAutoInput').click()">上传试卷（识码归类）</button>
                         <button type="button" class="btn btn-primary" id="gradingBtnCreate" onclick="showCreateGradingTaskWizard()" style="margin-left: auto;">创建阅卷任务</button>
                     </div>
                     <div id="gradingViewManage">
                         <h2 style="margin-bottom: 12px;">人工阅卷</h2>
-                        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">管理阅卷任务、查看阅卷进度。</p>
+                        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">管理阅卷任务、查看阅卷进度。使用带任务二维码的答题卡打印试卷后，可点「上传试卷（识码归类）」上传单张图片，系统将自动识别并归入对应任务。</p>
                         <div id="gradingTaskListManage"></div>
                     </div>
                     <div id="gradingViewMine" style="display: none;">
@@ -331,20 +328,15 @@
                     </div>
                     <div id="gradingViewProgress" style="display: none;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                            <h2 style="margin: 0;">阅卷进度</h2>
+                            <h2 style="margin: 0;">阅卷进度（按任务）</h2>
                             <button type="button" class="btn btn-warning" onclick="setGradingSubTab('manage')">← 返回</button>
                         </div>
-                        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-                            <button type="button" class="btn composition-type-tab active" onclick="setGradingProgressBy('question')">按题查看</button>
-                            <button type="button" class="btn composition-type-tab" onclick="setGradingProgressBy('teacher')">按老师查看</button>
-                            <button type="button" class="btn btn-primary" onclick="syncGradingScores()">同步成绩</button>
-                        </div>
-                        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">*总任务数、已完成、未完成中包括单/双评任务和仲裁任务</p>
+                        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">展示各任务已收试卷数量，可在此查看试卷或前往批阅。</p>
                         <div class="composition-table-wrap">
                             <table class="composition-table">
                                 <thead>
                                     <tr>
-                                        <th>题号</th><th>题型</th><th>批阅模式</th><th>未分配试卷</th><th>总任务数</th><th>已完成</th><th>未完成</th><th>仲裁任务数</th><th>已仲裁</th><th>未仲裁</th><th>详情</th>
+                                        <th>任务名称</th><th>创建时间</th><th>已收卷</th><th>已批阅</th><th>操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="gradingProgressTbody"></tbody>
@@ -377,21 +369,22 @@
                 </div>
             </div>
 
-            <!-- 布置练习（作文） -->
+            <!-- 组卷布置（作文） -->
             <div id="tab-assign" class="tab-content">
                 <div class="section">
                     <div class="composition-toolbar" style="justify-content: space-between; align-items: center;">
                         <h2 style="margin: 0;">📝 作文练习</h2>
-                        <div style="display: flex; gap: 8px;">
-                            <button type="button" class="btn btn-info" onclick="downloadCompositionMaterials()">下载作文素材</button>
-                            <button type="button" class="btn btn-info" onclick="downloadGeneralAnswerSheet()">下载通用答题卡</button>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-info" onclick="openEditCompositionMaterialsModal()">编辑作文素材</button>
+                            <button type="button" class="btn btn-info" onclick="openEditAnswerSheetModal()">编辑通用答题卡</button>
+                            <button type="button" class="btn btn-info" onclick="previewPrintAnswerSheet()">预览/打印答题卡</button>
                             <button type="button" class="btn btn-primary" onclick="openAddMaterialModal()">➕ 添加素材</button>
                         </div>
                     </div>
                     <!-- 素材管理（教师自定义素材） -->
                     <div class="section" style="margin-bottom: 1rem; padding: 1rem; background: var(--bg-gray); border-radius: 8px;">
                         <h3 style="margin: 0 0 8px 0; font-size: 1rem;">📎 素材管理</h3>
-                        <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 10px;">上传或创建素材供学生使用，可下载后发放。</p>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 10px;">作文素材与通用答题卡均在平台内编辑、保存；上传或创建的自定义素材可在此管理，需要时下载发放。</p>
                         <div id="materialsListContainer">
                             <p style="color: var(--text-muted); font-size: 0.9rem;">加载中...</p>
                         </div>
@@ -399,10 +392,10 @@
                     <p style="color: var(--text-secondary); margin-bottom: 1rem;">选择练习类型，筛选题目后加入试卷篮并布置给班级学生。</p>
                     <!-- 练习类型 -->
                     <div class="composition-type-tabs" id="compositionTypeTabs">
-                        <button type="button" class="composition-type-tab active" data-type="sync">教材同步练习</button>
-                        <button type="button" class="composition-type-tab" data-type="app">应用文题库</button>
-                        <button type="button" class="composition-type-tab" data-type="continuation">读后续写题库</button>
-                        <button type="button" class="composition-type-tab" data-type="custom">自定义出题</button>
+                        <button type="button" class="composition-type-tab active" data-type="sync" onclick="setCompositionType('sync')">教材同步练习</button>
+                        <button type="button" class="composition-type-tab" data-type="app" onclick="setCompositionType('app')">应用文题库</button>
+                        <button type="button" class="composition-type-tab" data-type="continuation" onclick="setCompositionType('continuation')">读后续写题库</button>
+                        <button type="button" class="composition-type-tab" data-type="custom" onclick="setCompositionType('custom')">自定义出题</button>
                     </div>
                     <!-- 筛选 -->
                     <div class="composition-filters" id="compositionFilters">
@@ -461,6 +454,7 @@
                             <label><input type="radio" name="filterDisplay" value="assigned"> 已布置</label>
                         </div>
                         <button type="button" class="btn btn-primary" onclick="loadCompositionExercises()">筛选</button>
+                        <button type="button" class="btn btn-success" onclick="openAssignFromBasket()" style="margin-left: 8px;">去布置</button>
                     </div>
                     <div class="composition-assign-layout">
                         <div>
@@ -508,6 +502,41 @@
                 <button type="button" class="btn btn-primary" onclick="openAssignFromBasket()">去布置</button>
             </div>
 
+            <!-- 布置弹窗：选择班级、学生与时间（提交接口接入后在此对接） -->
+            <div id="assignCompositionModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1045; overflow-y: auto;">
+                <div style="max-width: 520px; margin: 30px auto; background: var(--bg-white); border-radius: 12px; padding: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.2);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h2 style="margin: 0; font-size: 1.2rem;">选择班级与学生布置</h2>
+                        <button type="button" onclick="closeAssignCompositionModal()" style="background: none; border: none; font-size: 1.4rem; cursor: pointer;">&times;</button>
+                    </div>
+                    <p id="assignModalSummary" style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 16px;"></p>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 6px; font-weight: 500;">任务名称（可选，不填则用题目名或「作文练习」）</label>
+                        <input type="text" id="assignModalTaskTitle" placeholder="如：3月作文练习" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px;">
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 6px; font-weight: 500;">选择班级</label>
+                        <div id="assignModalClassList" style="max-height: 180px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; padding: 8px;">
+                            <p style="color: var(--text-muted); font-size: 0.9rem;">加载中...</p>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 6px; font-weight: 500;">选择学生（可选，不选则布置给所选班级全部学生）</label>
+                        <div id="assignModalStudentList" style="max-height: 160px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; padding: 8px;">
+                            <p style="color: var(--text-muted); font-size: 0.9rem;">先选择班级后显示学生名单</p>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 6px; font-weight: 500;">截止时间</label>
+                        <input type="datetime-local" id="assignModalDeadline" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px;">
+                    </div>
+                    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                        <button type="button" class="btn btn-warning" onclick="closeAssignCompositionModal()">取消</button>
+                        <button type="button" class="btn btn-primary" id="assignModalSubmitBtn" onclick="submitAssignComposition()">确认布置</button>
+                    </div>
+                </div>
+            </div>
+
                 <!-- 创建阅卷任务向导 -->
                 <div id="createGradingTaskModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1045; overflow-y: auto;">
                     <div style="max-width: 640px; margin: 30px auto; background: var(--bg-white); border-radius: 12px; padding: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.2);">
@@ -552,6 +581,27 @@
                             <div style="display: flex; gap: 10px; justify-content: flex-end;">
                                 <button type="button" class="btn btn-warning" onclick="createGradingTaskPrevStep()">上一步</button>
                                 <button type="button" class="btn btn-primary" onclick="saveCreateGradingTask()">保存</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 任务试卷列表（按任务查看/选择后前往批阅） -->
+                <div id="taskPapersModal" style="display:none; position: fixed; inset:0; background: rgba(0,0,0,0.5); z-index: 1055; overflow-y: auto;">
+                    <div style="max-width: 920px; margin: 30px auto; background: var(--bg-white); border-radius: 12px; padding: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2);">
+                        <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom: 12px;">
+                            <h2 style="margin:0; font-size: 1.1rem;">任务试卷：<span id="taskPapersTitle"></span></h2>
+                            <button type="button" onclick="closeTaskPapersModal()" style="background:none; border:none; font-size:1.4rem; cursor:pointer;">&times;</button>
+                        </div>
+                        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">
+                            勾选试卷后点击「前往批阅」，将自动带入「识别与批阅」页（支持区域选择/识别并批阅）。
+                        </p>
+                        <div id="taskPapersList" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px;"></div>
+                        <div style="display:flex; justify-content: space-between; align-items:center; margin-top: 14px;">
+                            <div style="font-size: 13px; color: var(--text-secondary);">已选 <span id="taskPapersSelectedCount">0</span> 张</div>
+                            <div style="display:flex; gap:10px;">
+                                <button type="button" class="btn btn-warning" onclick="closeTaskPapersModal()">关闭</button>
+                                <button type="button" class="btn btn-primary" onclick="confirmTaskPapersToGrade()">前往批阅</button>
                             </div>
                         </div>
                     </div>
@@ -667,6 +717,44 @@
                         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 1rem;">
                             <button type="button" class="btn btn-warning" onclick="closeAddMaterialModal()">取消</button>
                             <button type="button" class="btn btn-primary" onclick="submitAddMaterial()">添加</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 编辑作文素材（平台内编辑） -->
+                <div id="editCompositionMaterialsModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1056; overflow-y: auto;">
+                    <div class="modal-box" style="max-width: 720px; margin: 40px auto;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <h2 style="margin: 0; font-size: 1.25rem;">编辑作文素材</h2>
+                            <button type="button" onclick="closeEditCompositionMaterialsModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-secondary);">&times;</button>
+                        </div>
+                        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 10px;">在平台内编辑后保存，发放给学生时可直接使用或下载；无需下载到本地再传回。</p>
+                        <textarea id="editCompositionMaterialsContent" rows="16" style="width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; resize: vertical; font-family: inherit;"></textarea>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
+                            <button type="button" class="btn btn-info" onclick="downloadCompositionMaterials()">下载为 ZIP 备份</button>
+                            <div style="display: flex; gap: 10px;">
+                                <button type="button" class="btn btn-warning" onclick="closeEditCompositionMaterialsModal()">取消</button>
+                                <button type="button" class="btn btn-primary" onclick="saveCompositionMaterials()">保存</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 编辑通用答题卡（平台内编辑 HTML） -->
+                <div id="editAnswerSheetModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1056; overflow-y: auto;">
+                    <div class="modal-box" style="max-width: 900px; margin: 40px auto;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <h2 style="margin: 0; font-size: 1.25rem;">编辑通用答题卡</h2>
+                            <button type="button" onclick="closeEditAnswerSheetModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-secondary);">&times;</button>
+                        </div>
+                        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 10px;">在平台内编辑答题卡 HTML，保存后使用「预览/打印答题卡」直接打印，无需下载再传回。</p>
+                        <textarea id="editAnswerSheetContent" rows="20" style="width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; resize: vertical; font-family: monospace; font-size: 13px;"></textarea>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
+                            <button type="button" class="btn btn-info" onclick="downloadGeneralAnswerSheet()">下载为 HTML 备份</button>
+                            <div style="display: flex; gap: 10px;">
+                                <button type="button" class="btn btn-warning" onclick="closeEditAnswerSheetModal()">取消</button>
+                                <button type="button" class="btn btn-primary" onclick="saveAnswerSheet()">保存</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -899,21 +987,24 @@
                             <p style="margin-bottom: 10px;"><a href="javascript:void(0)" onclick="closeConfigModal(); openScannerAdvancedModal();" style="color: var(--primary-blue); font-size: 14px;">扫描仪高级设置</a>（图像模式、单/双面扫描）</p>
                         </div>
 
-                        <!-- 管理员：学生导入与邀请码 -->
+                        <!-- 教师与管理员：单个导入学生（共用同一接口） -->
+                        <div id="configSingleAddStudentBlock" style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
+                            <h3 style="margin-bottom: 12px; font-size: 1rem;">👤 单个导入学生</h3>
+                            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 10px;">填写学生姓名与登录账号（学号），密码默认与登录账号相同。</p>
+                            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                                <input type="text" id="singleAddStudentName" placeholder="学生姓名" style="padding: 8px; width: 120px; border: 1px solid var(--border-color); border-radius: 6px;">
+                                <input type="text" id="singleAddStudentId" placeholder="登录账号（学号）" style="padding: 8px; width: 140px; border: 1px solid var(--border-color); border-radius: 6px;">
+                                <button type="button" class="btn btn-success" onclick="addSingleStudent()">添加</button>
+                            </div>
+                        </div>
+
+                        <!-- 仅管理员：批量导入与邀请码 -->
                         <div id="configAdminBlock" style="display: none; margin-top: 25px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
-                            <h3 style="margin-bottom: 12px; font-size: 1rem;">👤 学生导入（管理员）</h3>
+                            <h3 style="margin-bottom: 12px; font-size: 1rem;">👤 批量导入学生（管理员）</h3>
                             <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 10px;">CSV 需包含列：学生姓名、登录账号。密码与登录账号相同。</p>
                             <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
                                 <button type="button" class="btn btn-primary" onclick="adminImportFromNamelist()">从根目录 namelist.csv 导入</button>
                                 <label class="btn btn-info" style="margin: 0;">上传 CSV <input type="file" id="adminImportCsvInput" accept=".csv" style="display: none;" onchange="adminImportFromCsv(event)"></label>
-                            </div>
-                            <div style="margin-bottom: 16px;">
-                                <strong style="font-size: 13px;">单个添加</strong>
-                                <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap;">
-                                    <input type="text" id="adminStudentName" placeholder="学生姓名" style="padding: 8px; width: 120px; border: 1px solid var(--border-color); border-radius: 6px;">
-                                    <input type="text" id="adminStudentId" placeholder="登录账号（学号）" style="padding: 8px; width: 140px; border: 1px solid var(--border-color); border-radius: 6px;">
-                                    <button type="button" class="btn btn-success" onclick="adminAddSingleStudent()">添加</button>
-                                </div>
                             </div>
                             <h3 style="margin: 20px 0 12px 0; font-size: 1rem;">🔑 邀请码管理（教师注册用）</h3>
                             <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
@@ -973,7 +1064,7 @@
         </div>
     </div>
 
-    <!-- 批阅加载遮罩层（转动框） -->
+    <!-- 批阅加载遮罩层（转动框 + 进度条 + 已用/预估时间） -->
     <div id="gradeLoadingOverlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.35); z-index:2000; align-items:center; justify-content:center;">
         <div style="background:#ffffff; padding:24px 32px; border-radius:12px; box-shadow:0 12px 32px rgba(15,23,42,0.25); text-align:center; max-width:400px;">
             <div class="spinner-border text-success" role="status" style="width:3rem; height:3rem;">
@@ -985,6 +1076,12 @@
             <div id="gradeLoadingProgress" style="margin-top:8px; font-size:12px; color:#888;">
                 预计需要60秒左右
             </div>
+            <div id="gradeLoadingBarWrap" style="display:none; margin-top:12px; width:100%; height:8px; background:#e9ecef; border-radius:4px; overflow:hidden;">
+                <div id="gradeLoadingBar" style="height:100%; width:0%; background:linear-gradient(90deg,#28a745,#20c997); border-radius:4px; transition:width 0.3s ease;"></div>
+            </div>
+            <div id="gradeLoadingTime" style="display:none; margin-top:8px; font-size:12px; color:#666;">
+                <span id="gradeLoadingElapsed">已用 0 秒</span> · <span id="gradeLoadingRemaining">预计还需 — 秒</span>
+            </div>
         </div>
     </div>
 
@@ -995,6 +1092,7 @@
         let ocrResults = {};
         let studentMapping = {};
         let classStudents = [];
+        let classStudentNames = {}; // 学号->姓名，供设置学号下拉等展示用
         let pendingFolderForOrganize = null; // 待归档的扫描文件夹名称
         let selectedClassFolders = new Set(); // 班级内多选文件夹
         let useProcessedVersions = new Map(); // 记录哪些文件使用处理过的版本 {fileKey: true/false}
@@ -1003,6 +1101,19 @@
         let compositionPracticeType = 'sync'; // sync | app | continuation | custom
         let compositionExercisesList = []; // 当前筛选后的题目列表
         let compositionReportAssignments = []; // 作文报告列表（历次布置）
+        // 题库示例数据（按类型：sync 教材同步 / app 应用文 / continuation 读后续写 / custom 自定义）
+        const COMPOSITION_BANK = [
+            { id: 'sync-1', type: 'sync', title: '必修一 Unit 1 单元写作：人物介绍', desc: '根据单元话题写一篇 80–100 词的人物介绍。', assigned: false, count: 1, duration: '25分钟', stars: 3, content: '请根据本单元所学话题，写一篇 80–100 词的英语短文，介绍一位你熟悉的人物（家人、朋友或榜样）。\n\n要求：\n1. 包含人物的外貌、性格与主要经历或对你的影响；\n2. 使用本单元所学词汇与句型；\n3. 书写工整，语法正确。' },
+            { id: 'sync-2', type: 'sync', title: '必修一 Unit 2 旅游经历', desc: '描述一次旅行经历，80 词左右。', assigned: true, count: 1, duration: '20分钟', stars: 2, content: '请以“A Trip I Will Never Forget”为题，写一篇 80 词左右的短文，描述你印象最深的一次旅行。\n\n要求：\n1. 写出时间、地点、人物与主要活动；\n2. 适当使用连接词（如 first, then, finally）；\n3. 表达真实感受。' },
+            { id: 'sync-3', type: 'sync', title: '必修二 Unit 1 文化遗产介绍', desc: '介绍一处文化遗产，100–120 词。', assigned: false, count: 1, duration: '30分钟', stars: 4, content: '请介绍一处你熟悉或感兴趣的中国或世界文化遗产（如长城、故宫、敦煌等）。\n\n要求：\n1. 字数 100–120 词；\n2. 包含其历史、特点与价值；\n3. 使用本单元相关词汇与被动语态。' },
+            { id: 'app-1', type: 'app', title: '求助信：请求外教修改作文', desc: '给外教写一封求助信，请求修改作文。', assigned: false, count: 1, duration: '25分钟', stars: 3, content: '假定你是李华，你的外教 Mr. Smith 愿意在课后帮助同学。请给他写一封邮件，请求他帮你修改一篇作文。\n\n要点：\n1. 说明你写了哪类作文、为何需要修改；\n2. 询问他方便的时间与方式（当面或邮件）；\n3. 表示感谢。\n\n词数 80 左右，可适当增加细节。' },
+            { id: 'app-2', type: 'app', title: '建议信：如何提高英语听力', desc: '给笔友写建议信，谈如何提高英语听力。', assigned: false, count: 1, duration: '25分钟', stars: 3, content: '假定你是李华，你的英国笔友 Tom 来信说英语听力较差，希望得到你的建议。请用英语给他写一封回信。\n\n要点：\n1. 表示理解并鼓励；\n2. 提出 2–3 条具体建议（如多听录音、看英剧、做听写等）；\n3. 祝愿他进步。\n\n词数 100 左右。' },
+            { id: 'app-3', type: 'app', title: '申请信：申请参加暑期英语夏令营', desc: '向学校写一封申请信，申请参加夏令营。', assigned: false, count: 1, duration: '30分钟', stars: 4, content: '假定你是高三学生李华，学校将举办暑期英语夏令营，现招募志愿者。请写一封申请信，申请成为志愿者。\n\n要点：\n1. 表达参加意愿；\n2. 说明你的英语能力与相关经历；\n3. 简述你能为夏令营做什么。\n\n词数 100 左右。' },
+            { id: 'continuation-1', type: 'continuation', title: '读后续写：迷路的小狗', desc: '根据所给短文与段首句续写两段，每段约 75 词。', assigned: false, count: 1, duration: '35分钟', stars: 4, content: '阅读下面短文，根据所给情节进行续写，使之构成完整故事。\n\nOne afternoon, Mary was walking home from school when she saw a small dog sitting by the roadside. It looked lost and hungry. Mary knelt down and patted it. The dog had a collar but no name tag. She decided to take it home and try to find its owner.\n\n段首句：\n1. When Mary got home, her mother was surprised to see the dog.\n2. The next day, Mary put up “Lost Dog” notices around the neighborhood.\n\n要求：续写两段，每段约 75 词；与所给短文及段首句衔接合理，情节完整。' },
+            { id: 'continuation-2', type: 'continuation', title: '读后续写：雨中的陌生人', desc: '根据所给短文续写两段，每段约 75 词。', assigned: false, count: 1, duration: '35分钟', stars: 5, content: '阅读下面短文，根据所给情节进行续写。\n\nIt was raining heavily when Jack left the library. He had no umbrella. Suddenly a stranger offered to share his umbrella with Jack. They walked together to the bus stop. The stranger said little but smiled. When the bus came, Jack thanked him and got on. Only then did he notice he had left his bag in the library.\n\n段首句：\n1. Jack got off at the next stop and ran back to the library.\n2. To his surprise, the stranger was standing at the library door, holding his bag.\n\n要求：续写两段，每段约 75 词；情节连贯、合理，体现人物情感或成长。' },
+            { id: 'custom-1', type: 'custom', title: '议论文：网络学习的利与弊', desc: '就网络学习的利与弊发表看法，120 词左右。', assigned: false, count: 1, duration: '30分钟', stars: 3, content: '请以“The Pros and Cons of Online Learning”为题，写一篇 120 词左右的短文，谈谈网络学习的利与弊。\n\n要求：\n1. 至少各写两点利与弊；\n2. 可简要陈述自己的看法；\n3. 结构清晰，逻辑连贯。' },
+            { id: 'custom-2', type: 'custom', title: '记叙文：一次难忘的失败', desc: '记叙一次失败经历及从中得到的收获。', assigned: false, count: 1, duration: '30分钟', stars: 4, content: '请以“An Unforgettable Failure”为题，写一篇 100–120 词的短文，记叙一次让你难忘的失败经历，并写出你从中的收获。\n\n要求：\n1. 交代时间、地点与事件；\n2. 写出当时的感受与事后的反思；\n3. 语言准确，条理清楚。' }
+        ];
 
         // ---------- 登录与角色 ----------
         function applyRoleLayout(role) {
@@ -1011,7 +1122,6 @@
             var homeStudent = document.getElementById('homeStudentBlock');
             var homeTeacher = document.getElementById('homeTeacherBlock');
             var configBtn = document.getElementById('configBtn');
-            var navHint = document.getElementById('navRoleHint');
             for (var i = 0; i < teacherOnly.length; i++) {
                 teacherOnly[i].style.display = (role === 'student') ? 'none' : '';
             }
@@ -1021,11 +1131,6 @@
             if (homeStudent) homeStudent.style.display = (role === 'student') ? 'block' : 'none';
             if (homeTeacher) homeTeacher.style.display = (role === 'student') ? 'none' : 'block';
             if (configBtn) configBtn.style.display = (role === 'student') ? 'none' : '';
-            if (navHint) {
-                if (role === 'student') navHint.textContent = '查看我的批阅报告';
-                else if (role === 'admin') navHint.textContent = '管理员 · 扫描 → 班级 → 文件 → 识别 → 批阅';
-                else navHint.textContent = '扫描 → 班级 → 文件 → 识别 → 批阅';
-            }
             if (role === 'student') switchTab('home', null);
         }
         function doLogin(e) {
@@ -1108,12 +1213,12 @@
                 var loginScreen = document.getElementById('loginScreen');
                 var mainApp = document.getElementById('mainApp');
                 if (mainApp) mainApp.style.display = 'none';
-                if (loginScreen) loginScreen.style.display = 'block';
+                if (loginScreen) loginScreen.style.display = 'flex';
             }).catch(function() {
                 var mainApp = document.getElementById('mainApp');
                 var loginScreen = document.getElementById('loginScreen');
                 if (mainApp) mainApp.style.display = 'none';
-                if (loginScreen) loginScreen.style.display = 'block';
+                if (loginScreen) loginScreen.style.display = 'flex';
             });
         }
         function loadMyReports() {
@@ -1159,7 +1264,27 @@
             div.textContent = s;
             return div.innerHTML;
         }
+        // 展示用：学号(姓名)，仅用于界面显示，不改变存储与提交的学号
+        function formatStudentDisplay(id, nameMapOrName) {
+            if (!id) return '';
+            var name = '';
+            if (typeof nameMapOrName === 'string') name = nameMapOrName;
+            else if (nameMapOrName && typeof nameMapOrName === 'object' && nameMapOrName[id] !== undefined) name = nameMapOrName[id];
+            else if (window.studentNames && window.studentNames[id]) name = window.studentNames[id];
+            return name ? (id + '(' + name + ')') : id;
+        }
+        function ensureStudentNames(callback) {
+            if (window.studentNames) { if (callback) callback(); return Promise.resolve(); }
+            return fetch('/api/users', { credentials: 'include' }).then(function(r) { return r.json(); }).then(function(data) {
+                window.studentNames = {};
+                (data.users || []).forEach(function(u) {
+                    if (u.role === 'student' && u.id) window.studentNames[u.id] = (u.name || '').trim();
+                });
+                if (callback) callback();
+            }).catch(function() { if (callback) callback(); });
+        }
         document.addEventListener('DOMContentLoaded', function() {
+            // 不阻塞：登录页已默认显示，仅在已登录时切换主界面并加载数据
             fetch('/api/me', { credentials: 'include' })
             .then(function(r) {
                 if (r.ok) return r.json();
@@ -1175,9 +1300,13 @@
                 if (span && user) span.textContent = (user.name || user.id) + '（' + (user.role === 'student' ? '学生' : user.role === 'admin' ? '管理员' : '老师') + '）';
                 window.currentUserRole = user.role || 'teacher';
                 applyRoleLayout(user.role || 'teacher');
+                // 已登录后再加载班级和文件夹，避免未登录时多发请求
+                loadClasses();
+                loadFolders();
+                if (user.role !== 'student') loadHomeDashboard();
             })
             .catch(function() {
-                document.getElementById('loginScreen').style.display = 'block';
+                document.getElementById('loginScreen').style.display = 'flex';
                 document.getElementById('mainApp').style.display = 'none';
             });
         });
@@ -1202,35 +1331,67 @@
         }
 
         // 显示 / 隐藏 批阅加载遮罩层
+        let gradeProgressTimerId = null;
         function showGradeLoading(message, progress) {
             const overlay = document.getElementById('gradeLoadingOverlay');
             const textEl = document.getElementById('gradeLoadingText');
             const progressEl = document.getElementById('gradeLoadingProgress');
-            if (overlay) {
-                overlay.style.display = 'flex';
+            const barWrap = document.getElementById('gradeLoadingBarWrap');
+            const timeEl = document.getElementById('gradeLoadingTime');
+            if (overlay) overlay.style.display = 'flex';
+            if (textEl && message) textEl.textContent = message;
+            if (progressEl && progress) progressEl.textContent = progress;
+            if (barWrap) barWrap.style.display = 'none';
+            if (timeEl) timeEl.style.display = 'none';
+        }
+
+        function updateGradeProgress(elapsedSec, estimatedTotalSec) {
+            const barWrap = document.getElementById('gradeLoadingBarWrap');
+            const bar = document.getElementById('gradeLoadingBar');
+            const timeEl = document.getElementById('gradeLoadingTime');
+            const elapsedSpan = document.getElementById('gradeLoadingElapsed');
+            const remainingSpan = document.getElementById('gradeLoadingRemaining');
+            if (barWrap) barWrap.style.display = 'block';
+            if (timeEl) timeEl.style.display = 'block';
+            const percent = estimatedTotalSec > 0 ? Math.min(95, Math.floor((elapsedSec / estimatedTotalSec) * 100)) : 0;
+            if (bar) bar.style.width = percent + '%';
+            if (elapsedSpan) elapsedSpan.textContent = '已用 ' + elapsedSec + ' 秒';
+            if (remainingSpan) remainingSpan.textContent = '预计还需 ' + Math.max(0, estimatedTotalSec - elapsedSec) + ' 秒';
+        }
+
+        function startGradeProgressTimer(fileCount) {
+            if (gradeProgressTimerId) clearInterval(gradeProgressTimerId);
+            const estimatedTotal = Math.max(60, Math.ceil(fileCount * 35));
+            const start = Date.now();
+            updateGradeProgress(0, estimatedTotal);
+            gradeProgressTimerId = setInterval(function() {
+                const elapsed = Math.floor((Date.now() - start) / 1000);
+                updateGradeProgress(elapsed, estimatedTotal);
+            }, 1000);
+        }
+
+        function stopGradeProgressTimer() {
+            if (gradeProgressTimerId) {
+                clearInterval(gradeProgressTimerId);
+                gradeProgressTimerId = null;
             }
-            if (textEl && message) {
-                textEl.textContent = message;
-            }
-            if (progressEl && progress) {
-                progressEl.textContent = progress;
-            }
+            const bar = document.getElementById('gradeLoadingBar');
+            const remainingSpan = document.getElementById('gradeLoadingRemaining');
+            if (bar) bar.style.width = '100%';
+            if (remainingSpan) remainingSpan.textContent = '预计还需 0 秒';
         }
 
         function hideGradeLoading() {
+            stopGradeProgressTimer();
             const overlay = document.getElementById('gradeLoadingOverlay');
-            if (overlay) {
-                overlay.style.display = 'none';
-            }
+            if (overlay) overlay.style.display = 'none';
         }
         
         // 创建班级函数 - 放在全局作用域，确保可访问
         async function createClass() {
-            console.log('createClass function called'); // 调试信息
             try {
                 const input = document.getElementById('newClassInput');
                 if (!input) {
-                    console.error('newClassInput element not found');
                     showAlert('系统错误：找不到输入框', 'error');
                     return;
                 }
@@ -1241,8 +1402,6 @@
                     return;
                 }
 
-                console.log('Sending request to create class:', className); // 调试信息
-                
                 // 显示加载状态
                 const createBtn = document.getElementById('createClassBtn');
                 if (createBtn) {
@@ -1257,8 +1416,6 @@
                 });
 
                 const data = await response.json();
-                console.log('Response received:', data); // 调试信息
-                
                 if (response.ok) {
                     showAlert('班级创建成功', 'success');
                     input.value = '';
@@ -1268,7 +1425,6 @@
                     showAlert(data.error || '创建失败', 'error');
                 }
             } catch (error) {
-                console.error('Error creating class:', error); // 调试信息
                 showAlert('创建班级失败: ' + error.message, 'error');
             } finally {
                 // 恢复按钮状态
@@ -1292,6 +1448,12 @@
             document.querySelectorAll('.admin-sidebar .sidebar-item').forEach(item => {
                 item.classList.toggle('active', item.getAttribute('data-tab') === tabName);
             });
+            if (tabName !== 'files') {
+                stopFileCheckIntervals();
+            }
+            if (tabName === 'home') {
+                loadHomeDashboard();
+            }
             if (tabName === 'center') {
                 loadClassCenterView();
             }
@@ -1309,17 +1471,31 @@
             }
             updateBasketFloatVisibility();
         }
+        function isFilesTabActive() {
+            const el = document.getElementById('tab-files');
+            return el && el.classList.contains('active');
+        }
+        function stopFileCheckIntervals() {
+            if (typeof newFileCheckInterval !== 'undefined' && newFileCheckInterval) {
+                clearInterval(newFileCheckInterval);
+                newFileCheckInterval = null;
+            }
+            if (typeof conversionCheckInterval !== 'undefined' && conversionCheckInterval) {
+                clearInterval(conversionCheckInterval);
+                conversionCheckInterval = null;
+            }
+        }
         
         // ---------- 作文布置 / 练习 ----------
+        function setCompositionType(type) {
+            compositionPracticeType = type;
+            const tabs = document.querySelectorAll('#compositionTypeTabs .composition-type-tab');
+            tabs.forEach(t => t.classList.toggle('active', t.getAttribute('data-type') === type));
+            loadCompositionExercises();
+        }
         function initCompositionAssign() {
             document.querySelectorAll('#compositionTypeTabs .composition-type-tab').forEach(tab => {
                 tab.classList.toggle('active', tab.getAttribute('data-type') === compositionPracticeType);
-                tab.onclick = function() {
-                    compositionPracticeType = this.getAttribute('data-type');
-                    document.querySelectorAll('#compositionTypeTabs .composition-type-tab').forEach(t => t.classList.remove('active'));
-                    this.classList.add('active');
-                    loadCompositionExercises();
-                };
             });
             loadCompositionExercises();
             loadCompositionReports();
@@ -1338,15 +1514,9 @@
                 if (checked) display = checked.value;
             }
             const searchTitle = document.getElementById('compositionSearchTitle') && document.getElementById('compositionSearchTitle').value.trim();
-            // 模拟数据（接口替换后改为 fetch）
-            const mockList = [
-                { id: 'e1', title: '报道1', desc: '上周五你校在礼堂举行了地震安全知识讲座以及防震演练(earthquake p...', assigned: true, count: 1, duration: '20m', stars: 3 },
-                { id: 'e2', title: '报道2', desc: '假定你是李华，你的英国笔友Peter...', assigned: false, count: 1, duration: '20m', stars: 4 },
-                { id: 'e3', title: '报道3', desc: '应用文写作：邀请信...', assigned: false, count: 1, duration: '20m', stars: 5 },
-                { id: 'e4', title: '读后续写1', desc: '阅读所给材料，根据其内容和所给段落开头语进行续写...', assigned: false, count: 1, duration: '25m', stars: 4 },
-                { id: 'e5', title: '报道4', desc: '图表类作文：某校学生周末活动调查...', assigned: false, count: 1, duration: '20m', stars: 3 }
-            ];
-            compositionExercisesList = mockList.filter(item => {
+            // 从题库中按当前练习类型取题，再按筛选条件过滤
+            const sourceList = (COMPOSITION_BANK || []).filter(item => item.type === compositionPracticeType);
+            compositionExercisesList = sourceList.filter(item => {
                 if (searchTitle && item.title.indexOf(searchTitle) === -1) return false;
                 if (display === 'assigned' && !item.assigned) return false;
                 if (display === 'unassigned' && item.assigned) return false;
@@ -1372,7 +1542,9 @@
         }
         function previewCompositionExercise(id) {
             const item = compositionExercisesList.find(e => e.id === id);
-            if (item) showAlert('试题预览：「' + item.title + '」（接口接入后可打开弹窗或新页）', 'info');
+            if (!item) return;
+            const text = item.content ? ('【' + item.title + '】\n\n' + item.content) : ('试题预览：「' + item.title + '」（暂无详细题干）');
+            showAlert(text, 'info');
         }
         function toggleCompositionBasket(id) {
             const item = compositionExercisesList.find(e => e.id === id);
@@ -1403,11 +1575,138 @@
                 showAlert('试卷篮为空，请先加入题目', 'warning');
                 return;
             }
-            showAlert('选择班级与学生布置（接口接入后打开布置弹窗，选择班级/学生与时间）', 'info');
+            openAssignCompositionModal(compositionBasket.map(function(id) {
+                var item = compositionExercisesList.find(function(e) { return e.id === id; });
+                return item ? item.title : id;
+            }));
         }
         function assignCompositionOne(id) {
-            const item = compositionExercisesList.find(e => e.id === id);
-            if (item) showAlert('布置「' + item.title + '」：接口接入后打开布置弹窗，选择班级、学生与时间', 'info');
+            var item = compositionExercisesList.find(function(e) { return e.id === id; });
+            if (item) openAssignCompositionModal([item.title]);
+        }
+        var assignModalClassData = [];
+        function openAssignCompositionModal(exerciseTitles) {
+            var modal = document.getElementById('assignCompositionModal');
+            var summary = document.getElementById('assignModalSummary');
+            if (summary && exerciseTitles && exerciseTitles.length) {
+                summary.textContent = '将布置 ' + exerciseTitles.length + ' 项练习：' + exerciseTitles.slice(0, 3).join('、') + (exerciseTitles.length > 3 ? ' 等' : '');
+            } else {
+                summary.textContent = '选择班级、学生与截止时间后提交布置。';
+            }
+            document.getElementById('assignModalDeadline').value = '';
+            var titleEl = document.getElementById('assignModalTaskTitle');
+            if (titleEl) titleEl.value = '';
+            loadAssignModalClasses();
+            if (modal) modal.style.display = 'block';
+        }
+        function closeAssignCompositionModal() {
+            var modal = document.getElementById('assignCompositionModal');
+            if (modal) modal.style.display = 'none';
+        }
+        function loadAssignModalClasses() {
+            var container = document.getElementById('assignModalClassList');
+            if (!container) return;
+            container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">加载中...</p>';
+            fetch('/api/classes').then(function(r) { return r.json(); }).then(function(data) {
+                assignModalClassData = data.classes || [];
+                if (assignModalClassData.length === 0) {
+                    container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">暂无班级，请先在班级中心创建班级。</p>';
+                    return;
+                }
+                var html = '';
+                assignModalClassData.forEach(function(cls) {
+                    var name = (cls.name || cls.class_name || '').toString();
+                    var count = (cls.students && cls.students.length) || cls.student_count || cls.folder_count || 0;
+                    html += '<label style="display: block; margin-bottom: 6px; cursor: pointer;"><input type="checkbox" class="assign-class-cb" value="' + escapeHtml(name) + '" data-class-name="' + escapeHtml(name) + '"> ' + escapeHtml(name) + '（' + count + ' 人）</label>';
+                });
+                container.innerHTML = html;
+                container.querySelectorAll('.assign-class-cb').forEach(function(cb) {
+                    cb.addEventListener('change', function() { onAssignModalClassChange(); });
+                });
+            }).catch(function() {
+                container.innerHTML = '<p style="color: var(--danger-color); font-size: 0.9rem;">加载班级失败</p>';
+            });
+            document.getElementById('assignModalStudentList').innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">先选择班级后显示学生名单</p>';
+        }
+        function onAssignModalClassChange() {
+            var checked = document.querySelectorAll('.assign-class-cb:checked');
+            var container = document.getElementById('assignModalStudentList');
+            if (!container) return;
+            if (checked.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">先选择班级后显示学生名单</p>';
+                return;
+            }
+            var students = [];
+            checked.forEach(function(cb) {
+                var name = cb.getAttribute('data-class-name');
+                var cls = assignModalClassData.find(function(c) { return (c.name || c.class_name) === name; });
+                if (cls && cls.students && cls.students.length) {
+                    var names = cls.student_names || {};
+                    cls.students.forEach(function(s) {
+                        var id = (typeof s === 'string' ? s : (s && (s.id || s.student_id || s)) || '').toString();
+                        if (id) students.push({ id: id, class: name, name: names[id] || '' });
+                    });
+                }
+            });
+            if (students.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">所选班级暂无学生名单，将按班级整体布置。</p>';
+                return;
+            }
+            var html = '<p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 8px;">不勾选则布置给班级全部学生</p>';
+            students.forEach(function(s) {
+                html += '<label style="display: block; margin-bottom: 4px; cursor: pointer;"><input type="checkbox" class="assign-student-cb" value="' + escapeHtml(s.id) + '"> ' + escapeHtml(formatStudentDisplay(s.id, s.name)) + '</label>';
+            });
+            container.innerHTML = html;
+        }
+        function submitAssignComposition() {
+            var classes = [];
+            document.querySelectorAll('.assign-class-cb:checked').forEach(function(cb) {
+                classes.push(cb.getAttribute('data-class-name'));
+            });
+            var deadline = document.getElementById('assignModalDeadline').value;
+            if (classes.length === 0) {
+                showAlert('请至少选择一个班级', 'warning');
+                return;
+            }
+            var students = [];
+            document.querySelectorAll('.assign-student-cb:checked').forEach(function(cb) {
+                students.push(cb.value);
+            });
+            var titleEl = document.getElementById('assignModalTaskTitle');
+            var title = (titleEl && titleEl.value && titleEl.value.trim()) ? titleEl.value.trim()
+                : (compositionBasket.length === 1 && compositionBasket[0].title)
+                    ? compositionBasket[0].title
+                    : (compositionBasket.length > 1 ? '作文练习 ' + new Date().toLocaleDateString('zh-CN') : '作文练习');
+            var answerSheetHtml = null;
+            var ta = document.getElementById('editAnswerSheetContent');
+            if (ta && ta.value && ta.value.trim()) answerSheetHtml = ta.value.trim();
+            var payload = {
+                title: title,
+                class_names: classes,
+                deadline: deadline || undefined,
+                student_ids: students.length ? students : undefined,
+                items: compositionBasket.map(function(b) { return { id: b.id, title: b.title || '', type: b.type || '' }; })
+            };
+            if (answerSheetHtml) payload.answer_sheet_html = answerSheetHtml;
+            var btn = document.getElementById('assignModalSubmitBtn');
+            if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
+            fetch('/api/tasks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(function(r) { return r.json().then(function(data) { return { ok: r.ok, data: data }; }); }).then(function(res) {
+                if (btn) { btn.disabled = false; btn.textContent = '确认布置'; }
+                if (res.ok && res.data.ok) {
+                    closeAssignCompositionModal();
+                    showAlert('任务已发布，可到「阅卷管理」查看、导出答题卡或进行阅卷。', 'success');
+                    if (typeof loadGradingTaskListManage === 'function') loadGradingTaskListManage();
+                } else {
+                    showAlert(res.data.error || '发布失败', 'danger');
+                }
+            }).catch(function() {
+                if (btn) { btn.disabled = false; btn.textContent = '确认布置'; }
+                showAlert('网络错误，发布失败', 'danger');
+            });
         }
         function loadCompositionReports() {
             const container = document.getElementById('compositionReportList');
@@ -1444,6 +1743,79 @@
                 container.innerHTML = '<p style="color: var(--text-muted); font-size: 13px;">加载失败。</p>';
             });
         }
+        function openEditCompositionMaterialsModal() {
+            var modal = document.getElementById('editCompositionMaterialsModal');
+            var ta = document.getElementById('editCompositionMaterialsContent');
+            if (!modal || !ta) return;
+            modal.style.display = 'block';
+            ta.value = '';
+            fetch('/api/config/composition_materials', { credentials: 'include' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.error) { showAlert(data.error, 'error'); return; }
+                    ta.value = data.content || '';
+                })
+                .catch(function() { showAlert('加载失败', 'error'); });
+        }
+        function closeEditCompositionMaterialsModal() {
+            var el = document.getElementById('editCompositionMaterialsModal');
+            if (el) el.style.display = 'none';
+        }
+        function saveCompositionMaterials() {
+            var ta = document.getElementById('editCompositionMaterialsContent');
+            var content = ta ? ta.value : '';
+            fetch('/api/config/composition_materials', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: content })
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.error) { showAlert(data.error, 'error'); return; }
+                    showAlert('已保存，发放时可直接使用或下载备份', 'success');
+                    closeEditCompositionMaterialsModal();
+                })
+                .catch(function() { showAlert('保存失败', 'error'); });
+        }
+        function openEditAnswerSheetModal() {
+            var modal = document.getElementById('editAnswerSheetModal');
+            var ta = document.getElementById('editAnswerSheetContent');
+            if (!modal || !ta) return;
+            modal.style.display = 'block';
+            ta.value = '';
+            fetch('/api/config/answer_sheet', { credentials: 'include' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.error) { showAlert(data.error, 'error'); return; }
+                    ta.value = data.content || '';
+                })
+                .catch(function() { showAlert('加载失败', 'error'); });
+        }
+        function closeEditAnswerSheetModal() {
+            var el = document.getElementById('editAnswerSheetModal');
+            if (el) el.style.display = 'none';
+        }
+        function saveAnswerSheet() {
+            var ta = document.getElementById('editAnswerSheetContent');
+            var content = ta ? ta.value : '';
+            fetch('/api/config/answer_sheet', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: content })
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.error) { showAlert(data.error, 'error'); return; }
+                    showAlert('已保存，可使用「预览/打印答题卡」直接打印', 'success');
+                    closeEditAnswerSheetModal();
+                })
+                .catch(function() { showAlert('保存失败', 'error'); });
+        }
+        function previewPrintAnswerSheet() {
+            window.open('/api/config/answer_sheet/preview', '_blank', 'noopener,noreferrer,width=900,height=800');
+        }
         function downloadCompositionMaterials() {
             fetch('/api/generate/composition_materials', { credentials: 'include' })
                 .then(function(r) { if (!r.ok) throw new Error('生成失败'); return r.blob(); })
@@ -1466,7 +1838,7 @@
                     a.download = '通用答题卡.html';
                     a.click();
                     URL.revokeObjectURL(a.href);
-                    showAlert('通用答题卡已下载，可用浏览器打开后打印为 PDF', 'success');
+                    showAlert('通用答题卡已下载', 'success');
                 })
                 .catch(function() { showAlert('下载失败，请重试', 'error'); });
         }
@@ -1622,10 +1994,6 @@
             { id: 't1', title: '高三->年级考试', created: '07-17 10:30', type: '读后续写', pending: 1, action: '去批阅' },
             { id: 't2', title: '高三->年级考试', created: '07-17 10:30', type: '应用文', pending: 1, action: '去批阅' }
         ];
-        const gradingProgressRows = [
-            { qNo: 66, qType: '应用文', mode: '单评', unassigned: 0, total: 4, done: 0, undone: 4, arbTotal: '-', arbDone: '-', arbUndone: '-' },
-            { qNo: 67, qType: '读后续写', mode: '双评', unassigned: 0, total: 8, done: 1, undone: 7, arbTotal: 0, arbDone: 0, arbUndone: 0 }
-        ];
         function initGradingTab() {
             showGradingView('manage');
             loadGradingTaskListManage();
@@ -1649,19 +2017,143 @@
             document.getElementById('gradingBtnCreate').style.display = view === 'progress' ? 'none' : 'block';
             if (view === 'progress') loadGradingProgressTable();
         }
+        var gradingTasksFromApi = [];
+        function uploadPaperAuto(input) {
+            var file = input && input.files && input.files[0];
+            if (!file) return;
+            var fd = new FormData();
+            fd.append('file', file);
+            fetch('/api/papers/upload_auto', {
+                method: 'POST',
+                credentials: 'include',
+                body: fd
+            }).then(function(r) { return r.json().then(function(data) { return { ok: r.ok, data: data }; }); }).then(function(res) {
+                if (res.data.ok) {
+                    showAlert('已归入任务：' + (res.data.task_id || '').slice(0, 8) + '…', 'success');
+                    if (typeof loadGradingTaskListManage === 'function') loadGradingTaskListManage();
+                } else {
+                    showAlert(res.data.error || '上传失败', 'warning');
+                }
+                input.value = '';
+            }).catch(function() {
+                showAlert('上传失败', 'danger');
+                input.value = '';
+            });
+        }
+
+        var taskPapersCurrentTaskId = null;
+        var taskPapersSelected = new Set();
+        function openTaskPapersModal(taskId, title) {
+            taskPapersCurrentTaskId = taskId;
+            taskPapersSelected.clear();
+            if ((!title || !String(title).trim()) && typeof gradingTasksFromApi !== 'undefined' && gradingTasksFromApi && gradingTasksFromApi.length) {
+                var found = gradingTasksFromApi.find(function(t) { return t && t.id === taskId; });
+                if (found && found.title) title = found.title;
+            }
+            var titleEl = document.getElementById('taskPapersTitle');
+            if (titleEl) titleEl.textContent = title || taskId || '';
+            var countEl = document.getElementById('taskPapersSelectedCount');
+            if (countEl) countEl.textContent = '0';
+            var listEl = document.getElementById('taskPapersList');
+            if (listEl) listEl.innerHTML = '<p style="color: var(--text-muted);">加载中...</p>';
+            var modal = document.getElementById('taskPapersModal');
+            if (modal) modal.style.display = 'block';
+            loadTaskPapers(taskId);
+        }
+        function closeTaskPapersModal() {
+            var modal = document.getElementById('taskPapersModal');
+            if (modal) modal.style.display = 'none';
+        }
+        function loadTaskPapers(taskId) {
+            var listEl = document.getElementById('taskPapersList');
+            if (!listEl) return;
+            fetch('/api/tasks/' + encodeURIComponent(taskId) + '/papers', { credentials: 'include' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var papers = (data && data.papers) ? data.papers : [];
+                    if (!papers.length) {
+                        listEl.innerHTML = '<p style="color: var(--text-muted);">该任务下暂无已归类试卷。可用「上传试卷（识码归类）」或在文件管理归档时自动归类。</p>';
+                        return;
+                    }
+                    listEl.innerHTML = papers.map(function(fn) {
+                        var safeFn = escapeHtml(fn);
+                        var imgSrc = '/api/image/task/' + encodeURIComponent(taskId) + '/' + encodeURIComponent(fn);
+                        var key = taskId + '::' + fn;
+                        return '' +
+                            '<label style="display:block; border:1px solid var(--border-color); border-radius:10px; overflow:hidden; cursor:pointer; background: #fff;">' +
+                            '<div style="display:flex; align-items:center; gap:8px; padding:8px; border-bottom:1px solid var(--border-color);">' +
+                            '<input type="checkbox" data-key="' + escapeHtml(key) + '" style="transform:scale(1.1);">' +
+                            '<span style="font-size:12px; color: var(--text-secondary);">选择</span>' +
+                            '</div>' +
+                            '<img src="' + imgSrc + '" style="width:100%; height:140px; object-fit:contain; background:#f7f7f7;" alt="' + safeFn + '">' +
+                            '<div style="padding:8px; font-size:12px; color: var(--text-secondary); word-break: break-all;">' + safeFn + '</div>' +
+                            '</label>';
+                    }).join('');
+                    listEl.querySelectorAll('input[type="checkbox"][data-key]').forEach(function(cb) {
+                        cb.addEventListener('change', function() {
+                            var key = cb.getAttribute('data-key');
+                            if (!key) return;
+                            if (cb.checked) taskPapersSelected.add(key);
+                            else taskPapersSelected.delete(key);
+                            var countEl = document.getElementById('taskPapersSelectedCount');
+                            if (countEl) countEl.textContent = String(taskPapersSelected.size);
+                        });
+                    });
+                })
+                .catch(function() {
+                    listEl.innerHTML = '<p style="color: var(--danger-color);">加载失败</p>';
+                });
+        }
+        function confirmTaskPapersToGrade() {
+            if (!taskPapersCurrentTaskId) {
+                showAlert('未选择任务', 'warning');
+                return;
+            }
+            if (!taskPapersSelected.size) {
+                showAlert('请至少选择 1 张试卷', 'warning');
+                return;
+            }
+            selectedFiles.clear();
+            taskPapersSelected.forEach(function(key) {
+                var parts = key.split('::');
+                if (parts.length !== 2) return;
+                var tid = parts[0];
+                var fn = parts[1];
+                selectedFiles.add('task/' + tid + '/' + fn);
+            });
+            closeTaskPapersModal();
+            showAlert('已载入 ' + selectedFiles.size + ' 张试卷，前往批阅', 'success');
+            switchTab('ocr', null);
+            try { updateSelectedImagesPreview(); } catch (e) {}
+            try { updateButtonStates(); } catch (e) {}
+        }
         function loadGradingTaskListManage() {
             const el = document.getElementById('gradingTaskListManage');
             if (!el) return;
-            el.innerHTML = gradingTasksManage.map(t => `
-                <div class="report-card-item" style="display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                        <div class="title">${t.title}</div>
-                        <div class="meta">创建时间: ${t.created} | 批阅题型: ${t.type}</div>
-                        <div class="progress" style="color: var(--danger-color);">已完成: ${t.completed}/${t.total}</div>
-                    </div>
-                    <button type="button" class="btn btn-info" onclick="showGradingView('progress')">查看详情</button>
-                </div>
-            `).join('');
+            el.innerHTML = '<p style="color: var(--text-muted);">加载中...</p>';
+            fetch('/api/tasks').then(function(r) { return r.json(); }).then(function(data) {
+                gradingTasksFromApi = data.tasks || [];
+                if (gradingTasksFromApi.length === 0) {
+                    el.innerHTML = '<p style="color: var(--text-muted);">暂无已发布任务，请先在「组卷布置」中选题并发布。</p>';
+                    return;
+                }
+                el.innerHTML = gradingTasksFromApi.map(function(t) {
+                    var classes = (t.class_names && t.class_names.length) ? t.class_names.join('、') : '-';
+                    var created = t.created_at || '-';
+                    var itemsCount = (t.items && t.items.length) ? t.items.length : 0;
+                    return '<div class="report-card-item" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">' +
+                        '<div><div class="title">' + escapeHtml(t.title) + '</div>' +
+                        '<div class="meta">创建时间: ' + escapeHtml(created) + ' | 班级: ' + escapeHtml(classes) + ' | 题目数: ' + itemsCount + '</div></div>' +
+                        '<div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">' +
+                        '<button type="button" class="btn btn-primary" onclick="openTaskPapersModal(\'' + escapeHtml(t.id) + '\')">查看试卷</button>' +
+                        '<a href="/api/tasks/' + escapeHtml(t.id) + '/answer_sheet" target="_blank" class="btn btn-info">导出答题卡</a>' +
+                        '<a href="/api/tasks/' + escapeHtml(t.id) + '/answer_sheet?download=1" class="btn btn-secondary">下载答题卡</a>' +
+                        '<a href="/api/tasks/' + escapeHtml(t.id) + '/export_answer_situation" class="btn btn-secondary" target="_blank" title="导出学号、批阅报告等" data-graded="' + (t.graded_count != null ? t.graded_count : 0) + '" onclick="if (parseInt(this.getAttribute(\'data-graded\'),10)===0) showAlert(\'当前暂无批阅结果，导出将为空表\', \'info\');">导出答题情况</a>' +
+                        '<button type="button" class="btn btn-info" onclick="showGradingView(\'progress\')">查看详情</button></div></div>';
+                }).join('');
+            }).catch(function() {
+                el.innerHTML = '<p style="color: var(--danger-color);">加载任务列表失败</p>';
+            });
         }
         function loadGradingTaskListMine() {
             const el = document.getElementById('gradingTaskListMine');
@@ -1690,60 +2182,71 @@
         function loadGradingProgressTable() {
             const tbody = document.getElementById('gradingProgressTbody');
             if (!tbody) return;
-            tbody.innerHTML = gradingProgressRows.map(r => `
-                <tr>
-                    <td>${r.qNo}</td><td>${r.qType}</td><td>${r.mode}</td><td>${r.unassigned}</td><td>${r.total}</td>
-                    <td>${r.done}</td><td style="color: var(--danger-color);">${r.undone}</td>
-                    <td>${r.arbTotal}</td><td>${r.arbDone}</td><td>${r.arbUndone}</td>
-                    <td><a href="javascript:void(0)" onclick="openGradingScoreModal()">查看</a></td>
-                </tr>
-            `).join('');
-        }
-        function setGradingProgressBy(by) {
-            gradingProgressBy = by;
-            document.querySelectorAll('#gradingViewProgress .composition-type-tab').forEach((el, i) => {
-                el.classList.toggle('active', (i === 0 && by === 'question') || (i === 1 && by === 'teacher'));
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">加载中...</td></tr>';
+            fetch('/api/tasks', { credentials: 'include' }).then(function(r) { return r.json(); }).then(function(data) {
+                var tasks = data.tasks || [];
+                gradingTasksFromApi = tasks;
+                if (tasks.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">暂无任务，请先在「组卷布置」中发布任务。</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = tasks.map(function(t) {
+                    var id = (t.id || '').replace(/'/g, "\\'");
+                    var created = t.created_at || '-';
+                    var papersCount = t.papers_count != null ? t.papers_count : 0;
+                    var graded = (t.graded_count != null && t.graded_count !== '') ? (t.graded_count + ' 份') : '-';
+                    return '<tr>' +
+                        '<td>' + escapeHtml(t.title || '未命名') + '</td>' +
+                        '<td>' + escapeHtml(created) + '</td>' +
+                        '<td>' + papersCount + ' 份</td>' +
+                        '<td>' + graded + '</td>' +
+                        '<td>' +
+                        '<button type="button" class="btn btn-sm btn-primary" onclick="openTaskPapersModal(\'' + id + '\')">查看试卷</button> ' +
+                        '<button type="button" class="btn btn-sm btn-info" onclick="openTaskPapersModal(\'' + id + '\')">前往批阅</button> ' +
+                        '<a href="/api/tasks/' + escapeHtml(t.id) + '/export_answer_situation" class="btn btn-sm btn-secondary" target="_blank" title="导出学号、批阅报告等" data-graded="' + (t.graded_count != null ? t.graded_count : 0) + '" onclick="if (parseInt(this.getAttribute(\'data-graded\'),10)===0) showAlert(\'当前暂无批阅结果，导出将为空表\', \'info\');">导出答题情况</a>' +
+                        '</td></tr>';
+                }).join('');
+            }).catch(function() {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger-color);">加载失败</td></tr>';
             });
         }
         function syncGradingScores() {
             showAlert('同步成绩：接口接入后提交到成绩中心', 'success');
         }
+        var gradingWizardTaskList = [];
         function showCreateGradingTaskWizard() {
             gradingCreateStep = 1;
             gradingSelectedExerciseId = null;
             document.getElementById('createGradingStep1').style.display = 'block';
             document.getElementById('createGradingStep2').style.display = 'none';
             const listEl = document.getElementById('createGradingExerciseList');
-            const exercises = [
-                { id: 'ex1', title: '高三->年级考试', deadline: '2025-07-17 10:17:57 至 2025-07-24 10:17:57', class: '2023级1班' },
-                { id: 'ex2', title: '25年温州二模应用文', deadline: '2025-07-17 10:08:43 至 2025-07-24 10:08:43', class: '2023级1班', note: '与所选练习的题目内容不同' }
-            ];
-            listEl.innerHTML = exercises.map(e => `
-                <div class="report-card-item" style="margin-bottom: 10px; cursor: pointer; border: 2px solid ${gradingSelectedExerciseId === e.id ? 'var(--primary-blue)' : 'var(--border-color)'};" onclick="selectGradingExercise('${e.id}')">
-                    <div class="title">${e.title}</div>
-                    <div class="meta">截止时间: ${e.deadline} | ${e.class}</div>
-                    ${e.note ? '<div class="meta" style="color: var(--text-muted);">' + e.note + '</div>' : ''}
-                    ${gradingSelectedExerciseId === e.id ? '<span style="color: var(--primary-blue);">✓ 已选</span>' : ''}
-                </div>
-            `).join('');
+            listEl.innerHTML = '<p style="color: var(--text-muted);">加载中...</p>';
             document.getElementById('createGradingTaskModal').style.display = 'block';
+            fetch('/api/tasks').then(function(r) { return r.json(); }).then(function(data) {
+                gradingWizardTaskList = data.tasks || [];
+                renderCreateGradingExerciseList();
+            }).catch(function() {
+                listEl.innerHTML = '<p style="color: var(--danger-color);">加载任务列表失败</p>';
+            });
+        }
+        function renderCreateGradingExerciseList() {
+            const listEl = document.getElementById('createGradingExerciseList');
+            if (!listEl) return;
+            if (gradingWizardTaskList.length === 0) {
+                listEl.innerHTML = '<p style="color: var(--text-muted);">暂无已发布任务，请先在「组卷布置」中选题并发布。</p>';
+                return;
+            }
+            listEl.innerHTML = gradingWizardTaskList.map(function(e) {
+                var meta = (e.created_at || '') + (e.class_names && e.class_names.length ? ' | ' + e.class_names.join('、') : '');
+                return '<div class="report-card-item" style="margin-bottom: 10px; cursor: pointer; border: 2px solid ' + (gradingSelectedExerciseId === e.id ? 'var(--primary-blue)' : 'var(--border-color)') + ';" onclick="selectGradingExercise(\'' + escapeHtml(e.id) + '\')">' +
+                    '<div class="title">' + escapeHtml(e.title || '') + '</div>' +
+                    '<div class="meta">' + escapeHtml(meta) + '</div>' +
+                    (gradingSelectedExerciseId === e.id ? '<span style="color: var(--primary-blue);">✓ 已选</span>' : '') + '</div>';
+            }).join('');
         }
         function selectGradingExercise(id) {
             gradingSelectedExerciseId = id;
-            const listEl = document.getElementById('createGradingExerciseList');
-            if (!listEl) return;
-            const exercises = [
-                { id: 'ex1', title: '高三->年级考试', deadline: '2025-07-17 10:17:57 至 2025-07-24 10:17:57', class: '2023级1班' },
-                { id: 'ex2', title: '25年温州二模应用文', deadline: '2025-07-17 10:08:43 至 2025-07-24 10:08:43', class: '2023级1班', note: '与所选练习的题目内容不同' }
-            ];
-            listEl.innerHTML = exercises.map(e => `
-                <div class="report-card-item" style="margin-bottom: 10px; cursor: pointer; border: 2px solid ${gradingSelectedExerciseId === e.id ? 'var(--primary-blue)' : 'var(--border-color)'};" onclick="selectGradingExercise('${e.id}')">
-                    <div class="title">${e.title}</div>
-                    <div class="meta">截止时间: ${e.deadline} | ${e.class}</div>
-                    ${e.note ? '<div class="meta" style="color: var(--text-muted);">' + e.note + '</div>' : ''}
-                    ${gradingSelectedExerciseId === e.id ? '<span style="color: var(--primary-blue);">✓ 已选</span>' : ''}
-                </div>
-            `).join('');
+            renderCreateGradingExerciseList();
         }
         function createGradingTaskNextStep() {
             if (!gradingSelectedExerciseId) {
@@ -1775,9 +2278,43 @@
             document.getElementById('createGradingTaskModal').style.display = 'none';
         }
         function saveCreateGradingTask() {
-            showAlert('阅卷任务已创建（接口接入后保存到后端）', 'success');
-            closeCreateGradingTaskModal();
-            loadGradingTaskListManage();
+            if (!gradingSelectedExerciseId) {
+                showAlert('请先选择需要阅卷的练习', 'warning');
+                return;
+            }
+            var payload = { configured: true };
+            var tbody = document.getElementById('createGradingSettingsTbody');
+            if (tbody && tbody.rows && tbody.rows.length) {
+                var rows = [];
+                for (var i = 0; i < tbody.rows.length; i++) {
+                    var cells = tbody.rows[i].cells;
+                    if (cells.length >= 3) {
+                        var modeSelect = cells[2].querySelector('select');
+                        rows.push({
+                            qNo: (cells[0] && cells[0].textContent) || '',
+                            qType: (cells[1] && cells[1].textContent) || '',
+                            mode: modeSelect ? modeSelect.value : ''
+                        });
+                    }
+                }
+                if (rows.length) payload.questions = rows;
+            }
+            fetch('/api/tasks/' + encodeURIComponent(gradingSelectedExerciseId) + '/grading_config', {
+                method: 'PUT',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (data.error) {
+                    showAlert(data.error || '保存失败', 'danger');
+                    return;
+                }
+                showAlert('阅卷设置已保存', 'success');
+                closeCreateGradingTaskModal();
+                loadGradingTaskListManage();
+            }).catch(function() {
+                showAlert('网络错误，保存失败', 'danger');
+            });
         }
         function openGradingScoreModal() {
             document.getElementById('gradingScoreModal').style.display = 'block';
@@ -1819,6 +2356,82 @@
             }
         }
         
+        // 首页仪表盘：最新试卷 + 改卷情况报表
+        async function loadHomeDashboard() {
+            const papersEl = document.getElementById('homeLatestPapers');
+            const reportsEl = document.getElementById('homeGradingReports');
+            if (!papersEl || !reportsEl) return;
+
+            try {
+                const [foldersRes, classesRes, tasksRes] = await Promise.all([
+                    fetch('/api/folders', { credentials: 'include' }),
+                    fetch('/api/classes', { credentials: 'include' }),
+                    fetch('/api/tasks', { credentials: 'include' }).catch(function() { return { ok: false }; })
+                ]);
+                const foldersData = foldersRes.ok ? await foldersRes.json() : { folders: [] };
+                const classesData = classesRes.ok ? await classesRes.json() : { classes: [] };
+                const tasksData = tasksRes.ok ? await tasksRes.json() : { tasks: [] };
+                const folders = foldersData.folders || [];
+                const classes = classesData.classes || [];
+                const tasks = tasksData.tasks || [];
+
+                const papersHtml = folders.length === 0
+                    ? '<p style="color: var(--text-muted); font-size: 13px;">暂无扫描试卷批次，请先在「<a href="javascript:void(0)" onclick="switchTab(\'files\', event)">文件管理</a>」中扫描或导入图片。</p>'
+                    : folders.slice(0, 10).map(f => {
+                        const name = f.name || f.path || '未命名';
+                        const count = f.file_count != null ? f.file_count : '-';
+                        return `<div class="report-card-item" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <div>
+                                <div class="title">${name}</div>
+                                <div class="meta">${count} 张图片</div>
+                            </div>
+                            <button type="button" class="btn btn-info" onclick="switchTab('files', event)">去管理</button>
+                        </div>`;
+                    }).join('');
+                papersEl.innerHTML = papersHtml;
+
+                let reportsHtml = '';
+                if (classes.length > 0) {
+                    reportsHtml += '<p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 10px;">班级批阅概况</p>';
+                    classes.slice(0, 8).forEach(cls => {
+                        const safeName = String(cls.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                        reportsHtml += `<div class="report-card-item" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <div>
+                                <div class="title">${cls.name}</div>
+                                <div class="meta">${cls.folder_count || 0} 个日期批次</div>
+                            </div>
+                            <button type="button" class="btn btn-info" onclick="switchTab('center', event); setTimeout(function(){ loadClassReports('${safeName}'); }, 300)">查看报告</button>
+                        </div>`;
+                    });
+                }
+                if (tasks.length > 0) {
+                    reportsHtml += '<p style="color: var(--text-secondary); font-size: 13px; margin: 16px 0 10px 0;">阅卷任务进度</p>';
+                    tasks.slice(0, 8).forEach(t => {
+                        const papersCount = t.papers_count != null ? t.papers_count : 0;
+                        const gradedCount = t.graded_count != null ? t.graded_count : 0;
+                        const created = t.created_at || '-';
+                        reportsHtml += `<div class="report-card-item" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <div>
+                                <div class="title">${escapeHtml(t.title || '未命名')}</div>
+                                <div class="meta">创建于 ${escapeHtml(created)}</div>
+                                <div class="progress" style="color: var(--text-secondary); font-size: 12px;">已收卷 ${papersCount} 份 · 已批阅 ${gradedCount} 份</div>
+                            </div>
+                            <button type="button" class="btn btn-primary" onclick="switchTab('grading', event); setTimeout(function(){ showGradingView('progress'); loadGradingProgressTable(); }, 300)">查看进度</button>
+                        </div>`;
+                    });
+                }
+                if (classes.length === 0 && tasks.length === 0) {
+                    reportsHtml = '<p style="color: var(--text-muted); font-size: 13px;">暂无班级与阅卷任务。请先在「<a href="javascript:void(0)" onclick="switchTab(\'assign\', event)">组卷布置</a>」中选题并发布任务，或到「<a href="javascript:void(0)" onclick="switchTab(\'center\', event)">班级中心</a>」创建班级。</p>';
+                } else if (tasks.length === 0) {
+                    reportsHtml += '<p style="color: var(--text-muted); font-size: 13px;">暂无阅卷任务，可到「<a href="javascript:void(0)" onclick="switchTab(\'assign\', event)">组卷布置</a>」发布任务。</p>';
+                }
+                reportsEl.innerHTML = reportsHtml;
+            } catch (e) {
+                papersEl.innerHTML = '<p style="color: var(--text-muted); font-size: 13px;">加载失败。</p>';
+                reportsEl.innerHTML = '<p style="color: var(--text-muted); font-size: 13px;">加载失败。</p>';
+            }
+        }
+
         // 加载班级中心视图（显示所有班级）
         async function loadClassCenterView() {
             const content = document.getElementById('classCenterContent');
@@ -1829,19 +2442,29 @@
                 const data = await response.json();
                 
                 if (response.ok && data.classes && data.classes.length > 0) {
-                    let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px;">';
-                    
+                    let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px;">';
                     data.classes.forEach(cls => {
-                        html += `<div class="class-card" style="padding: 20px; background: #f8f9fa; border-radius: 12px; border: 2px solid #e0e0e0; cursor: pointer; transition: all 0.3s;" onclick="loadClassReports('${cls.name}')">
+                        const safeName = String(cls.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                        const nFolder = cls.folder_count || 0;
+                        const nStudent = cls.student_count != null ? cls.student_count : (cls.students && cls.students.length) || 0;
+                        const names = cls.student_names || {};
+                        const previewParts = (cls.students && cls.students.length) ? cls.students.slice(0, 5).map(function(sid) { return formatStudentDisplay(sid, names); }) : [];
+                        const studentPreview = previewParts.length ? previewParts.join('、') + (cls.students.length > 5 ? ' 等' : '') : '暂无';
+                        const studentPreviewEsc = escapeHtml(studentPreview);
+                        html += `<div class="class-card" style="padding: 20px; background: #f8f9fa; border-radius: 12px; border: 2px solid #e0e0e0; transition: all 0.3s;">
                             <h3 style="margin: 0 0 10px 0; color: #333;">${cls.name}</h3>
-                            <p style="color: #666; font-size: 0.9em; margin: 0;">${cls.folder_count || 0} 个日期文件夹</p>
+                            <p style="color: #666; font-size: 0.9em; margin: 0 0 6px 0;">${nFolder} 个日期批次 · <strong>${nStudent} 人</strong></p>
+                            <p style="color: #888; font-size: 12px; margin: 0 0 12px 0; max-height: 2.4em; overflow: hidden; text-overflow: ellipsis;" title="${studentPreviewEsc}">${studentPreviewEsc}</p>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                <button type="button" class="btn btn-info" style="padding: 6px 12px; font-size: 13px;" onclick="loadClassReports('${safeName}')">历次报告</button>
+                                <button type="button" class="btn btn-primary" style="padding: 6px 12px; font-size: 13px;" onclick="loadClassGradeReport('${safeName}')">成绩报表</button>
+                            </div>
                         </div>`;
                     });
-                    
                     html += '</div>';
                     content.innerHTML = html;
                 } else {
-                    content.innerHTML = '<p style="color: #666;">暂无班级，请先在"文件管理"标签页创建班级</p>';
+                    content.innerHTML = '<p style="color: #666;">暂无班级，请先在「<a href="javascript:void(0)" onclick="switchTab(\'files\', event)">文件管理</a>」左侧创建班级。</p>';
                 }
             } catch (error) {
                 showAlert('加载班级列表失败: ' + error.message, 'error');
@@ -1859,12 +2482,37 @@
                 const data = await response.json();
                 
                 if (response.ok && data.reports) {
+                    const safeName = String(className).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                     let html = `<div style="margin-bottom: 20px;">
                         <button class="btn btn-warning" onclick="loadClassCenterView()" style="margin-bottom: 15px;">← 返回班级列表</button>
-                        <h2 style="color: #333; margin-bottom: 10px;">📚 ${className} - 历次报告</h2>
-                        <p style="color: #666; margin-bottom: 20px;">共 ${data.reports.length} 次批阅报告</p>
+                        <h2 style="color: #333; margin-bottom: 10px;">📚 ${className}</h2>
+                        <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
+                            <button type="button" class="btn btn-primary" onclick="loadClassGradeReport('${safeName}')">📊 成绩报表</button>
+                        </div>
                     </div>`;
-                    
+                    html += '<h3 style="margin-bottom: 10px; color: #333;">👥 当前班级学生</h3>';
+                    html += '<p style="color: #666; font-size: 13px; margin-bottom: 12px;">学生名单与人数由班级学号配置决定，成绩报表中学号与分数将联动。</p>';
+                    try {
+                        const stuRes = await fetch('/api/students/' + encodeURIComponent(className), { credentials: 'include' });
+                        const stuData = stuRes.ok ? await stuRes.json() : { students: [], student_names: {} };
+                        const students = stuData.students || [];
+                        const studentNames = stuData.student_names || {};
+                        if (students.length === 0) {
+                            html += '<p style="color: #888;">暂无学生名单，请在文件管理中选择该班级并保存学号列表。</p>';
+                        } else {
+                            html += '<p style="color: #666; margin-bottom: 10px;"><strong>共 ' + students.length + ' 人</strong></p>';
+                            html += '<div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px;">';
+                            students.slice(0, 50).forEach(function(sid) {
+                                html += '<span style="padding: 4px 10px; background: #f0f0f0; border-radius: 6px; font-size: 13px;">' + escapeHtml(formatStudentDisplay(sid, studentNames)) + '</span>';
+                            });
+                            if (students.length > 50) html += '<span style="color: #888;">等共 ' + students.length + ' 人</span>';
+                            html += '</div>';
+                        }
+                    } catch (e) {
+                        html += '<p style="color: #888;">加载学生名单失败</p>';
+                    }
+                    html += '<h3 style="margin: 20px 0 10px 0; color: #333;">📅 历次批阅报告</h3>';
+                    html += '<p style="color: #666; margin-bottom: 16px;">共 ' + data.reports.length + ' 次批阅报告</p>';
                     if (data.reports.length === 0) {
                         html += '<p style="color: #666;">该班级暂无批阅报告</p>';
                     } else {
@@ -1893,7 +2541,49 @@
                 content.innerHTML = '<p style="color: #dc3545;">加载失败: ' + error.message + '</p>';
             }
         }
-        
+
+        // 成绩报表：学号与分数字段联动（后续接入批阅分数后自动填充）
+        async function loadClassGradeReport(className) {
+            const content = document.getElementById('classCenterContent');
+            content.innerHTML = '<p style="color: #666;">正在加载成绩报表...</p>';
+            try {
+                const [stuRes, gradesRes] = await Promise.all([
+                    fetch('/api/students/' + encodeURIComponent(className), { credentials: 'include' }),
+                    fetch('/api/class_center/' + encodeURIComponent(className) + '/grades', { credentials: 'include' }).then(function(r) { return r; }).catch(function() { return { ok: false }; })
+                ]);
+                const stuData = stuRes.ok ? await stuRes.json() : { students: [] };
+                let gradesByStudent = {};
+                if (gradesRes.ok && gradesRes.json) {
+                    try {
+                        const g = await gradesRes.json();
+                        if (g && g.grades) g.grades.forEach(function(r) { gradesByStudent[r.student_id || r.id] = r; });
+                    } catch (e) {}
+                }
+                const students = stuData.students || [];
+                const safeName = String(className).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                let html = '<div style="margin-bottom: 20px;">';
+                html += '<button class="btn btn-warning" onclick="loadClassReports(\'' + safeName + '\')" style="margin-bottom: 15px;">← 返回班级</button>';
+                html += '<h2 style="color: #333; margin-bottom: 8px;">📊 ' + escapeHtml(className) + ' - 成绩报表</h2>';
+                html += '<p style="color: #666; font-size: 13px;">学号与分数联动，后续接入批阅结果后将自动显示各次成绩。</p></div>';
+                html += '<div style="overflow-x: auto;"><table class="table" style="width: 100%; border-collapse: collapse;">';
+                html += '<thead><tr><th style="text-align:left; padding: 10px; border: 1px solid #ddd;">学号</th><th style="padding: 10px; border: 1px solid #ddd;">分数</th><th style="text-align:left; padding: 10px; border: 1px solid #ddd;">备注</th></tr></thead><tbody>';
+                if (students.length === 0) {
+                    html += '<tr><td colspan="3" style="padding: 12px; color: #888;">暂无学生名单</td></tr>';
+                } else {
+                    students.forEach(function(sid) {
+                        const g = gradesByStudent[sid];
+                        const score = g && (g.score != null || g.score_text) ? (g.score != null ? g.score : g.score_text) : '—';
+                        const note = (g && g.note) ? g.note : '';
+                        html += '<tr><td style="padding: 10px; border: 1px solid #ddd;">' + escapeHtml(sid) + '</td><td style="padding: 10px; border: 1px solid #ddd;">' + escapeHtml(String(score)) + '</td><td style="padding: 10px; border: 1px solid #ddd;">' + escapeHtml(note) + '</td></tr>';
+                    });
+                }
+                html += '</tbody></table></div>';
+                content.innerHTML = html;
+            } catch (e) {
+                content.innerHTML = '<p style="color: #dc3545;">加载失败</p>';
+            }
+        }
+
         // 加载报告详情（显示该次批阅的所有学生）
         async function loadReportDetail(className, date) {
             const content = document.getElementById('classCenterContent');
@@ -2083,30 +2773,19 @@
             }
         }
         
-        // 初始化
+        // 初始化（loadClasses/loadFolders 已移至 /api/me 成功后再调用，避免未登录时多发请求）
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOMContentLoaded event fired'); // 调试信息
-            
-            loadClasses();
-            loadFolders();
-            
             // 绑定创建班级按钮事件 - 使用多种方式确保绑定成功
             function bindCreateButton() {
                 const createBtn = document.getElementById('createClassBtn');
                 if (createBtn) {
-                    console.log('Found createClassBtn, binding event'); // 调试信息
-                    // 移除旧的事件监听器（如果有）
                     const newBtn = createBtn.cloneNode(true);
                     createBtn.parentNode.replaceChild(newBtn, createBtn);
-                    // 绑定新的事件
                     newBtn.addEventListener('click', function(e) {
                         e.preventDefault();
                         e.stopPropagation();
-                        console.log('Create button clicked'); // 调试信息
                         createClass();
                     });
-                } else {
-                    console.error('createClassBtn element not found'); // 调试信息
                 }
             }
             
@@ -2223,12 +2902,14 @@
         // 加载班级学生列表
         async function loadClassStudents(className) {
             try {
-                const response = await fetch(`/api/students/${className}`);
+                const response = await fetch('/api/students/' + encodeURIComponent(className));
                 const data = await response.json();
                 classStudents = data.students || [];
+                classStudentNames = data.student_names || {};
             } catch (error) {
                 console.error('加载学生列表失败:', error);
                 classStudents = [];
+                classStudentNames = {};
             }
         }
 
@@ -2444,6 +3125,11 @@
                         clearInterval(conversionCheckInterval);
                     }
                     conversionCheckInterval = setInterval(() => {
+                        if (!isFilesTabActive()) {
+                            clearInterval(conversionCheckInterval);
+                            conversionCheckInterval = null;
+                            return;
+                        }
                         if (selectedFolder && !selectedClass) {
                             checkConversionProgress(selectedFolder);
                         } else {
@@ -2461,6 +3147,11 @@
                         clearInterval(newFileCheckInterval);
                     }
                     newFileCheckInterval = setInterval(() => {
+                        if (!isFilesTabActive()) {
+                            clearInterval(newFileCheckInterval);
+                            newFileCheckInterval = null;
+                            return;
+                        }
                         if (selectedFolder && !selectedClass) {
                             checkNewFiles(selectedFolder);
                         } else if (selectedClass && selectedClassFolders.size > 0) {
@@ -3049,15 +3740,8 @@
                 }
                 
                 const img = document.createElement('img');
-                // 如果有处理过的版本，总是显示处理过的版本
-                if (hasProcessed) {
-                    // 显示处理过的版本（临时文件）
-                    const name = file.name.split('.')[0];
-                    const ext = file.name.split('.').pop();
-                    img.src = `/api/image/temp/${name}_processed.${ext}`;
-                } else {
-                    img.src = `/api/image/${file.path}`;
-                }
+                // 优先使用原图，避免请求不存在的 _processed 导致 404（一步方案不再生成 processed）
+                img.src = `/api/image/${file.path}`;
                 img.alt = file.name;
                 img.className = 'file-preview';
                 img.dataset.fileKey = fileKey;
@@ -3379,27 +4063,16 @@
             
             const img = document.createElement('img');
             // 尝试加载处理过的版本
-            if (firstFile.includes('temp/')) {
-                // 如果路径已经是temp路径，直接使用
-                img.src = `/api/image/${firstFile}`;
-            } else {
-                // 先尝试处理过的版本
-                img.src = `/api/image/temp/${name}_processed.${ext}`;
-                // 如果处理过的版本不存在，回退到原图
-                img.onerror = function() {
-                    this.onerror = null; // 防止循环
-                    this.src = `/api/image/${firstFile}`;
-                    // 如果原图也加载失败，显示错误提示
-                    this.onerror = function() {
-                        this.onerror = null;
-                        this.style.display = 'none';
-                        const errorDiv = document.createElement('div');
-                        errorDiv.style.cssText = 'width: 100%; height: 150px; display: flex; align-items: center; justify-content: center; background: #f8f9fa; color: #dc3545; font-size: 0.9em;';
-                        errorDiv.textContent = '图片加载失败';
-                        previewItem.appendChild(errorDiv);
-                    };
-                };
-            }
+            // 一步方案下不再请求 _processed，直接使用原图避免 404
+            img.src = `/api/image/${firstFile}`;
+            img.onerror = function() {
+                this.onerror = null;
+                this.style.display = 'none';
+                const errorDiv = document.createElement('div');
+                errorDiv.style.cssText = 'width: 100%; height: 150px; display: flex; align-items: center; justify-content: center; background: #f8f9fa; color: #dc3545; font-size: 0.9em;';
+                errorDiv.textContent = '图片加载失败';
+                previewItem.appendChild(errorDiv);
+            };
             
             img.style.cssText = 'width: 100%; height: 200px; object-fit: contain; display: block;';
             img.alt = firstFile.split('/').pop();
@@ -3420,12 +4093,8 @@
             const hasOcrResults = Object.keys(ocrResults).length > 0;
             // 识别并批阅按钮：只要有选中文件就可以点击
             const recognizeAndGradeBtn = document.getElementById('recognizeAndGradeBtn');
-            const recognizeAndGradeWithReportBtn = document.getElementById('recognizeAndGradeWithReportBtn');
             if (recognizeAndGradeBtn) {
                 recognizeAndGradeBtn.disabled = !hasSelection;
-            }
-            if (recognizeAndGradeWithReportBtn) {
-                recognizeAndGradeWithReportBtn.disabled = !hasSelection;
             }
             document.getElementById('mappingBtn').style.display = hasOcrResults ? 'inline-block' : 'none';
             document.getElementById('promptBtn').style.display = 'inline-block';
@@ -3881,10 +4550,10 @@
                     defaultOption.textContent = '从列表选择';
                     select.appendChild(defaultOption);
                     
-                    classStudents.forEach(s => {
+                    classStudents.forEach(function(s) {
                         const option = document.createElement('option');
                         option.value = s;
-                        option.textContent = s;
+                        option.textContent = formatStudentDisplay(s, classStudentNames);
                         select.appendChild(option);
                     });
                     
@@ -4110,130 +4779,10 @@
             }
         }
 
-        // 识别并批阅+班级报告（合并功能，并显示班级报告）
-        async function recognizeAndGradeWithClassReport() {
-            if (selectedFiles.size === 0) {
-                showAlert('请先选择文件', 'error');
-                return;
-            }
-
-            const files = Array.from(selectedFiles);
-            const fileCount = files.length;
-            
-            // 显示加载提示
-            showGradeLoading(
-                `正在识别并批阅 ${fileCount} 篇作文，请稍候...`,
-                `预计需要数分钟，请耐心等待`
-            );
-            
-            const recognizeAndGradeWithReportBtn = document.getElementById('recognizeAndGradeWithReportBtn');
-            if (recognizeAndGradeWithReportBtn) {
-                recognizeAndGradeWithReportBtn.disabled = true;
-            }
-            
-            const resultsArea = document.getElementById('resultsArea');
-            const resultsContent = document.getElementById('resultsContent');
-            resultsArea.style.display = 'block';
-            resultsContent.innerHTML = '<div class="loading">⏳ 正在识别文字并生成批阅报告，请稍候...</div>';
-            // 切换到识别与批阅标签页
-            switchTab('ocr', null);
-
-            try {
-                // 第一步：进行OCR识别
-                const filesNeedingOcr = [];
-                for (const fileKey of selectedFiles) {
-                    if (!ocrResults[fileKey] || ocrResults[fileKey].status !== 'success' || !ocrResults[fileKey].text) {
-                        filesNeedingOcr.push(fileKey);
-                    }
-                }
-                
-                if (filesNeedingOcr.length > 0) {
-                    resultsContent.innerHTML = `<div class="loading">⏳ 正在识别 ${filesNeedingOcr.length} 个文件的文字，请稍候...</div>`;
-                    
-                    const ocrResponse = await fetch('/api/ocr', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            files: filesNeedingOcr
-                        })
-                    });
-                    
-                    const ocrData = await ocrResponse.json();
-                    if (ocrResponse.ok && ocrData.results) {
-                        // 合并OCR结果
-                        Object.assign(ocrResults, ocrData.results);
-                        
-                        // 自动提取学号映射
-                        for (const [filePath, result] of Object.entries(ocrData.results)) {
-                            if (result.status === 'success' && result.student_id) {
-                                studentMapping[filePath] = result.student_id;
-                            }
-                        }
-                        
-                        // 显示OCR识别结果
-                        displayOcrResults(ocrResults);
-                        
-                        const successCount = Object.values(ocrData.results).filter(r => r.status === 'success').length;
-                        showAlert(`文字识别完成！成功识别 ${successCount} 个文件，开始批阅...`, 'success');
-                    } else {
-                        showAlert('文字识别失败: ' + (ocrData.error || '未知错误'), 'error');
-                        hideGradeLoading();
-                        if (recognizeAndGradeWithReportBtn) recognizeAndGradeWithReportBtn.disabled = false;
-                        return;
-                    }
-                } else {
-                    resultsContent.innerHTML = '<div class="loading">⏳ 所有文件已完成识别，开始批阅...</div>';
-                }
-                
-                // 第二步：进行批阅
-                resultsContent.innerHTML = '<div class="loading">⏳ 正在生成批阅报告，请稍候...</div>';
-                
-                // 获取提示词模板
-                let promptTemplate = null;
-                try {
-                    const promptResponse = await fetch('/api/prompt_template');
-                    if (promptResponse.ok) {
-                        const promptData = await promptResponse.json();
-                        promptTemplate = promptData.template || null;
-                    }
-                } catch (e) {
-                    console.error('获取提示词模板失败:', e);
-                }
-                
-                const gradeResponse = await fetch('/api/grade', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        ocr_results: ocrResults,
-                        student_mapping: studentMapping,
-                        prompt_template: promptTemplate,
-                        save_to_class_center: true  // 保存到班级中心
-                    })
-                });
-
-                const data = await gradeResponse.json();
-                if (gradeResponse.ok) {
-                    displayResults(data);
-                    showAlert('识别并批阅完成！', 'success');
-                    // 确保在识别与批阅标签页
-                    switchTab('ocr', null);
-                } else {
-                    showAlert('批阅失败: ' + (data.error || '未知错误'), 'error');
-                    resultsContent.innerHTML = '<div class="alert alert-error">批阅失败: ' + (data.error || '未知错误') + '</div>';
-                }
-            } catch (error) {
-                showAlert('识别并批阅失败: ' + error.message, 'error');
-                resultsContent.innerHTML = '<div class="alert alert-error">识别并批阅失败: ' + error.message + '</div>';
-            } finally {
-                hideGradeLoading();
-                if (recognizeAndGradeWithReportBtn) recognizeAndGradeWithReportBtn.disabled = false;
-            }
-        }
-
-        // 识别并批阅（合并功能）
+        // 识别并批阅（仅个人报告；班级报告在结果页点击「生成班级报告」）
         async function recognizeAndGrade() {
-            if (selectedFiles.size === 0) {
-                showAlert('请先选择文件', 'error');
+            if (!selectedFiles || selectedFiles.size === 0) {
+                showAlert('请先在文件管理或阅卷管理中选择要批阅的试卷，再点击「识别并批阅」', 'warning');
                 return;
             }
 
@@ -4241,12 +4790,13 @@
             const fileCount = files.length;
             const estimatedTime = Math.ceil(fileCount * 10); // 估算时间：每个文件约10秒
             
-            // 显示加载提示
+            // 显示加载提示与进度（已用时间、预估时间、进度条）
             showGradeLoading(
-                `正在识别并批阅 ${fileCount} 篇作文，请稍候...`,
-                `预计需要数分钟，请耐心等待`
+                '正在识别并批阅 ' + fileCount + ' 篇作文，请稍候…',
+                '每篇约 30–60 秒，请耐心等待'
             );
-            
+            startGradeProgressTimer(fileCount);
+
             const recognizeAndGradeBtn = document.getElementById('recognizeAndGradeBtn');
             if (recognizeAndGradeBtn) {
                 recognizeAndGradeBtn.disabled = true;
@@ -4255,61 +4805,11 @@
             const resultsArea = document.getElementById('resultsArea');
             const resultsContent = document.getElementById('resultsContent');
             resultsArea.style.display = 'block';
-            resultsContent.innerHTML = '<div class="loading">⏳ 正在识别文字并生成批阅报告，请稍候...</div>';
-            // 切换到识别与批阅标签页
+            resultsContent.innerHTML = '<div class="loading">⏳ 正在识别并批阅，请稍候…</div>';
             switchTab('ocr', null);
 
             try {
-                // 第一步：进行OCR识别
-                const filesNeedingOcr = [];
-                for (const fileKey of selectedFiles) {
-                    if (!ocrResults[fileKey] || ocrResults[fileKey].status !== 'success' || !ocrResults[fileKey].text) {
-                        filesNeedingOcr.push(fileKey);
-                    }
-                }
-                
-                if (filesNeedingOcr.length > 0) {
-                    resultsContent.innerHTML = `<div class="loading">⏳ 正在识别 ${filesNeedingOcr.length} 个文件的文字，请稍候...</div>`;
-                    
-                    const ocrResponse = await fetch('/api/ocr', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            files: filesNeedingOcr
-                        })
-                    });
-                    
-                    const ocrData = await ocrResponse.json();
-                    if (ocrResponse.ok && ocrData.results) {
-                        // 合并OCR结果
-                        Object.assign(ocrResults, ocrData.results);
-                        
-                        // 自动提取学号映射
-                        for (const [filePath, result] of Object.entries(ocrData.results)) {
-                            if (result.status === 'success' && result.student_id) {
-                                studentMapping[filePath] = result.student_id;
-                            }
-                        }
-                        
-                        // 显示OCR识别结果
-                        displayOcrResults(ocrResults);
-                        
-                        const successCount = Object.values(ocrData.results).filter(r => r.status === 'success').length;
-                        showAlert(`文字识别完成！成功识别 ${successCount} 个文件，开始批阅...`, 'success');
-                    } else {
-                        showAlert('文字识别失败: ' + (ocrData.error || '未知错误'), 'error');
-                        hideGradeLoading();
-                        if (recognizeAndGradeBtn) recognizeAndGradeBtn.disabled = false;
-                        return;
-                    }
-                } else {
-                    resultsContent.innerHTML = '<div class="loading">⏳ 所有文件已完成识别，开始批阅...</div>';
-                }
-                
-                // 第二步：进行批阅
-                resultsContent.innerHTML = '<div class="loading">⏳ 正在生成批阅报告，请稍候...</div>';
-                
-                // 获取提示词模板
+                resultsContent.innerHTML = '<div class="loading">⏳ 正在识别并批阅，请稍候…</div>';
                 let promptTemplate = null;
                 try {
                     const promptResponse = await fetch('/api/prompt_template');
@@ -4320,27 +4820,33 @@
                 } catch (e) {
                     console.error('获取提示词模板失败:', e);
                 }
-                
-                const gradeResponse = await fetch('/api/grade', {
+                const visionResponse = await fetch('/api/vision_grade', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
-                        ocr_results: ocrResults,
-                        student_mapping: studentMapping,
+                        files: files,
                         prompt_template: promptTemplate,
-                        save_to_class_center: false  // 不保存到班级中心
+                        save_to_class_center: false
                     })
                 });
-
-                const data = await gradeResponse.json();
-                if (gradeResponse.ok) {
+                const data = await visionResponse.json();
+                if (visionResponse.ok) {
+                    // 同步到 ocrResults 以便界面显示识别文本
+                    if (data.individual_reports) {
+                        for (const [filePath, reportData] of Object.entries(data.individual_reports)) {
+                            if (reportData.status === 'success' && reportData.essay_text !== undefined) {
+                                ocrResults[filePath] = { text: reportData.essay_text, student_id: reportData.student_id, status: 'success' };
+                                studentMapping[filePath] = reportData.student_id;
+                            }
+                        }
+                        displayOcrResults(ocrResults);
+                    }
                     displayResults(data);
                     showAlert('识别并批阅完成！', 'success');
-                    // 确保在识别与批阅标签页
                     switchTab('ocr', null);
                 } else {
-                    showAlert('批阅失败: ' + (data.error || '未知错误'), 'error');
-                    resultsContent.innerHTML = '<div class="alert alert-error">批阅失败: ' + (data.error || '未知错误') + '</div>';
+                    showAlert('识别并批阅失败: ' + (data.error || '未知错误'), 'error');
+                    resultsContent.innerHTML = '<div class="alert alert-error">识别并批阅失败: ' + (data.error || '未知错误') + '</div>';
                 }
             } catch (error) {
                 showAlert('识别并批阅失败: ' + error.message, 'error');
@@ -4454,57 +4960,56 @@
             }
         }
 
-        // 显示批阅结果
+        // 显示批阅结果（保存供「生成班级报告」使用）
         function displayResults(data) {
+            window.lastGradeResult = data;
             const resultsContent = document.getElementById('resultsContent');
-            let html = '';
-            
-            // 收集所有学号用于导出
-            const studentIds = new Set();
-            if (data.individual_reports) {
-                for (const [filePath, report] of Object.entries(data.individual_reports)) {
-                    if (report.status === 'success' && report.student_id && report.student_id.length === 6) {
-                        studentIds.add(report.student_id);
+            function render() {
+                let html = '';
+                // 收集所有学号用于导出
+                const studentIds = new Set();
+                if (data.individual_reports) {
+                    for (const [filePath, report] of Object.entries(data.individual_reports)) {
+                        if (report.status === 'success' && report.student_id && report.student_id.length === 6) {
+                            studentIds.add(report.student_id);
+                        }
                     }
                 }
-            }
-            
-            // 如果有学号，更新侧边栏的导出区域（不再在结果区域显示导出选项）
-            if (studentIds.size > 0 && selectedClass) {
-                // 更新侧边栏的导出区域
-                const exportSection = document.getElementById('exportSection');
-                if (exportSection) {
-                    exportSection.style.display = 'block';
-                    const exportStudentList = document.getElementById('exportStudentList');
-                    if (exportStudentList) {
-                        exportStudentList.innerHTML = '';
-                        Array.from(studentIds).sort().forEach(studentId => {
-                            const label = document.createElement('label');
-                            label.style.cssText = 'display: block; margin: 5px 0; cursor: pointer;';
-                            const checkbox = document.createElement('input');
-                            checkbox.type = 'checkbox';
-                            checkbox.value = studentId;
-                            checkbox.style.marginRight = '8px';
-                            label.appendChild(checkbox);
-                            label.appendChild(document.createTextNode(`学号：${studentId}`));
-                            exportStudentList.appendChild(label);
-                        });
+                // 如果有学号，更新侧边栏的导出区域（展示用学号(姓名)，value 保持纯学号）
+                if (studentIds.size > 0 && selectedClass) {
+                    const exportSection = document.getElementById('exportSection');
+                    if (exportSection) {
+                        exportSection.style.display = 'block';
+                        const exportStudentList = document.getElementById('exportStudentList');
+                        if (exportStudentList) {
+                            exportStudentList.innerHTML = '';
+                            Array.from(studentIds).sort().forEach(function(studentId) {
+                                const label = document.createElement('label');
+                                label.style.cssText = 'display: block; margin: 5px 0; cursor: pointer;';
+                                const checkbox = document.createElement('input');
+                                checkbox.type = 'checkbox';
+                                checkbox.value = studentId;
+                                checkbox.style.marginRight = '8px';
+                                label.appendChild(checkbox);
+                                label.appendChild(document.createTextNode('学号：' + formatStudentDisplay(studentId)));
+                                exportStudentList.appendChild(label);
+                            });
+                        }
                     }
                 }
-            }
-
-            // 个人报告
-            if (data.individual_reports) {
-                html += '<div class="result-section"><h3>📝 个人批阅报告</h3>';
-                for (const [filePath, report] of Object.entries(data.individual_reports)) {
-                    if (report.status === 'success') {
-                        const studentId = report.student_id || '';
-                        const identifier = studentId && studentId !== report.filename 
-                            ? `学号：${studentId}` 
-                            : report.filename || filePath;
-                        
-                        html += `<div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">`;
-                        html += `<h4 style="color: #667eea; margin-bottom: 10px;">${identifier}</h4>`;
+                // 个人报告
+                if (data.individual_reports) {
+                    html += '<div class="result-section"><h3>📝 个人批阅报告</h3>';
+                    for (const [filePath, report] of Object.entries(data.individual_reports)) {
+                        if (report.status === 'success') {
+                            const studentId = report.student_id || '';
+                            const displayId = formatStudentDisplay(studentId);
+                            const identifier = studentId && studentId !== report.filename
+                                ? ('学号：' + displayId)
+                                : (report.filename || filePath);
+                            const identifierEsc = escapeHtml(identifier);
+                            html += '<div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">';
+                            html += '<h4 style="color: #667eea; margin-bottom: 10px;">' + identifierEsc + '</h4>';
                         if (studentId && studentId !== report.filename) {
                             html += `<p style="color: #666; font-size: 0.9em; margin-bottom: 10px;">文件：${report.filename}</p>`;
                         }
@@ -4519,16 +5024,59 @@
                 html += '</div>';
             }
 
-            // 班级评价
+            // 班级评价：已有则展示，否则提供「生成班级报告」按钮
+            html += '<div class="result-section" id="classReportSection">';
+            html += '<h3>🏫 班级整体评价</h3>';
+            html += '<div id="classReportBlock">';
             if (data.class_evaluation) {
-                html += '<div class="result-section"><h3>🏫 班级整体评价</h3>';
-                // 使用marked.js渲染markdown
-                const evaluationHtml = typeof marked !== 'undefined' ? marked.parse(data.class_evaluation || '') : data.class_evaluation.replace(/\n/g, '<br>');
-                html += `<div class="result-content" style="white-space: pre-wrap; line-height: 1.6;">${evaluationHtml}</div>`;
-                html += '</div>';
+                const evaluationHtml = typeof marked !== 'undefined' ? marked.parse(data.class_evaluation || '') : (data.class_evaluation || '').replace(/\n/g, '<br>');
+                html += '<div class="result-content" style="white-space: pre-wrap; line-height: 1.6;">' + evaluationHtml + '</div>';
+            } else {
+                const successCount = data.individual_reports ? Object.values(data.individual_reports).filter(function(r) { return r.status === 'success'; }).length : 0;
+                if (successCount > 0) {
+                    html += '<p style="color:#666; margin-bottom:10px;">可根据上方个人报告生成班级整体评价。</p>';
+                    html += '<button type="button" class="btn btn-info" onclick="requestClassReport()" id="requestClassReportBtn">📊 生成班级报告</button>';
+                } else {
+                    html += '<p style="color:#888;">暂无成功批阅的个人报告，无法生成班级报告。</p>';
+                }
             }
+            html += '</div></div>';
 
-            resultsContent.innerHTML = html;
+                resultsContent.innerHTML = html;
+            }
+            ensureStudentNames(render);
+        }
+
+        async function requestClassReport() {
+            const data = window.lastGradeResult;
+            if (!data || !data.individual_reports) {
+                showAlert('没有可用的批阅结果', 'error');
+                return;
+            }
+            const btn = document.getElementById('requestClassReportBtn');
+            const block = document.getElementById('classReportBlock');
+            if (btn) btn.disabled = true;
+            if (block) block.innerHTML = '<p class="loading">⏳ 正在生成班级报告…</p>';
+            try {
+                const res = await fetch('/api/vision_class_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ individual_reports: data.individual_reports, save_to_class_center: false })
+                });
+                const out = await res.json();
+                if (res.ok && out.class_evaluation) {
+                    if (window.lastGradeResult) window.lastGradeResult.class_evaluation = out.class_evaluation;
+                    const evaluationHtml = typeof marked !== 'undefined' ? marked.parse(out.class_evaluation) : out.class_evaluation.replace(/\n/g, '<br>');
+                    if (block) block.innerHTML = '<div class="result-content" style="white-space: pre-wrap; line-height: 1.6;">' + evaluationHtml + '</div>';
+                    showAlert('班级报告已生成', 'success');
+                } else {
+                    if (block) block.innerHTML = '<p class="alert alert-error">生成失败：' + (out.error || '未知错误') + '</p>';
+                    if (btn) btn.disabled = false;
+                }
+            } catch (e) {
+                if (block) block.innerHTML = '<p class="alert alert-error">生成失败：' + e.message + '</p>';
+                if (btn) btn.disabled = false;
+            }
         }
         
         // 配置相关函数
@@ -4600,9 +5148,9 @@
                 })
                 .catch(function(e) { showAlert('导入失败: ' + e.message, 'error'); });
         }
-        function adminAddSingleStudent() {
-            var nameEl = document.getElementById('adminStudentName');
-            var idEl = document.getElementById('adminStudentId');
+        function addSingleStudent() {
+            var nameEl = document.getElementById('singleAddStudentName');
+            var idEl = document.getElementById('singleAddStudentId');
             var name = nameEl && nameEl.value.trim();
             var id = idEl && idEl.value.trim();
             if (!id) { showAlert('请填写登录账号（学号）', 'warning'); return; }
@@ -4615,6 +5163,9 @@
                     if (idEl) idEl.value = '';
                 })
                 .catch(function(e) { showAlert('添加失败', 'error'); });
+        }
+        function adminAddSingleStudent() {
+            addSingleStudent();
         }
         function adminCreateInviteCode() {
             var maxEl = document.getElementById('inviteCodeMaxUses');

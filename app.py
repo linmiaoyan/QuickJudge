@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory, send_file, session
+from flask import Flask, render_template, request, jsonify, send_from_directory, send_file, session, Response
 from flask_cors import CORS
 import os
 import json
@@ -17,10 +17,13 @@ try:
 except ImportError:
     pass  # dotenv是可选的
 
-# MiniMax 接口（批阅、译文等均使用 MiniMax）
-minimax_api_key = os.getenv("MINIMAX_API_KEY", "").strip()
-minimax_base_url = os.getenv("MINIMAX_BASE_URL", "https://api.minimaxi.com/v1").strip()
-minimax_model = os.getenv("MINIMAX_MODEL", "MiniMax-M2.5").strip()
+# 大模型接口：优先使用 LLM_*（支持 CodingPlan 等 OpenAI 兼容），未设置时回退到 MINIMAX_*
+_llm_key = os.getenv("LLM_API_KEY", "").strip() or os.getenv("MINIMAX_API_KEY", "").strip()
+_llm_base = os.getenv("LLM_BASE_URL", "").strip() or os.getenv("MINIMAX_BASE_URL", "https://api.minimaxi.com/v1").strip()
+_llm_model = os.getenv("LLM_MODEL", "").strip() or os.getenv("MINIMAX_MODEL", "MiniMax-M2.5").strip()
+minimax_api_key = _llm_key
+minimax_base_url = _llm_base if _llm_base else "https://api.minimaxi.com/v1"
+minimax_model = _llm_model if _llm_model else "MiniMax-M2.5"
 # End block (15-20)
 
 from openai import OpenAI
@@ -40,10 +43,17 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'scan-biyue-dev-secret-key-change
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 CORS(app, supports_credentials=True)
 
+LOGO_DIR = os.path.join(os.path.dirname(__file__), 'logo')
+
 @app.route('/favicon.ico')
 def favicon():
     """返回favicon图标（使用根目录 logo 文件夹中的 ico）"""
-    return send_from_directory(os.path.join(os.path.dirname(__file__), 'logo'), 'favicon.ico', mimetype='image/vnd.microsoft.icon')
+    return send_from_directory(LOGO_DIR, 'favicon.ico', mimetype='image/vnd.microsoft.icon')
+
+@app.route('/logo/<path:filename>')
+def logo_file(filename):
+    """提供 logo 目录下的图片（如 4.png 横向 logo）"""
+    return send_from_directory(LOGO_DIR, filename)
 
 @app.route('/api/me', methods=['GET'])
 def get_current_user():
@@ -57,6 +67,15 @@ def get_current_user():
             'role': session.get('user_role', 'teacher')
         }
     })
+
+@app.route('/api/users', methods=['GET'])
+def get_users():
+    """获取用户列表（id, name, role），不含密码。用于前端展示学号(姓名)等。需登录。"""
+    if not session.get('user_id'):
+        return jsonify({'error': '未登录'}), 401
+    users = load_users()
+    out = [{'id': str(u.get('id', '')), 'name': (u.get('name') or '').strip(), 'role': u.get('role', '')} for u in users]
+    return jsonify({'users': out})
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -181,6 +200,9 @@ def admin_import_students():
             else:
                 by_id[sid]['name'] = name or sid
         save_users(list(by_id.values()))
+        for name, account in rows:
+            if account and len(str(account).strip()) == 6 and str(account).strip().isdigit():
+                ensure_class_for_student(str(account).strip(), name or account)
         return jsonify({'msg': f'导入完成，本次新增 {added} 人', 'added': added, 'total_rows': len(rows)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -188,9 +210,9 @@ def admin_import_students():
 
 @app.route('/api/admin/students', methods=['POST'])
 def admin_add_student():
-    """管理员：单个添加学生。body { name, id }，密码=id。"""
-    if _require_admin():
-        return jsonify({'error': '仅管理员可操作'}), 403
+    """教师或管理员：单个添加学生。body { name, id }，密码=id。管理员与教师均可调用。"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
     account = (data.get('id') or data.get('account') or '').strip()
@@ -201,6 +223,7 @@ def admin_add_student():
         return jsonify({'error': '该账号已存在'}), 400
     users.append({'id': account, 'name': name or account, 'role': 'student', 'password': account})
     save_users(users)
+    ensure_class_for_student(account, name or account)
     return jsonify({'msg': '添加成功', 'user': {'id': account, 'name': name or account, 'role': 'student'}})
 
 
@@ -261,6 +284,12 @@ def save_users(users):
         json.dump(users, f, ensure_ascii=False, indent=2)
 
 
+def get_student_names_map():
+    """返回学号 -> 姓名 的字典，仅学生角色。用于展示「学号(姓名)」时查姓名，学号存储保持纯净。姓名为空则值为空字符串。"""
+    users = load_users()
+    return {str(u.get('id', '')): (u.get('name') or '').strip() for u in users if u.get('role') == 'student'}
+
+
 # 根目录 namelist.csv（学生姓名, 登录账号）
 NAMELIST_CSV = os.path.join(os.path.dirname(__file__), 'namelist.csv')
 # 邀请码配置
@@ -318,6 +347,99 @@ MATERIALS_DIR = os.path.join(DATA_DIR, 'materials')
 MATERIALS_INDEX_FILE = os.path.join(MATERIALS_DIR, 'index.json')
 os.makedirs(MATERIALS_DIR, exist_ok=True)
 
+# 平台内编辑：作文素材使用说明、通用答题卡 HTML（存 CONFIG_DIR）
+COMPOSITION_MATERIALS_FILE = os.path.join(CONFIG_DIR, 'composition_materials.txt')
+ANSWER_SHEET_HTML_FILE = os.path.join(CONFIG_DIR, 'answer_sheet.html')
+# 组卷发布产生的任务列表（发布=创建任务）
+TASKS_FILE = os.path.join(CONFIG_DIR, 'tasks.json')
+# 按任务归类的试卷图片（扫码或上传时写入，便于批改与学号对应）
+TASK_PAPERS_DIR = os.path.join(DATA_DIR, 'task_papers')
+os.makedirs(TASK_PAPERS_DIR, exist_ok=True)
+# 按任务持久化的批阅结果（答题情况导出用）
+TASK_RESULTS_DIR = os.path.join(DATA_DIR, 'task_results')
+os.makedirs(TASK_RESULTS_DIR, exist_ok=True)
+
+
+def _save_task_grading_results(individual_reports):
+    """将批阅结果中属于任务试卷的条目按任务持久化到 task_results/<task_id>.json，便于按任务导出答题情况。"""
+    import re
+    for file_path, report_data in individual_reports.items():
+        m = re.match(r'^task/([^/]+)/(.+)$', file_path.strip())
+        if not m:
+            continue
+        task_id, filename = m.group(1), m.group(2)
+        result_file = os.path.join(TASK_RESULTS_DIR, f'{task_id}.json')
+        data = {'results': {}, 'updated_at': datetime.now().isoformat()}
+        if os.path.exists(result_file):
+            try:
+                with open(result_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if not isinstance(data.get('results'), dict):
+                    data['results'] = {}
+            except Exception:
+                data['results'] = {}
+        data['results'][filename] = {
+            'student_id': report_data.get('student_id', ''),
+            'report': report_data.get('report', ''),
+            'status': report_data.get('status', ''),
+            'filename': report_data.get('filename', filename),
+        }
+        data['updated_at'] = datetime.now().isoformat()
+        try:
+            with open(result_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+
+def load_tasks():
+    """加载任务列表。每项: id, title, class_names, deadline, student_ids, items, created_at, answer_sheet_html?, status"""
+    if not os.path.exists(TASKS_FILE):
+        return []
+    try:
+        with open(TASKS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def save_tasks(tasks):
+    """保存任务列表"""
+    with open(TASKS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(tasks, f, ensure_ascii=False, indent=2)
+
+
+def decode_qr_from_image(image_bytes):
+    """从图片字节中解析二维码内容，返回解码字符串或 None。用于试卷扫码自动归类。"""
+    if not image_bytes or len(image_bytes) < 100:
+        return None
+    try:
+        import numpy as np
+        import cv2
+        arr = np.frombuffer(image_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+        det = cv2.QRCodeDetector()
+        decoded, _, _ = det.detectAndDecode(img)
+        if decoded and isinstance(decoded, str) and decoded.strip():
+            return decoded.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _save_paper_to_task(task_id, image_bytes, ext='.png'):
+    """将试卷图片写入任务目录，返回保存后的文件名。"""
+    task_dir = os.path.join(TASK_PAPERS_DIR, task_id)
+    os.makedirs(task_dir, exist_ok=True)
+    name = str(uuid.uuid4()) + ext
+    path = os.path.join(task_dir, name)
+    with open(path, 'wb') as f:
+        f.write(image_bytes)
+    return name
+
+
 # 提示词模板存储
 PROMPT_TEMPLATE_FILE = os.path.join(CONFIG_DIR, 'prompt_template.txt')
 DEFAULT_PROMPT_TEMPLATE = """请对以下英语作文进行详细批阅，给出：
@@ -329,8 +451,7 @@ DEFAULT_PROMPT_TEMPLATE = """请对以下英语作文进行详细批阅，给出
 
 作文内容：
 {essay_text}
-
-请用中文回复，格式清晰。"""
+"""
 
 # PNG压缩质量配置存储
 PNG_QUALITY_CONFIG_FILE = os.path.join(CONFIG_DIR, 'png_quality_config.json')
@@ -666,26 +787,39 @@ def index():
 
 @app.route('/api/classes')
 def get_classes():
-    """获取所有班级列表"""
+    """获取所有班级列表（含学生人数与学生名单，便于班级中心展示与成绩报表联动）"""
     classes = []
     try:
         if os.path.exists(CLASSES_DIR):
             for item in os.listdir(CLASSES_DIR):
                 item_path = os.path.join(CLASSES_DIR, item)
                 if os.path.isdir(item_path):
-                    # 统计班级文件夹中的所有文件夹数量
-                    all_folders = [f for f in os.listdir(item_path) 
-                                  if os.path.isdir(os.path.join(item_path, f)) and 
+                    all_folders = [f for f in os.listdir(item_path)
+                                  if os.path.isdir(os.path.join(item_path, f)) and
                                   not f.startswith('.')]
+                    student_ids = []
+                    students_file = os.path.join(STUDENTS_DIR, f"{item}.json")
+                    if os.path.exists(students_file):
+                        try:
+                            with open(students_file, 'r', encoding='utf-8') as f:
+                                raw = json.load(f)
+                            student_ids = [str(s) for s in raw] if isinstance(raw, list) else list(raw.keys()) if isinstance(raw, dict) else []
+                        except Exception:
+                            student_ids = []
+                    names_map = get_student_names_map()
+                    student_names = {sid: names_map.get(sid, '') for sid in student_ids}
                     classes.append({
                         'name': item,
                         'path': item,
-                        'folder_count': len(all_folders)
+                        'folder_count': len(all_folders),
+                        'student_count': len(student_ids),
+                        'students': student_ids,
+                        'student_names': student_names,
                     })
         classes.sort(key=lambda x: x['name'])
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-    
+
     return jsonify({'classes': classes})
 
 @app.route('/api/classes', methods=['POST'])
@@ -709,6 +843,378 @@ def create_class():
         return jsonify({'msg': '班级创建成功', 'class_name': class_name})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+def student_id_to_class_code(student_id):
+    """
+    根据学号推导班级编码。规则：前2位=年份，第3-4位=班号，第5-6位=学号。
+    例如 230205 -> 23年2班5号 -> 班级编码 2302。
+    仅当学号为6位数字时返回前4位，否则返回 None。
+    """
+    s = str(student_id or '').strip()
+    if len(s) != 6 or not s.isdigit():
+        return None
+    return s[:4]
+
+
+def ensure_class_for_student(student_id, student_name=None):
+    """
+    根据学号自动确保班级存在，并把该学生加入班级名单。
+    班级编码取学号前4位（如 230205 -> 2302）。若班级不存在则创建目录与学生列表；
+    老师也可在界面手动创建班级，本函数只做“不存在则创建”的补充。
+    """
+    class_code = student_id_to_class_code(student_id)
+    if not class_code:
+        return
+    class_path = os.path.join(CLASSES_DIR, class_code)
+    students_file = os.path.join(STUDENTS_DIR, f"{class_code}.json")
+    try:
+        os.makedirs(class_path, exist_ok=True)
+    except Exception:
+        pass
+    students = []
+    if os.path.exists(students_file):
+        try:
+            with open(students_file, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+            if isinstance(raw, list):
+                students = [str(x) for x in raw]
+            elif isinstance(raw, dict):
+                students = list(raw.keys())
+            else:
+                students = []
+        except Exception:
+            students = []
+    sid = str(student_id)
+    if sid not in students:
+        students.append(sid)
+        students.sort()
+        with open(students_file, 'w', encoding='utf-8') as f:
+            json.dump(students, f, ensure_ascii=False, indent=2)
+
+
+def _task_papers_count(task_id):
+    """返回某任务下已收试卷数量（用于阅卷进度展示）"""
+    task_dir = os.path.join(TASK_PAPERS_DIR, task_id)
+    if not os.path.isdir(task_dir):
+        return 0
+    return sum(1 for f in os.listdir(task_dir) if os.path.isfile(os.path.join(task_dir, f)) and f[0] != '.')
+
+
+def _task_graded_count(task_id):
+    """返回某任务下已批阅数量（从 task_results 统计）"""
+    result_file = os.path.join(TASK_RESULTS_DIR, f'{task_id}.json')
+    if not os.path.isfile(result_file):
+        return 0
+    try:
+        with open(result_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return len(data.get('results') or {})
+    except Exception:
+        return 0
+
+
+@app.route('/api/tasks', methods=['GET'])
+def get_tasks():
+    """获取任务列表（组卷发布产生的任务，用于阅卷管理、导出答题卡等）。每项含 papers_count（已收卷数）。"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    tasks = load_tasks()
+    # 为每项附加已收卷数，供阅卷进度使用
+    for i, t in enumerate(tasks):
+        tid = t.get('id')
+        if tid:
+            tasks[i] = dict(t)
+            tasks[i]['papers_count'] = _task_papers_count(tid)
+            tasks[i]['graded_count'] = _task_graded_count(tid)
+    # 按创建时间倒序
+    tasks = sorted(tasks, key=lambda t: t.get('created_at', ''), reverse=True)
+    return jsonify({'tasks': tasks})
+
+
+@app.route('/api/tasks', methods=['POST'])
+def create_task():
+    """发布=创建任务。body: title, class_names[], deadline?, student_ids?, items[]（试卷篮）, answer_sheet_html?（可选，不传则用当前通用答题卡快照）"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    data = request.get_json() or {}
+    title = (data.get('title') or '').strip() or '作文练习'
+    class_names = data.get('class_names') or []
+    if not isinstance(class_names, list):
+        class_names = [class_names] if class_names else []
+    class_names = [str(c).strip() for c in class_names if str(c).strip()]
+    if not class_names:
+        return jsonify({'error': '请至少选择一个班级'}), 400
+    deadline = data.get('deadline') or ''
+    student_ids = data.get('student_ids') or []
+    if not isinstance(student_ids, list):
+        student_ids = [student_ids] if student_ids else []
+    items = data.get('items') or []
+    if not isinstance(items, list):
+        items = []
+    answer_sheet_html = data.get('answer_sheet_html')
+    if answer_sheet_html is None:
+        answer_sheet_html = _read_answer_sheet_html()
+    task_id = str(uuid.uuid4())
+    created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    task = {
+        'id': task_id,
+        'title': title,
+        'class_names': class_names,
+        'deadline': deadline,
+        'student_ids': student_ids,
+        'items': items,
+        'answer_sheet_html': answer_sheet_html,
+        'created_at': created_at,
+        'status': 'published',
+    }
+    tasks = load_tasks()
+    tasks.append(task)
+    save_tasks(tasks)
+    return jsonify({'ok': True, 'task': task})
+
+
+@app.route('/api/tasks/<task_id>', methods=['GET'])
+def get_task(task_id):
+    """获取单个任务详情（用于导出答题卡、阅卷入口）"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    tasks = load_tasks()
+    for t in tasks:
+        if t.get('id') == task_id:
+            return jsonify(t)
+    return jsonify({'error': '任务不存在'}), 404
+
+
+@app.route('/api/tasks/<task_id>/grading_config', methods=['PUT', 'POST'])
+def save_task_grading_config(task_id):
+    """保存某任务的阅卷设置（单评/双评等），供「创建阅卷任务」保存时调用"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    data = request.get_json() or {}
+    tasks = load_tasks()
+    for i, t in enumerate(tasks):
+        if t.get('id') == task_id:
+            tasks[i] = dict(t)
+            tasks[i]['grading_config'] = {
+                **(t.get('grading_config') or {}),
+                **data,
+                'saved_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            }
+            save_tasks(tasks)
+            return jsonify({'ok': True, 'task_id': task_id})
+    return jsonify({'error': '任务不存在'}), 404
+
+
+def _inject_task_qr_into_html(html, task_id):
+    """在答题卡 HTML 中注入任务二维码（编码 task_id），便于打印后扫码自动归类。无 qrcode 库时返回原 HTML。"""
+    try:
+        import qrcode
+        buf = io.BytesIO()
+        qrcode.make(task_id, box_size=4, border=1).save(buf, format='PNG')
+        buf.seek(0)
+        b64 = base64.b64encode(buf.read()).decode('ascii')
+        qr_block = (
+            '<div class="task-qr" style="margin-top:16px;text-align:center;">'
+            '<span style="font-size:12px;color:#666;">扫此码归入本任务</span><br>'
+            '<img src="data:image/png;base64,' + b64 + '" alt="task:' + task_id + '" style="width:80px;height:80px;"/>'
+            '</div>'
+        )
+        if '</body>' in html:
+            html = html.replace('</body>', qr_block + '\n</body>')
+        else:
+            html = html + qr_block
+    except Exception:
+        pass
+    return html
+
+
+@app.route('/api/tasks/<task_id>/answer_sheet')
+def get_task_answer_sheet(task_id):
+    """获取任务对应的答题卡 HTML（预览或下载，便于打印；含任务二维码便于扫码归类）"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    tasks = load_tasks()
+    for t in tasks:
+        if t.get('id') == task_id:
+            html = t.get('answer_sheet_html') or _read_answer_sheet_html()
+            html = _inject_task_qr_into_html(html, task_id)
+            if request.args.get('download'):
+                return Response(html, mimetype='text/html; charset=utf-8',
+                                headers={'Content-Disposition': 'attachment; filename=答题卡_' + task_id[:8] + '.html'})
+            return Response(html, mimetype='text/html; charset=utf-8')
+    return jsonify({'error': '任务不存在'}), 404
+
+
+@app.route('/api/papers/upload_auto', methods=['POST'])
+def upload_paper_auto():
+    """上传一张试卷图片，自动解析图中二维码得到 task_id 并归入该任务；未识别到有效任务二维码时返回错误。支持 multipart 或 JSON base64。"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    image_bytes = None
+    ext = '.png'
+    if request.files:
+        f = request.files.get('file') or request.files.get('image')
+        if f and f.filename:
+            image_bytes = f.read()
+            ext = os.path.splitext(f.filename)[1].lower() or '.png'
+            if ext not in ('.png', '.jpg', '.jpeg', '.webp'):
+                ext = '.png'
+    if not image_bytes and request.get_json(silent=True):
+        data = request.get_json()
+        b64 = data.get('image') or data.get('base64') or data.get('content')
+        if b64:
+            if isinstance(b64, str) and ',' in b64 and b64.startswith('data:'):
+                b64 = b64.split(',', 1)[-1]
+            image_bytes = base64.b64decode(b64)
+    if not image_bytes:
+        return jsonify({'ok': False, 'error': '请上传图片或提供 base64'}), 400
+    decoded = decode_qr_from_image(image_bytes)
+    task_ids = {t.get('id') for t in load_tasks() if t.get('id')}
+    if not decoded or decoded not in task_ids:
+        return jsonify({
+            'ok': False,
+            'error': '未识别到任务二维码或任务不存在，请使用带任务二维码的答题卡或手动指定任务后上传'
+        }), 200
+    try:
+        filename = _save_paper_to_task(decoded, image_bytes, ext)
+        return jsonify({'ok': True, 'task_id': decoded, 'filename': filename})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/tasks/<task_id>/papers', methods=['POST'])
+def upload_task_paper(task_id):
+    """扫码或上传时，将一张试卷图片归入指定任务（便于后续按任务批改、学号对应）。支持 multipart 文件或 JSON body 的 base64 图片。"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    tasks = load_tasks()
+    if not any(t.get('id') == task_id for t in tasks):
+        return jsonify({'error': '任务不存在'}), 404
+    task_dir = os.path.join(TASK_PAPERS_DIR, task_id)
+    os.makedirs(task_dir, exist_ok=True)
+    try:
+        if request.files:
+            f = request.files.get('file') or request.files.get('image')
+            if not f or not f.filename:
+                return jsonify({'error': '请上传文件'}), 400
+            ext = os.path.splitext(f.filename)[1].lower() or '.png'
+            if ext not in ('.png', '.jpg', '.jpeg', '.webp'):
+                ext = '.png'
+            name = str(uuid.uuid4()) + ext
+            path = os.path.join(task_dir, name)
+            f.save(path)
+        else:
+            data = request.get_json() or {}
+            b64 = data.get('image') or data.get('base64') or data.get('content')
+            if not b64:
+                return jsonify({'error': '请提供 file 或 JSON 中的 image/base64'}), 400
+            if isinstance(b64, str) and b64.startswith('data:'):
+                b64 = b64.split(',', 1)[-1] if ',' in b64 else b64
+            raw = base64.b64decode(b64)
+            name = str(uuid.uuid4()) + '.png'
+            path = os.path.join(task_dir, name)
+            with open(path, 'wb') as out:
+                out.write(raw)
+        return jsonify({'ok': True, 'filename': name, 'task_id': task_id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tasks/<task_id>/papers', methods=['GET'])
+def list_task_papers(task_id):
+    """列出某任务下已归类的试卷图片（扫码/上传后的列表，便于批改与结果分析）"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    tasks = load_tasks()
+    if not any(t.get('id') == task_id for t in tasks):
+        return jsonify({'error': '任务不存在'}), 404
+    task_dir = os.path.join(TASK_PAPERS_DIR, task_id)
+    if not os.path.isdir(task_dir):
+        return jsonify({'task_id': task_id, 'papers': []})
+    papers = [f for f in os.listdir(task_dir) if os.path.isfile(os.path.join(task_dir, f)) and f[0] != '.']
+    papers.sort()
+    return jsonify({'task_id': task_id, 'papers': papers})
+
+
+@app.route('/api/tasks/<task_id>/papers/<path:filename>')
+def get_task_paper_file(task_id, filename):
+    """获取任务下某张试卷图片（供批改界面展示）"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    task_dir = os.path.join(TASK_PAPERS_DIR, task_id)
+    path = os.path.join(task_dir, filename)
+    if not os.path.isfile(path) or not os.path.realpath(path).startswith(os.path.realpath(task_dir)):
+        return jsonify({'error': '文件不存在'}), 404
+    return send_from_directory(task_dir, filename)
+
+
+@app.route('/api/tasks/<task_id>/answer_situation')
+def get_task_answer_situation(task_id):
+    """获取某任务的答题/批阅情况（用于展示或导出）"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    tasks = load_tasks()
+    if not any(t.get('id') == task_id for t in tasks):
+        return jsonify({'error': '任务不存在'}), 404
+    result_file = os.path.join(TASK_RESULTS_DIR, f'{task_id}.json')
+    if not os.path.isfile(result_file):
+        return jsonify({'task_id': task_id, 'results': [], 'updated_at': None})
+    try:
+        with open(result_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception:
+        return jsonify({'task_id': task_id, 'results': [], 'updated_at': None})
+    results = []
+    for filename, rec in (data.get('results') or {}).items():
+        results.append({
+            'filename': filename,
+            'student_id': rec.get('student_id', ''),
+            'report': rec.get('report', ''),
+            'status': rec.get('status', ''),
+        })
+    results.sort(key=lambda x: (x.get('student_id') or '', x.get('filename', '')))
+    return jsonify({'task_id': task_id, 'results': results, 'updated_at': data.get('updated_at')})
+
+
+@app.route('/api/tasks/<task_id>/export_answer_situation')
+def export_task_answer_situation(task_id):
+    """导出某任务的答题情况为 CSV 下载"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    tasks = load_tasks()
+    if not any(t.get('id') == task_id for t in tasks):
+        return jsonify({'error': '任务不存在'}), 404
+    result_file = os.path.join(TASK_RESULTS_DIR, f'{task_id}.json')
+    data = {}
+    if os.path.isfile(result_file):
+        try:
+            with open(result_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            pass
+    results = list((data.get('results') or {}).items())
+    results.sort(key=lambda x: (x[1].get('student_id') or '', x[0]))
+    import csv
+    import io
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(['学号', '文件名', '状态', '批阅报告'])
+    if not results:
+        writer.writerow(['（暂无批阅数据）', '', '', ''])
+    for filename, rec in results:
+        report = (rec.get('report') or '').replace('\r\n', '\n').replace('\n', ' ')
+        writer.writerow([rec.get('student_id', ''), filename, rec.get('status', ''), report])
+    body = out.getvalue()
+    try:
+        body = body.encode('utf-8-sig')
+    except Exception:
+        body = body.encode('utf-8')
+    from flask import Response
+    res = Response(body, mimetype='text/csv; charset=utf-8')
+    res.headers['Content-Disposition'] = f'attachment; filename="task_{task_id[:8]}_answer_situation.csv"'
+    return res
+
 
 def is_file_locked(file_path, max_retries=3, retry_delay=0.5):
     """检查文件是否被锁定（正在使用中）"""
@@ -767,11 +1273,24 @@ def organize_files():
             # 移动新文件到目标文件夹
             moved_count = 0
             locked_files = []
-            
+            task_ids = {t.get('id') for t in load_tasks() if t.get('id')}
+
             for f in os.listdir(source_path):
                 source_file = os.path.join(source_path, f)
                 target_file = os.path.join(target_path, f)
                 if os.path.isfile(source_file) and f.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    # 若图中含任务二维码，同步归入该任务下（便于按任务批改）
+                    try:
+                        with open(source_file, 'rb') as rf:
+                            raw = rf.read()
+                        decoded = decode_qr_from_image(raw)
+                        if decoded and decoded in task_ids:
+                            ext = os.path.splitext(f)[1].lower() or '.png'
+                            if ext not in ('.png', '.jpg', '.jpeg', '.webp'):
+                                ext = '.png'
+                            _save_paper_to_task(decoded, raw, ext)
+                    except Exception:
+                        pass
                     if not os.path.exists(target_file):
                         # 检查文件是否被锁定，如果是则重试
                         max_retries = 5
@@ -1713,6 +2232,16 @@ def get_image(file_path):
             return send_from_directory(TEMP_DIR, filename)
         else:
             return jsonify({'error': '临时文件不存在'}), 404
+
+    # 任务试卷图片：task/<task_id>/<filename>
+    if len(parts) >= 3 and parts[0] == 'task':
+        task_id = parts[1]
+        filename = parts[-1]
+        folder_path = os.path.join(TASK_PAPERS_DIR, task_id)
+        full_path = os.path.join(folder_path, filename)
+        if os.path.isfile(full_path) and os.path.realpath(full_path).startswith(os.path.realpath(folder_path)):
+            return send_from_directory(folder_path, filename)
+        return jsonify({'error': '文件不存在'}), 404
     
     if len(parts) >= 2:
         filename = parts[-1]
@@ -1849,8 +2378,12 @@ def find_class_by_student_id(student_id, logger=None):
                 with open(students_file, 'r', encoding='utf-8') as f:
                     students = json.load(f)
                 
-                # 检查学号是否在列表中
+                # 检查学号是否在列表中（支持 list 或 dict）
                 if isinstance(students, list) and student_id in students:
+                    if logger:
+                        logger.info(f"找到学号 {student_id} 对应的班级: {class_name}")
+                    return class_name
+                if isinstance(students, dict) and student_id in students:
                     if logger:
                         logger.info(f"找到学号 {student_id} 对应的班级: {class_name}")
                     return class_name
@@ -1967,13 +2500,16 @@ def get_my_reports():
 
 @app.route('/api/students/<class_name>', methods=['GET'])
 def get_students(class_name):
-    """获取班级学生列表"""
+    """获取班级学生列表（students 为纯净学号列表；student_names 为学号->姓名，供展示「学号(姓名)」用）"""
     students_file = os.path.join(STUDENTS_DIR, f"{class_name}.json")
     if os.path.exists(students_file):
         with open(students_file, 'r', encoding='utf-8') as f:
-            students = json.load(f)
-        return jsonify({'students': students})
-    return jsonify({'students': []})
+            raw = json.load(f)
+        student_ids = [str(s) for s in raw] if isinstance(raw, list) else list(raw.keys()) if isinstance(raw, dict) else []
+        names_map = get_student_names_map()
+        student_names = {sid: names_map.get(sid, '') for sid in student_ids}
+        return jsonify({'students': student_ids, 'student_names': student_names})
+    return jsonify({'students': [], 'student_names': {}})
 
 @app.route('/api/students/<class_name>', methods=['POST'])
 def save_students(class_name):
@@ -2016,7 +2552,13 @@ def ocr_recognize():
             parts = file_path.split('/')
             filename = parts[-1]
             # 判断是班级文件夹还是原始扫描文件夹
-            if len(parts) == 3:
+            if len(parts) >= 3 and parts[0] == 'task':
+                # 任务文件夹：task/task_id/filename
+                task_id = parts[1]
+                folder_path = os.path.join(TASK_PAPERS_DIR, task_id)
+            elif len(parts) >= 2 and parts[0] == '__scan_output__':
+                folder_path = get_scan_output_dir()
+            elif len(parts) == 3:
                 # 班级文件夹：class_name/date_folder/filename
                 class_name, date_folder = parts[0], parts[1]
                 folder_path = os.path.join(CLASSES_DIR, class_name, date_folder)
@@ -2305,6 +2847,209 @@ def delete_prompt_template_api():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def _resolve_file_path_to_full(file_path):
+    """将前端传的 file_path 解析为本地完整路径（仅原图，不查 temp processed）。返回 (full_path, error_msg)，失败时 full_path 为 None。"""
+    parts = file_path.split('/')
+    filename = parts[-1]
+    if len(parts) >= 3 and parts[0] == 'task':
+        task_id = parts[1]
+        folder_path = os.path.join(TASK_PAPERS_DIR, task_id)
+    elif len(parts) >= 2 and parts[0] == '__scan_output__':
+        folder_path = get_scan_output_dir()
+    elif len(parts) == 3:
+        class_name, date_folder = parts[0], parts[1]
+        folder_path = os.path.join(CLASSES_DIR, class_name, date_folder)
+    else:
+        folder_name = parts[0]
+        folder_path = os.path.join(SCAN_DIR, folder_name)
+    original_path = os.path.join(folder_path, filename)
+    if os.path.exists(original_path):
+        return (original_path, None)
+    if original_path.lower().endswith(('.tif', '.tiff')):
+        png_path = os.path.splitext(original_path)[0] + '.png'
+        if os.path.exists(png_path):
+            return (png_path, None)
+    return (None, f'文件不存在: {file_path}')
+
+@app.route('/api/vision_grade', methods=['POST'])
+def vision_grade():
+    """一步方案：直接看图识别+批阅（使用 MiniMax 多模态，不依赖讯飞 OCR）"""
+    data = request.get_json()
+    files = data.get('files', [])
+    custom_prompt_template = data.get('prompt_template', None)
+    save_to_class_center_flag = data.get('save_to_class_center', True)
+    if not files:
+        return jsonify({'error': '请选择文件'}), 400
+    if not minimax_api_key:
+        return jsonify({'error': '未配置 LLM_API_KEY 或 MINIMAX_API_KEY，请在 .env 中设置'}), 500
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    try:
+        # 视觉批阅需上传图片+长文生成，使用较长超时；连接超时多为网络/服务响应慢，非接口方式问题
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=120.0)
+        prompt_template = custom_prompt_template or get_prompt_template()
+        # 一步提示：要求模型看图后按格式输出识别文本与批阅报告
+        vision_instruction = (
+            '请仔细观察图片中的手写作文内容，完成以下两项并严格按格式回复：\n'
+            '1. 【识别文本】\n（此处仅输出从图片中识别出的全部手写文字，不要添加其他说明）\n'
+            '2. 【批阅报告】\n（此处输出你对这篇作文的批阅报告，包含评语与建议）\n'
+            '若能从图中或文字中看出学号（如6位数字），请在识别文本中保留。'
+        )
+        user_prompt = prompt_template.replace('{essay_text}', '[请根据图片中的作文内容进行识别并批阅]') + '\n\n' + vision_instruction
+        individual_reports = {}
+        for file_path in files:
+            full_path, err = _resolve_file_path_to_full(file_path)
+            if err or not full_path:
+                individual_reports[file_path] = {'error': err or '文件不存在', 'status': 'error'}
+                continue
+            filename = os.path.basename(file_path)
+            try:
+                image = Image.open(full_path)
+                if image.mode in ('RGBA', 'LA', 'P'):
+                    background = Image.new('RGB', image.size, (255, 255, 255))
+                    if image.mode == 'P':
+                        image = image.convert('RGBA')
+                    if image.mode in ('RGBA', 'LA'):
+                        background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
+                        image = background
+                    else:
+                        image = image.convert('RGB')
+                elif image.mode not in ('RGB', 'L'):
+                    image = image.convert('RGB')
+                if image.mode == 'L':
+                    image = image.convert('RGB')
+                max_size = 2000
+                if max(image.size) > max_size:
+                    ratio = max_size / max(image.size)
+                    new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
+                    image = image.resize(new_size, Image.Resampling.LANCZOS)
+                img_io = io.BytesIO()
+                image.save(img_io, format='PNG')
+                b64 = base64.b64encode(img_io.getvalue()).decode('utf-8')
+                data_url = f'data:image/png;base64,{b64}'
+                last_err = None
+                for attempt in range(2):
+                    try:
+                        response = client.chat.completions.create(
+                            model=minimax_model,
+                            messages=[
+                                {"role": "system", "content": "你是一位经验丰富的教师，擅长识别手写作文并批阅。"},
+                                {"role": "user", "content": [
+                                    {"type": "image_url", "image_url": {"url": data_url}},
+                                    {"type": "text", "text": user_prompt}
+                                ]}
+                            ],
+                            temperature=0.7
+                        )
+                        raw = (response.choices[0].message.content or '').strip()
+                        last_err = None
+                        break
+                    except (Exception) as e:
+                        last_err = e
+                        if attempt == 0 and (getattr(e, 'status_code', None) == 'timeout' or 'timeout' in str(type(e).__name__).lower() or 'timed out' in str(e).lower()):
+                            continue
+                        raise
+                if last_err is not None:
+                    raise last_err
+                essay_text = ''
+                report = raw
+                if '【识别文本】' in raw and '【批阅报告】' in raw:
+                    try:
+                        _, rest = raw.split('【识别文本】', 1)
+                        essay_part, report_part = rest.split('【批阅报告】', 1)
+                        essay_text = essay_part.strip()
+                        report = report_part.strip()
+                    except Exception:
+                        essay_text = raw
+                else:
+                    essay_text = raw
+                student_id = extract_student_id(essay_text) or filename
+                individual_reports[file_path] = {
+                    'report': report,
+                    'filename': filename,
+                    'student_id': student_id,
+                    'essay_text': essay_text,
+                    'status': 'success'
+                }
+            except Exception as e:
+                logger.exception(f"vision_grade 单文件失败: {file_path}")
+                individual_reports[file_path] = {'error': str(e), 'status': 'error'}
+        if save_to_class_center_flag:
+            summary_prompt = "请将以下学生作文批阅报告进行精简汇总，提取关键信息：\n\n"
+            for fp, report_data in individual_reports.items():
+                if report_data.get('status') == 'success':
+                    summary_prompt += f"\n【{report_data.get('student_id', fp)}】\n{report_data.get('report', '')}\n"
+            summary_prompt += "\n\n请基于以上个人报告，生成一份班级整体评价报告，包括：\n1. 整体水平评估\n2. 共同优点\n3. 普遍问题\n4. 教学建议\n5. 好词好句：从学生作文或批阅点评中摘录 5-10 条佳句，单独作为一小节，每行一条，格式为「- 句子」"
+            try:
+                class_response = client.chat.completions.create(
+                    model=minimax_model,
+                    messages=[
+                        {"role": "system", "content": "你是一位经验丰富的教师，擅长分析班级整体学习情况，并能从作文中提炼好词好句。"},
+                        {"role": "user", "content": summary_prompt}
+                    ],
+                    temperature=0.7
+                )
+                class_evaluation = class_response.choices[0].message.content or ''
+            except Exception as e:
+                class_evaluation = f"生成班级评价时出错: {str(e)}"
+        else:
+            class_evaluation = ''
+        result_data = {'individual_reports': individual_reports, 'class_evaluation': class_evaluation, 'timestamp': datetime.now().isoformat()}
+        result_file = os.path.join(results_dir, f"grade_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+        with open(result_file, 'w', encoding='utf-8') as f:
+            json.dump(result_data, f, ensure_ascii=False, indent=2)
+        if save_to_class_center_flag:
+            save_to_class_center(individual_reports, class_evaluation, logger)
+        _save_task_grading_results(individual_reports)
+        history_file = os.path.join(HISTORY_DIR, f"history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+        with open(history_file, 'w', encoding='utf-8') as f:
+            json.dump({'type': 'grade', 'result_file': result_file, 'individual_reports': individual_reports, 'class_evaluation': class_evaluation, 'timestamp': datetime.now().isoformat()}, f, ensure_ascii=False, indent=2)
+        return jsonify({
+            'individual_reports': individual_reports,
+            'class_evaluation': class_evaluation,
+            'result_file': result_file,
+            'history_file': history_file
+        })
+    except Exception as e:
+        logger.exception("vision_grade 异常")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/vision_class_report', methods=['POST'])
+def vision_class_report():
+    """根据已有个人批阅报告生成班级整体评价（不重新识别/批阅）"""
+    data = request.get_json() or {}
+    individual_reports = data.get('individual_reports', {})
+    save_to_class_center_flag = data.get('save_to_class_center', False)
+    if not individual_reports:
+        return jsonify({'error': '请先完成识别并批阅，再生成班级报告'}), 400
+    if not minimax_api_key:
+        return jsonify({'error': '未配置 LLM_API_KEY 或 MINIMAX_API_KEY'}), 500
+    logger = logging.getLogger(__name__)
+    try:
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=60.0)
+        summary_prompt = "请将以下学生作文批阅报告进行精简汇总，提取关键信息：\n\n"
+        for fp, report_data in individual_reports.items():
+            if report_data.get('status') == 'success':
+                summary_prompt += f"\n【{report_data.get('student_id', fp)}】\n{report_data.get('report', '')}\n"
+        summary_prompt += "\n\n请基于以上个人报告，生成一份班级整体评价报告，包括：\n1. 整体水平评估\n2. 共同优点\n3. 普遍问题\n4. 教学建议\n5. 好词好句：从学生作文或批阅点评中摘录 5-10 条佳句，单独作为一小节，每行一条，格式为「- 句子」"
+        class_response = client.chat.completions.create(
+            model=minimax_model,
+            messages=[
+                {"role": "system", "content": "你是一位经验丰富的教师，擅长分析班级整体学习情况，并能从作文中提炼好词好句。"},
+                {"role": "user", "content": summary_prompt}
+            ],
+            temperature=0.7
+        )
+        class_evaluation = class_response.choices[0].message.content or ''
+        if save_to_class_center_flag:
+            save_to_class_center(individual_reports, class_evaluation, logger)
+        return jsonify({'class_evaluation': class_evaluation})
+    except Exception as e:
+        logger.exception("vision_class_report 异常")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/grade', methods=['POST'])
 def grade_essays():
     """批阅作文"""
@@ -2317,7 +3062,7 @@ def grade_essays():
     if not ocr_results:
         return jsonify({'error': '没有识别结果'}), 400
     if not minimax_api_key:
-        return jsonify({'error': '未配置 MINIMAX_API_KEY，请在 .env 中设置'}), 500
+        return jsonify({'error': '未配置 LLM_API_KEY 或 MINIMAX_API_KEY，请在 .env 中设置'}), 500
     
     # 配置日志
     logger = logging.getLogger(__name__)
@@ -2395,7 +3140,7 @@ def grade_essays():
                     identifier = f"学号：{student_id}" if student_id and student_id != filename else filename
                     summary_prompt += f"\n【{identifier}】\n{report}\n"
             
-            summary_prompt += "\n\n请基于以上个人报告，生成一份班级整体评价报告，包括：\n1. 整体水平评估\n2. 共同优点\n3. 普遍问题\n4. 教学建议"
+            summary_prompt += "\n\n请基于以上个人报告，生成一份班级整体评价报告，包括：\n1. 整体水平评估\n2. 共同优点\n3. 普遍问题\n4. 教学建议\n5. 好词好句：从学生作文或批阅点评中摘录 5-10 条佳句，单独作为一小节，每行一条，格式为「- 句子」"
             
             # 获取班级评价
             try:
@@ -2697,18 +3442,13 @@ def _save_materials_index(entries):
         json.dump(entries, f, ensure_ascii=False, indent=2)
 
 
-@app.route('/api/generate/composition_materials', methods=['GET'])
-def generate_composition_materials():
-    """生成并下载作文素材包（ZIP，内含说明与模板）"""
-    try:
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-            content = """# 作文素材使用说明
+# ---------- 平台内编辑：作文素材、通用答题卡 ----------
+DEFAULT_COMPOSITION_MATERIALS = """# 作文素材使用说明
 
-本素材包供作文练习使用。请将题目或阅读材料发放给学生，学生可在通用答题卡上书写作文（务必在作文上方写清6位学号），写完后扫描或拍照上传至 QuickJudge 进行批阅。
+本素材供作文练习使用。请将题目或阅读材料发放给学生，学生可在通用答题卡上书写作文（务必在作文上方写清6位学号），写完后扫描或拍照上传至 QuickJudge 进行批阅。
 
 ## 使用流程
-1. 下载「通用答题卡」并打印（或使用本系统生成的答题卡）。
+1. 在平台内编辑并打印「通用答题卡」。
 2. 将本次练习的题目/材料发给学生。
 3. 学生在答题卡上写清学号并书写作文。
 4. 扫描或拍照后，在「智能阅卷」中识别并批阅。
@@ -2717,18 +3457,8 @@ def generate_composition_materials():
 - 学号请写6位数字，便于系统识别。
 - 字迹清晰、拍照端正有利于识别准确率。
 """
-            zf.writestr('作文素材使用说明.txt', content.encode('utf-8'))
-            zf.writestr('阅读材料模板.txt', '请在此处填写或粘贴本次练习的阅读材料、题目要求等。\n\n'.encode('utf-8'))
-        buf.seek(0)
-        return send_file(buf, as_attachment=True, download_name='作文素材.zip', mimetype='application/zip')
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
-
-@app.route('/api/generate/answer_sheet', methods=['GET'])
-def generate_answer_sheet():
-    """生成并下载通用答题卡（HTML，可打印或另存为 PDF）"""
-    html = """<!DOCTYPE html>
+DEFAULT_ANSWER_SHEET_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -2746,7 +3476,8 @@ h1 { text-align: center; font-size: 1.4rem; margin-bottom: 24px; }
 .student-id .label { font-weight: bold; margin-bottom: 8px; }
 .student-id .hint { font-size: 12px; color: #666; margin-top: 4px; }
 .student-id .boxes { display: flex; gap: 8px; }
-.student-id .box { width: 36px; height: 44px; border: 2px solid #333; text-align: center; font-size: 1.2rem; line-height: 40px; }
+.student-id .box { width: 36px; height: 44px; border: 2px solid #333; text-align: center; font-size: 1.2rem; line-height: 40px; position: relative; }
+.student-id .box .writing-guide { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; color: #ddd; pointer-events: none; font-family: "Microsoft YaHei", sans-serif; }
 .writing-area { border: 1px solid #999; min-height: 400px; padding: 12px; line-height: 2; }
 .writing-area .lines { border-bottom: 1px solid #eee; min-height: 32px; }
 @media print { body { margin: 0; } .sheet { box-shadow: none; } }
@@ -2761,11 +3492,11 @@ h1 { text-align: center; font-size: 1.4rem; margin-bottom: 24px; }
   <label>日期</label><input type="text" placeholder="日期">
 </div>
 <div class="student-id">
-  <div class="label">学号（请用正楷填写 6 位数字，系统将用于识别）</div>
+  <div class="label">学号（六位数字，请按 8 字形规范书写，便于系统识别）</div>
   <div class="boxes">
-    <div class="box"></div><div class="box"></div><div class="box"></div><div class="box"></div><div class="box"></div><div class="box"></div>
+    <div class="box"><span class="writing-guide">8</span></div><div class="box"><span class="writing-guide">8</span></div><div class="box"><span class="writing-guide">8</span></div><div class="box"><span class="writing-guide">8</span></div><div class="box"><span class="writing-guide">8</span></div><div class="box"><span class="writing-guide">8</span></div>
   </div>
-  <div class="hint">示例：230101</div>
+  <div class="hint">每格按 8 字形书写一位数字，示例：230101</div>
 </div>
 <div class="writing-area">
   <div class="label" style="font-weight:bold; margin-bottom:8px;">作文书写区</div>
@@ -2777,6 +3508,96 @@ h1 { text-align: center; font-size: 1.4rem; margin-bottom: 24px; }
 </body>
 </html>
 """
+
+
+def _read_composition_materials():
+    if os.path.exists(COMPOSITION_MATERIALS_FILE):
+        with open(COMPOSITION_MATERIALS_FILE, 'r', encoding='utf-8') as f:
+            return f.read()
+    return DEFAULT_COMPOSITION_MATERIALS
+
+
+def _read_answer_sheet_html():
+    if os.path.exists(ANSWER_SHEET_HTML_FILE):
+        with open(ANSWER_SHEET_HTML_FILE, 'r', encoding='utf-8') as f:
+            return f.read()
+    return DEFAULT_ANSWER_SHEET_HTML
+
+
+@app.route('/api/config/composition_materials', methods=['GET'])
+def get_composition_materials():
+    """获取作文素材使用说明（平台内编辑用）"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    return jsonify({'content': _read_composition_materials()})
+
+
+@app.route('/api/config/composition_materials', methods=['POST', 'PUT'])
+def save_composition_materials():
+    """保存作文素材使用说明"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    try:
+        data = request.get_json() or {}
+        content = data.get('content', '')
+        with open(COMPOSITION_MATERIALS_FILE, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/config/answer_sheet', methods=['GET'])
+def get_answer_sheet():
+    """获取通用答题卡 HTML（平台内编辑/预览用）"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    return jsonify({'content': _read_answer_sheet_html()})
+
+
+@app.route('/api/config/answer_sheet', methods=['POST', 'PUT'])
+def save_answer_sheet():
+    """保存通用答题卡 HTML"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    try:
+        data = request.get_json() or {}
+        content = data.get('content', '')
+        with open(ANSWER_SHEET_HTML_FILE, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/config/answer_sheet/preview')
+def preview_answer_sheet():
+    """预览/打印：返回答题卡 HTML 页面（新窗口打开用）"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    html = _read_answer_sheet_html()
+    return Response(html, mimetype='text/html; charset=utf-8')
+
+
+@app.route('/api/generate/composition_materials', methods=['GET'])
+def generate_composition_materials():
+    """生成并下载作文素材包（ZIP，使用平台内已编辑的说明）"""
+    try:
+        content = _read_composition_materials()
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr('作文素材使用说明.txt', content.encode('utf-8'))
+            zf.writestr('阅读材料模板.txt', '请在此处填写或粘贴本次练习的阅读材料、题目要求等。\n\n'.encode('utf-8'))
+        buf.seek(0)
+        return send_file(buf, as_attachment=True, download_name='作文素材.zip', mimetype='application/zip')
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/generate/answer_sheet', methods=['GET'])
+def generate_answer_sheet():
+    """下载通用答题卡（使用平台内已编辑的 HTML）"""
+    html = _read_answer_sheet_html()
     buf = io.BytesIO(html.encode('utf-8'))
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name='通用答题卡.html', mimetype='text/html; charset=utf-8')
@@ -3002,6 +3823,19 @@ def get_class_report_detail(class_name, date):
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/class_center/<class_name>/grades', methods=['GET'])
+def get_class_grades(class_name):
+    """成绩报表：按学号返回分数列表。后续与批阅结果联动，当前返回空列表。格式 [{ student_id, score?, score_text?, note? }, ...]"""
+    try:
+        # 可选：从班级中心或成绩存储中汇总各学号最新分数，当前无分数字段则返回空
+        grades = []
+        # 后续可在此读取批阅结果，按 student_id 聚合分数后填入 grades
+        return jsonify({'grades': grades})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/process_image', methods=['POST'])
 def process_image():
