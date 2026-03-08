@@ -73,6 +73,7 @@
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
     max-width: 400px;
     width: 90%;
+    margin: auto; /* 与 flex 父级配合实现居中 */
 }
 .login-box .form-group {
     margin-bottom: 1.25rem;
@@ -581,7 +582,7 @@
     right: 24px;
     top: 50%;
     transform: translateY(-50%);
-    z-index: 100;
+    z-index: 1050;
     background: var(--bg-white);
     border: 1px solid var(--border-color);
     border-radius: 10px;
