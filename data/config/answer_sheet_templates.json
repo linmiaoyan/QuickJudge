@@ -1,0 +1,26 @@
+{
+  "english": {
+    "name": "英语",
+    "choice_sections": [
+      { "name": "听力", "start": 1, "end": 20 },
+      { "name": "阅读理解", "start": 21, "end": 40 },
+      { "name": "完形填空", "start": 41, "end": 55 }
+    ],
+    "subjective_sections": [
+      { "name": "语法填空", "type": "fill", "num_questions": 10, "num_lines": 12, "prompt": "" },
+      { "name": "短文改错", "type": "short_answer", "num_questions": 10, "num_lines": 12, "prompt": "" },
+      { "name": "书面表达", "type": "essay", "num_questions": 1, "num_lines": 20, "prompt": "" }
+    ]
+  },
+  "chinese": {
+    "name": "语文",
+    "choice_sections": [
+      { "name": "选择题", "start": 1, "end": 12 }
+    ],
+    "subjective_sections": [
+      { "name": "文言文/古诗", "type": "short_answer", "num_questions": 4, "num_lines": 8, "prompt": "" },
+      { "name": "现代文阅读", "type": "short_answer", "num_questions": 4, "num_lines": 16, "prompt": "" },
+      { "name": "作文", "type": "essay", "num_questions": 1, "num_lines": 28, "prompt": "" }
+    ]
+  }
+}

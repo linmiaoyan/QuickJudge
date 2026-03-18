@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>限时练2</title>
+<style>
+
+* { box-sizing: border-box; }
+body { font-family: "Microsoft YaHei", "SimSun", sans-serif; margin: 16px; font-size: 12px; }
+@media print { body { margin: 0; } .no-print { display: none !important; } }
+.page { max-width: 210mm; margin: 0 auto; padding: 12px; border: 1px solid #333; min-height: 297mm; }
+h1 { text-align: center; font-size: 16px; margin-bottom: 12px; }
+.meta { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.meta label { font-weight: bold; min-width: 56px; }
+.meta input { border: none; border-bottom: 1px solid #333; padding: 2px 6px; width: 100px; }
+.student-id { margin-bottom: 16px; }
+.student-id .label { font-weight: bold; margin-bottom: 6px; }
+.student-id .boxes { display: flex; gap: 6px; flex-wrap: wrap; }
+.student-id .box { width: 28px; height: 32px; border: 1.5px solid #333; text-align: center; line-height: 28px; font-size: 14px; }
+.choice-section { margin-bottom: 16px; }
+.choice-title { font-weight: bold; margin-bottom: 8px; }
+.choice-grid { border: 1px solid #999; padding: 8px; }
+.choice-row { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.choice-row .q-num { width: 22px; font-weight: bold; }
+.choice-row .opt { display: flex; align-items: center; cursor: default; }
+.choice-row .opt-box { width: 20px; height: 20px; border: 1px solid #333; margin-left: 2px; text-align: center; line-height: 18px; font-size: 11px; }
+.subjective-section { margin-top: 14px; border: 1px solid #999; padding: 10px; }
+.subjective-title { font-weight: bold; margin-bottom: 6px; }
+.subjective-prompt { background: #f5f5f5; padding: 8px; margin-bottom: 8px; font-size: 11px; white-space: pre-wrap; max-height: 200px; overflow: auto; }
+.subjective-lines .line { border-bottom: 1px solid #eee; min-height: 24px; }
+
+</style>
+</head>
+<body>
+<div class="page">
+<h1>【A4】限时练2</h1>
+<div class="meta">
+  <label>班级</label><input type="text" placeholder="班级">
+  <label>姓名</label><input type="text" placeholder="姓名">
+  <label>日期</label><input type="text" placeholder="日期">
+</div>
+<div class="student-id">
+  <div class="label">学号（六位数字，按 8 字形规范书写）</div>
+  <div class="boxes">
+    <div class="box">8</div><div class="box">8</div><div class="box">8</div>
+    <div class="box">8</div><div class="box">8</div><div class="box">8</div>
+  </div>
+</div>
+<div class="choice-section">
+<div class="choice-title">选择题</div>
+<div class="choice-grid">
+<div class="choice-row"><span class="q-num">1</span><label class="opt"><input type="radio" name="q1" value="A" checked disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q1" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q1" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q1" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">2</span><label class="opt"><input type="radio" name="q2" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q2" value="B" checked disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q2" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q2" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">3</span><label class="opt"><input type="radio" name="q3" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q3" value="B" checked disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q3" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q3" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">4</span><label class="opt"><input type="radio" name="q4" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q4" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q4" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q4" value="D" checked disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">5</span><label class="opt"><input type="radio" name="q5" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q5" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q5" value="C" checked disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q5" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">6</span><label class="opt"><input type="radio" name="q6" value="A" checked disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q6" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q6" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q6" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">7</span><label class="opt"><input type="radio" name="q7" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q7" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q7" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q7" value="D" checked disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">8</span><label class="opt"><input type="radio" name="q8" value="A" checked disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q8" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q8" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q8" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">9</span><label class="opt"><input type="radio" name="q9" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q9" value="B" checked disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q9" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q9" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">10</span><label class="opt"><input type="radio" name="q10" value="A" checked disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q10" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q10" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q10" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">11</span><label class="opt"><input type="radio" name="q11" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q11" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q11" value="C" checked disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q11" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">12</span><label class="opt"><input type="radio" name="q12" value="A" checked disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q12" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q12" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q12" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">13</span><label class="opt"><input type="radio" name="q13" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q13" value="B" checked disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q13" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q13" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">14</span><label class="opt"><input type="radio" name="q14" value="A" checked disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q14" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q14" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q14" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">15</span><label class="opt"><input type="radio" name="q15" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q15" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q15" value="C" checked disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q15" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">16</span><label class="opt"><input type="radio" name="q16" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q16" value="B" checked disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q16" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q16" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">17</span><label class="opt"><input type="radio" name="q17" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q17" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q17" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q17" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">18</span><label class="opt"><input type="radio" name="q18" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q18" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q18" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q18" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">19</span><label class="opt"><input type="radio" name="q19" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q19" value="B" checked disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q19" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q19" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">20</span><label class="opt"><input type="radio" name="q20" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q20" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q20" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q20" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">21</span><label class="opt"><input type="radio" name="q21" value="A" disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q21" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q21" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q21" value="D" disabled><span class="opt-box">D</span></label></div>
+<div class="choice-row"><span class="q-num">22</span><label class="opt"><input type="radio" name="q22" value="A" checked disabled><span class="opt-box">A</span></label><label class="opt"><input type="radio" name="q22" value="B" disabled><span class="opt-box">B</span></label><label class="opt"><input type="radio" name="q22" value="C" disabled><span class="opt-box">C</span></label><label class="opt"><input type="radio" name="q22" value="D" disabled><span class="opt-box">D</span></label></div>
+</div></div>
+<div class="subjective-section">
+<div class="subjective-title">书面表达</div>
+<div class="subjective-lines">
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+<div class="line"></div>
+</div></div>
+</div>
+</body>
+</html>

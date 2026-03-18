@@ -378,6 +378,8 @@
                             <button type="button" class="btn btn-info" onclick="openEditCompositionMaterialsModal()">编辑作文素材</button>
                             <button type="button" class="btn btn-info" onclick="openEditAnswerSheetModal()">编辑通用答题卡</button>
                             <button type="button" class="btn btn-info" onclick="previewPrintAnswerSheet()">预览/打印答题卡</button>
+                            <button type="button" class="btn btn-success" onclick="openGenerateAnswerSheetFromPaperModal()">📄 从试卷Word生成答题卡</button>
+                            <button type="button" class="btn btn-info" onclick="openGenerateAnswerSheetFromTemplateModal()">📋 按题型模板生成答题卡</button>
                             <button type="button" class="btn btn-primary" onclick="openAddMaterialModal()">➕ 添加素材</button>
                         </div>
                     </div>
@@ -759,6 +761,79 @@
                     </div>
                 </div>
 
+                <!-- 从试卷 Word 生成答题卡弹窗 -->
+                <div id="generateAnswerSheetFromPaperModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1057; overflow-y: auto;">
+                    <div class="modal-box" style="max-width: 480px; margin: 40px auto;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <h2 style="margin: 0; font-size: 1.25rem;">从试卷 Word 生成答题卡</h2>
+                            <button type="button" onclick="closeGenerateAnswerSheetFromPaperModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-secondary);">&times;</button>
+                        </div>
+                        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 1rem;">上传试卷或答案的 .docx 文件，系统将自动识别选择题数量、主观题区块与答案，生成 A4 答题卡（HTML 或 PDF）。</p>
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label>试卷/答案 Word（.docx）</label>
+                            <input type="file" id="generateAnswerSheetDocx" accept=".docx" style="padding: 8px; width: 100%;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0.75rem;">
+                            <label>答题卡标题（可选，如：限时练2）</label>
+                            <input type="text" id="generateAnswerSheetTitle" placeholder="不填则从文件名推断" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;">
+                        </div>
+                        <div style="margin-bottom: 0.75rem;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="generateAnswerSheetShowAnswers" checked> 答题卡上显示参考答案（教师版）
+                            </label>
+                        </div>
+                        <div style="margin-bottom: 0.75rem;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="generateAnswerSheetUseLlm"> 使用大模型增强解析（需已配置 API Key）
+                            </label>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label>导出格式</label>
+                            <select id="generateAnswerSheetFormat" style="padding: 8px; border: 1px solid var(--border-color); border-radius: 6px;">
+                                <option value="html">HTML（推荐，浏览器可打印为 PDF）</option>
+                                <option value="pdf">PDF（需安装 weasyprint）</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                            <button type="button" class="btn btn-warning" onclick="closeGenerateAnswerSheetFromPaperModal()">取消</button>
+                            <button type="button" class="btn btn-primary" id="submitGenerateAnswerSheetBtn" onclick="submitGenerateAnswerSheetFromPaper()">生成并下载</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 按题型模板生成答题卡弹窗 -->
+                <div id="generateAnswerSheetFromTemplateModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1058; overflow-y: auto;">
+                    <div class="modal-box" style="max-width: 480px; margin: 40px auto;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <h2 style="margin: 0; font-size: 1.25rem;">按题型模板生成答题卡</h2>
+                            <button type="button" onclick="closeGenerateAnswerSheetFromTemplateModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-secondary);">&times;</button>
+                        </div>
+                        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 1rem;">选择学科预设（选择题/填空/解答/作文等区块与题数已配置），直接生成空白答题卡，无需上传试卷。</p>
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label>学科预设</label>
+                            <select id="templatePresetSelect" onchange="updateTemplatePresetSummary(this.value)" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;">
+                                <option value="english">英语</option>
+                            </select>
+                            <div id="templatePresetSummary" style="font-size: 12px; color: var(--text-muted); margin-top: 6px;"></div>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label>答题卡标题</label>
+                            <input type="text" id="templateSheetTitle" placeholder="如：限时练、月考" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label>导出格式</label>
+                            <select id="templateFormatSelect" style="padding: 8px; border: 1px solid var(--border-color); border-radius: 6px;">
+                                <option value="html">HTML（推荐，浏览器可打印为 PDF）</option>
+                                <option value="pdf">PDF（需安装 weasyprint）</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                            <button type="button" class="btn btn-warning" onclick="closeGenerateAnswerSheetFromTemplateModal()">取消</button>
+                            <button type="button" class="btn btn-primary" id="submitTemplateSheetBtn" onclick="submitGenerateAnswerSheetFromTemplate()">生成并下载</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 答题卡设置弹窗（保留打印机相关说明） -->
                 <div id="answerSheetSettingsModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1060; overflow-y: auto;">
                     <div style="max-width: 900px; margin: 20px auto; background: var(--bg-white); border-radius: 12px; padding: 1.5rem; box-shadow: 0 10px 40px rgba(0,0,0,0.2); display: flex; gap: 1.5rem;">
@@ -918,7 +993,24 @@
                             </div>
                             <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">选择已连接的扫描仪后点击重新查找，然后开始扫描。</p>
                             <p style="margin-bottom: 12px;"><a href="javascript:void(0)" onclick="openScannerAdvancedModalFromImport();" style="font-size: 13px; color: var(--primary-blue);">扫描仪高级设置</a>（图像模式、单/双面）</p>
-                            <button type="button" class="btn btn-primary" style="width: 100%;" onclick="startScanFromImportModal()">开始扫描</button>
+                            <!-- 扫描流程三步进度（缓解等待焦虑） -->
+                            <div id="importScanProgressStrip" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding: 12px; background: var(--bg-gray, #f5f5f5); border-radius: 8px;">
+                                <div class="scan-step" data-step="1" style="flex: 1; text-align: center;">
+                                    <div class="scan-step-circle" style="width: 36px; height: 36px; border-radius: 50%; margin: 0 auto 6px; border: 2px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: var(--text-secondary);">1</div>
+                                    <div class="scan-step-label" style="font-size: 12px; color: var(--text-secondary);">已扫描</div>
+                                </div>
+                                <div style="width: 24px; height: 2px; background: var(--border-color); align-self: flex-start; margin-top: 18px;"></div>
+                                <div class="scan-step" data-step="2" style="flex: 1; text-align: center;">
+                                    <div class="scan-step-circle" style="width: 36px; height: 36px; border-radius: 50%; margin: 0 auto 6px; border: 2px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: var(--text-secondary);">2</div>
+                                    <div class="scan-step-label" style="font-size: 12px; color: var(--text-secondary);">已识别</div>
+                                </div>
+                                <div style="width: 24px; height: 2px; background: var(--border-color); align-self: flex-start; margin-top: 18px;"></div>
+                                <div class="scan-step" data-step="3" style="flex: 1; text-align: center;">
+                                    <div class="scan-step-circle" style="width: 36px; height: 36px; border-radius: 50%; margin: 0 auto 6px; border: 2px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: var(--text-secondary);">3</div>
+                                    <div class="scan-step-label" style="font-size: 12px; color: var(--text-secondary);">已上传</div>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-primary" style="width: 100%;" id="importStartScanBtn" onclick="startScanFromImportModal()">开始扫描</button>
                         </div>
                         <div id="importPaperLocalPanel" style="display: none;">
                             <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 10px;">选择图片文件（可多选），将导入到扫描输出目录。</p>
@@ -1842,6 +1934,160 @@
                 })
                 .catch(function() { showAlert('下载失败，请重试', 'error'); });
         }
+        function openGenerateAnswerSheetFromPaperModal() {
+            var modal = document.getElementById('generateAnswerSheetFromPaperModal');
+            if (modal) modal.style.display = 'block';
+            var fileInput = document.getElementById('generateAnswerSheetDocx');
+            if (fileInput) fileInput.value = '';
+            document.getElementById('generateAnswerSheetTitle').value = '';
+        }
+        function closeGenerateAnswerSheetFromPaperModal() {
+            var el = document.getElementById('generateAnswerSheetFromPaperModal');
+            if (el) el.style.display = 'none';
+        }
+        function submitGenerateAnswerSheetFromPaper() {
+            var fileInput = document.getElementById('generateAnswerSheetDocx');
+            var file = fileInput && fileInput.files && fileInput.files[0];
+            if (!file || !file.name.toLowerCase().endsWith('.docx')) {
+                showAlert('请选择 .docx 格式的试卷或答案文件', 'warning');
+                return;
+            }
+            var btn = document.getElementById('submitGenerateAnswerSheetBtn');
+            if (btn) { btn.disabled = true; btn.textContent = '生成中...'; }
+            var fd = new FormData();
+            fd.append('file', file);
+            var title = (document.getElementById('generateAnswerSheetTitle') && document.getElementById('generateAnswerSheetTitle').value) || '';
+            if (title) fd.append('title', title);
+            fd.append('show_answers', document.getElementById('generateAnswerSheetShowAnswers') && document.getElementById('generateAnswerSheetShowAnswers').checked ? 'true' : 'false');
+            fd.append('use_llm', document.getElementById('generateAnswerSheetUseLlm') && document.getElementById('generateAnswerSheetUseLlm').checked ? 'true' : 'false');
+            fd.append('format', (document.getElementById('generateAnswerSheetFormat') && document.getElementById('generateAnswerSheetFormat').value) || 'html');
+            fetch('/api/generate/answer_sheet_from_paper', { method: 'POST', credentials: 'include', body: fd })
+                .then(function(r) {
+                    var contentType = r.headers.get('Content-Type') || '';
+                    if (contentType.indexOf('application/json') !== -1) return r.json().then(function(data) { return { ok: false, data: data }; });
+                    return r.blob().then(function(blob) {
+                        var name = '答题卡.html';
+                        var disp = r.headers.get('Content-Disposition');
+                        if (disp) {
+                            var m = disp.match(/filename[*]?=(?:UTF-8'')?["']?([^"';]+)/i) || disp.match(/filename=([^;]+)/);
+                            if (m && m[1]) name = m[1].trim().replace(/^["']|["']$/g, '');
+                        }
+                        var a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = name;
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                        return { ok: true };
+                    });
+                })
+                .then(function(res) {
+                    if (btn) { btn.disabled = false; btn.textContent = '生成并下载'; }
+                    if (res.ok) {
+                        showAlert('答题卡已生成并开始下载', 'success');
+                        closeGenerateAnswerSheetFromPaperModal();
+                    } else {
+                        showAlert(res.data && res.data.error ? res.data.error : '生成失败', 'error');
+                    }
+                })
+                .catch(function() {
+                    if (btn) { btn.disabled = false; btn.textContent = '生成并下载'; }
+                    showAlert('请求失败，请重试', 'error');
+                });
+        }
+        function openGenerateAnswerSheetFromTemplateModal() {
+            var modal = document.getElementById('generateAnswerSheetFromTemplateModal');
+            if (modal) modal.style.display = 'block';
+            var sel = document.getElementById('templatePresetSelect');
+            var summary = document.getElementById('templatePresetSummary');
+            if (!sel) return;
+            sel.innerHTML = '<option value="">加载中...</option>';
+            if (summary) summary.textContent = '';
+            fetch('/api/config/answer_sheet_templates', { credentials: 'include' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var list = data.templates || [];
+                    sel.innerHTML = '';
+                    if (list.length === 0) {
+                        sel.innerHTML = '<option value="english">英语</option>';
+                        if (summary) summary.textContent = '当前仅内置英语模板';
+                        return;
+                    }
+                    for (var i = 0; i < list.length; i++) {
+                        var opt = document.createElement('option');
+                        opt.value = list[i].id;
+                        opt.textContent = list[i].name || list[i].id;
+                        sel.appendChild(opt);
+                    }
+                    updateTemplatePresetSummary(sel.value);
+                })
+                .catch(function() {
+                    sel.innerHTML = '<option value="english">英语</option>';
+                    if (summary) summary.textContent = '加载失败，使用默认英语模板';
+                });
+            document.getElementById('templateSheetTitle').value = '';
+        }
+        function updateTemplatePresetSummary(subjectId) {
+            var summary = document.getElementById('templatePresetSummary');
+            if (!summary || !subjectId) return;
+            fetch('/api/config/answer_sheet_templates/' + encodeURIComponent(subjectId), { credentials: 'include' })
+                .then(function(r) { return r.ok ? r.json() : null; })
+                .then(function(t) {
+                    if (!t) { summary.textContent = ''; return; }
+                    var parts = [];
+                    if (t.choice_sections && t.choice_sections.length) {
+                        parts.push('选择题：' + t.choice_sections.map(function(s) { return (s.name || '') + (s.start != null && s.end != null ? ' ' + s.start + '-' + s.end : ''); }).join('、'));
+                    }
+                    if (t.subjective_sections && t.subjective_sections.length) {
+                        parts.push('主观题：' + t.subjective_sections.map(function(s) { return (s.name || '') + (s.num_lines ? ' ' + s.num_lines + '行' : ''); }).join('、'));
+                    }
+                    summary.textContent = parts.length ? parts.join('；') : '';
+                })
+                .catch(function() { summary.textContent = ''; });
+        }
+        function closeGenerateAnswerSheetFromTemplateModal() {
+            var el = document.getElementById('generateAnswerSheetFromTemplateModal');
+            if (el) el.style.display = 'none';
+        }
+        function submitGenerateAnswerSheetFromTemplate() {
+            var sel = document.getElementById('templatePresetSelect');
+            var subject = (sel && sel.value) || 'english';
+            var title = (document.getElementById('templateSheetTitle') && document.getElementById('templateSheetTitle').value) || '答题卡';
+            var format = (document.getElementById('templateFormatSelect') && document.getElementById('templateFormatSelect').value) || 'html';
+            var btn = document.getElementById('submitTemplateSheetBtn');
+            if (btn) { btn.disabled = true; btn.textContent = '生成中...'; }
+            var url = '/api/generate/answer_sheet_from_template?subject=' + encodeURIComponent(subject) + '&title=' + encodeURIComponent(title) + '&format=' + encodeURIComponent(format) + '&show_answers=0';
+            fetch(url, { credentials: 'include' })
+                .then(function(r) {
+                    var contentType = r.headers.get('Content-Type') || '';
+                    if (contentType.indexOf('application/json') !== -1) return r.json().then(function(data) { return { ok: false, data: data }; });
+                    return r.blob().then(function(blob) {
+                        var name = '答题卡.html';
+                        var disp = r.headers.get('Content-Disposition');
+                        if (disp) {
+                            var m = disp.match(/filename[*]?=(?:UTF-8'')?["']?([^"';]+)/i) || disp.match(/filename=([^;]+)/);
+                            if (m && m[1]) name = m[1].trim().replace(/^["']|["']$/g, '');
+                        }
+                        var a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = name;
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                        return { ok: true };
+                    });
+                })
+                .then(function(res) {
+                    if (btn) { btn.disabled = false; btn.textContent = '生成并下载'; }
+                    if (res.ok) {
+                        showAlert('答题卡已生成并开始下载', 'success');
+                        closeGenerateAnswerSheetFromTemplateModal();
+                    } else {
+                        showAlert(res.data && res.data.error ? res.data.error : '生成失败', 'error');
+                    }
+                })
+                .catch(function() {
+                    if (btn) { btn.disabled = false; btn.textContent = '生成并下载'; showAlert('请求失败，请重试', 'error'); }
+                });
+        }
         function loadMaterials() {
             var container = document.getElementById('materialsListContainer');
             if (!container) return;
@@ -1971,7 +2217,7 @@
                 showAlert('请选择或输入导出位置', 'warning');
                 return;
             }
-            showAlert('导出试卷：接口接入后将生成试卷(Word)、答题卡(PDF)、参考答案(Word) 到指定路径', 'success');
+            showAlert('导出试卷（试卷 Word、参考答案 Word）功能开发中。答题卡请使用「从试卷Word生成答题卡」上传 .docx 后生成。', 'info');
             closeExportPaperModal();
         }
         function openAnswerSheetSettingsModal() {
@@ -2149,6 +2395,7 @@
                         '<a href="/api/tasks/' + escapeHtml(t.id) + '/answer_sheet" target="_blank" class="btn btn-info">导出答题卡</a>' +
                         '<a href="/api/tasks/' + escapeHtml(t.id) + '/answer_sheet?download=1" class="btn btn-secondary">下载答题卡</a>' +
                         '<a href="/api/tasks/' + escapeHtml(t.id) + '/export_answer_situation" class="btn btn-secondary" target="_blank" title="导出学号、批阅报告等" data-graded="' + (t.graded_count != null ? t.graded_count : 0) + '" onclick="if (parseInt(this.getAttribute(\'data-graded\'),10)===0) showAlert(\'当前暂无批阅结果，导出将为空表\', \'info\');">导出答题情况</a>' +
+                        '<button type="button" class="btn btn-info" onclick="exportClassReport(\'' + escapeHtml(t.id) + '\', \'html\')" title="合并全班学生个人报告为 HTML/PDF">导出全班报告单</button>' +
                         '<button type="button" class="btn btn-info" onclick="showGradingView(\'progress\')">查看详情</button></div></div>';
                 }).join('');
             }).catch(function() {
@@ -2203,12 +2450,43 @@
                         '<td>' +
                         '<button type="button" class="btn btn-sm btn-primary" onclick="openTaskPapersModal(\'' + id + '\')">查看试卷</button> ' +
                         '<button type="button" class="btn btn-sm btn-info" onclick="openTaskPapersModal(\'' + id + '\')">前往批阅</button> ' +
-                        '<a href="/api/tasks/' + escapeHtml(t.id) + '/export_answer_situation" class="btn btn-sm btn-secondary" target="_blank" title="导出学号、批阅报告等" data-graded="' + (t.graded_count != null ? t.graded_count : 0) + '" onclick="if (parseInt(this.getAttribute(\'data-graded\'),10)===0) showAlert(\'当前暂无批阅结果，导出将为空表\', \'info\');">导出答题情况</a>' +
+                        '<a href="/api/tasks/' + escapeHtml(t.id) + '/export_answer_situation" class="btn btn-sm btn-secondary" target="_blank" title="导出学号、批阅报告等" data-graded="' + (t.graded_count != null ? t.graded_count : 0) + '" onclick="if (parseInt(this.getAttribute(\'data-graded\'),10)===0) showAlert(\'当前暂无批阅结果，导出将为空表\', \'info\');">导出答题情况</a> ' +
+                        '<button type="button" class="btn btn-sm btn-info" onclick="exportClassReport(\'' + id + '\', \'html\')" title="合并全班学生个人报告">导出全班报告单</button>' +
                         '</td></tr>';
                 }).join('');
             }).catch(function() {
                 tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger-color);">加载失败</td></tr>';
             });
+        }
+        async function exportClassReport(taskId, format) {
+            if (!taskId) return;
+            format = format || 'html';
+            showAlert('正在生成全班报告单，请稍候…', 'info', 0);
+            try {
+                const url = '/api/tasks/' + encodeURIComponent(taskId) + '/export_class_report?format=' + encodeURIComponent(format);
+                const r = await fetch(url, { credentials: 'include' });
+                const blob = await r.blob();
+                if (!r.ok) {
+                    const text = await blob.text();
+                    let err = r.status === 400 ? '该任务暂无批阅结果，请先完成智能阅卷后再导出' : '导出失败';
+                    try {
+                        const j = JSON.parse(text);
+                        if (j.error) err = j.error;
+                    } catch (e) {}
+                    showAlert(err, 'error');
+                    return;
+                }
+                const disp = r.headers.get('Content-Disposition');
+                let name = (disp && disp.indexOf('filename=') >= 0) ? disp.split('filename=')[1].replace(/^["']|["']$/g, '').trim() : '学生个人报告_' + taskId.slice(0, 8) + (format === 'pdf' ? '.pdf' : '.html');
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = name;
+                a.click();
+                URL.revokeObjectURL(a.href);
+                showAlert('全班报告单已下载', 'success');
+            } catch (e) {
+                showAlert('导出失败：' + e.message, 'error');
+            }
         }
         function syncGradingScores() {
             showAlert('同步成绩：接口接入后提交到成绩中心', 'success');
@@ -5218,7 +5496,8 @@
         }
         function openImportPaperModal() {
             setImportPaperTab('scanner');
-            document.getElementById('importScannerError').style.display = 'none';
+            if (document.getElementById('importScannerError')) document.getElementById('importScannerError').style.display = 'none';
+            resetImportScanProgress();
             document.getElementById('importPaperModal').style.display = 'block';
         }
         function closeImportPaperModal() {
@@ -5251,9 +5530,51 @@
             showAlert('已重新查找扫描仪（当前使用 NAPS2 控制台）', 'info');
             if (errEl) errEl.style.display = 'none';
         }
+        function setImportScanProgressStep(step, status) {
+            var strip = document.getElementById('importScanProgressStrip');
+            if (!strip) return;
+            var steps = strip.querySelectorAll('.scan-step');
+            var labels = ['已扫描', '已识别', '已上传'];
+            var activeLabels = ['扫描中…', '识别中…', '上传中…'];
+            steps.forEach(function(el, i) {
+                var n = parseInt(el.getAttribute('data-step'), 10);
+                var circle = el.querySelector('.scan-step-circle');
+                var label = el.querySelector('.scan-step-label');
+                if (!circle) return;
+                circle.classList.remove('scan-step-pending', 'scan-step-active', 'scan-step-done');
+                if (n === step && status === 'active') {
+                    circle.innerHTML = '<span class="scan-spinner" style="display:inline-block;width:14px;height:14px;border:2px solid var(--primary-blue);border-top-color:transparent;border-radius:50%;animation:scan-spin 0.8s linear infinite;"></span>';
+                } else {
+                    circle.textContent = (status === 'done' && n <= step) ? '✓' : String(n);
+                }
+                if (n < step || (n === step && status === 'done')) circle.classList.add('scan-step-done');
+                else if (n === step && status === 'active') circle.classList.add('scan-step-active');
+                else circle.classList.add('scan-step-pending');
+                if (label) label.textContent = (n === step && status === 'active') ? (activeLabels[n - 1] || '') : (labels[n - 1] || '');
+            });
+        }
+        function resetImportScanProgress() {
+            var strip = document.getElementById('importScanProgressStrip');
+            if (!strip) return;
+            var steps = strip.querySelectorAll('.scan-step');
+            var labels = ['已扫描', '已识别', '已上传'];
+            steps.forEach(function(el, i) {
+                var circle = el.querySelector('.scan-step-circle');
+                var label = el.querySelector('.scan-step-label');
+                if (circle) { circle.className = 'scan-step-circle scan-step-pending'; circle.textContent = (i + 1); }
+                if (label) label.textContent = labels[i] || '';
+            });
+        }
         async function startScanFromImportModal() {
-            closeImportPaperModal();
-            await startScan();
+            var btn = document.getElementById('importStartScanBtn');
+            if (btn) { btn.disabled = true; btn.textContent = '扫描中…'; }
+            setImportScanProgressStep(1, 'active');
+            setTimeout(function() {
+                closeImportPaperModal();
+                if (btn) { btn.disabled = false; btn.textContent = '开始扫描'; }
+                resetImportScanProgress();
+                startScan();
+            }, 400);
         }
         async function importLocalFiles() {
             const input = document.getElementById('importLocalFileInput');

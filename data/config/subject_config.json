@@ -1,0 +1,10 @@
+{
+  "current": "english",
+  "subjects": {
+    "english": {
+      "name": "英语",
+      "prompt_file": "prompt_template.txt",
+      "paper_preset": "english"
+    }
+  }
+}
