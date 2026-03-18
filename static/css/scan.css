@@ -423,6 +423,21 @@
     to { transform: rotate(360deg); }
 }
 
+/* 导入纸张 - 三步进度条状态（缓解等待焦虑） */
+#importScanProgressStrip .scan-step-circle.scan-step-active {
+    border-color: var(--primary-blue, #2563eb);
+    background: rgba(37, 99, 235, 0.08);
+}
+#importScanProgressStrip .scan-step-circle.scan-step-done {
+    border-color: var(--success-color, #16a34a);
+    background: rgba(22, 163, 74, 0.12);
+    color: var(--success-color, #16a34a);
+}
+#importScanProgressStrip .scan-step.scan-step-active .scan-step-label {
+    color: var(--primary-blue, #2563eb);
+    font-weight: 500;
+}
+
 /* ========== 作文练习 / 布置练习 ========== */
 .composition-assign-layout {
     display: grid;

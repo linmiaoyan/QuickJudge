@@ -347,9 +347,10 @@ MATERIALS_DIR = os.path.join(DATA_DIR, 'materials')
 MATERIALS_INDEX_FILE = os.path.join(MATERIALS_DIR, 'index.json')
 os.makedirs(MATERIALS_DIR, exist_ok=True)
 
-# 平台内编辑：作文素材使用说明、通用答题卡 HTML（存 CONFIG_DIR）
+# 平台内编辑：作文素材使用说明、通用答题卡 HTML、答题卡题型模板（存 CONFIG_DIR）
 COMPOSITION_MATERIALS_FILE = os.path.join(CONFIG_DIR, 'composition_materials.txt')
 ANSWER_SHEET_HTML_FILE = os.path.join(CONFIG_DIR, 'answer_sheet.html')
+ANSWER_SHEET_TEMPLATES_FILE = os.path.join(CONFIG_DIR, 'answer_sheet_templates.json')
 # 组卷发布产生的任务列表（发布=创建任务）
 TASKS_FILE = os.path.join(CONFIG_DIR, 'tasks.json')
 # 按任务归类的试卷图片（扫码或上传时写入，便于批改与学号对应）
@@ -442,6 +443,7 @@ def _save_paper_to_task(task_id, image_bytes, ext='.png'):
 
 # 提示词模板存储
 PROMPT_TEMPLATE_FILE = os.path.join(CONFIG_DIR, 'prompt_template.txt')
+SUBJECT_CONFIG_FILE = os.path.join(CONFIG_DIR, 'subject_config.json')
 DEFAULT_PROMPT_TEMPLATE = """请对以下英语作文进行详细批阅，给出：
 1. 总体评分
 2. 优点分析
@@ -955,6 +957,8 @@ def create_task():
     answer_sheet_html = data.get('answer_sheet_html')
     if answer_sheet_html is None:
         answer_sheet_html = _read_answer_sheet_html()
+    subject_cfg = _get_subject_config()
+    subject = (data.get('subject') or subject_cfg.get('current') or 'english').strip() or 'english'
     task_id = str(uuid.uuid4())
     created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     task = {
@@ -967,6 +971,7 @@ def create_task():
         'answer_sheet_html': answer_sheet_html,
         'created_at': created_at,
         'status': 'published',
+        'subject': subject,
     }
     tasks = load_tasks()
     tasks.append(task)
@@ -1214,6 +1219,94 @@ def export_task_answer_situation(task_id):
     res = Response(body, mimetype='text/csv; charset=utf-8')
     res.headers['Content-Disposition'] = f'attachment; filename="task_{task_id[:8]}_answer_situation.csv"'
     return res
+
+
+# 学校/报告配置（用于导出全班报告单表头）
+SCHOOL_CONFIG_FILE = os.path.join(CONFIG_DIR, 'school_config.json')
+
+
+def _get_school_name():
+    """读取学校名称，用于学生个人报告表头。"""
+    if not os.path.isfile(SCHOOL_CONFIG_FILE):
+        return ''
+    try:
+        with open(SCHOOL_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return (data.get('school_name') or '').strip()
+    except Exception:
+        return ''
+
+
+@app.route('/api/tasks/<task_id>/export_class_report')
+def export_class_report(task_id):
+    """导出某任务下全班学生个人报告（合并为单 HTML 或 PDF），便于一次性打印下发。"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    tasks = load_tasks()
+    task = next((t for t in tasks if t.get('id') == task_id), None)
+    if not task:
+        return jsonify({'error': '任务不存在'}), 404
+    result_file = os.path.join(TASK_RESULTS_DIR, f'{task_id}.json')
+    data = {}
+    if os.path.isfile(result_file):
+        try:
+            with open(result_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            pass
+    results_raw = data.get('results') or {}
+    if not results_raw:
+        return jsonify({'error': '该任务暂无批阅结果，请先完成智能阅卷后再导出'}), 400
+    results = []
+    for filename, rec in results_raw.items():
+        results.append({
+            'filename': filename,
+            'student_id': rec.get('student_id', ''),
+            'report': rec.get('report', ''),
+            'status': rec.get('status', ''),
+            'score_text': rec.get('score_text', ''),
+            'answer_time': rec.get('answer_time', ''),
+        })
+    student_names_map = get_student_names_map()
+    school_name = _get_school_name()
+    class_name = (task.get('class_names') or [''])[0]
+    try:
+        from utils.student_report_generator import generate_class_report_html
+    except ImportError:
+        return jsonify({'error': '报告生成模块不可用'}), 500
+    html = generate_class_report_html(
+        results=results,
+        task=task,
+        student_names_map=student_names_map,
+        school_name=school_name,
+        class_name=class_name,
+    )
+    output_format = (request.args.get('format') or 'html').lower()
+    task_title = (task.get('title') or '练习').strip()
+    safe_title = re.sub(r'[\\/:*?"<>|]', '-', task_title)[:30]
+    date_str = datetime.now().strftime('%Y-%m-%d')
+    if output_format == 'pdf':
+        try:
+            from utils.answer_sheet_generator import html_to_pdf
+            pdf_name = f"{class_name}_学生个人报告_{safe_title}_{date_str}.pdf"
+            pdf_path = os.path.join(EXPORTS_DIR, str(uuid.uuid4()) + '.pdf')
+            if html_to_pdf(html, pdf_path):
+                return send_file(
+                    pdf_path, as_attachment=True, download_name=pdf_name,
+                    mimetype='application/pdf'
+                )
+        except Exception:
+            pass
+        return jsonify({
+            'error': 'PDF 生成失败。请改用 format=html 下载 HTML 后使用浏览器打印为 PDF，或安装 weasyprint: pip install weasyprint'
+        }), 500
+    buf = io.BytesIO(html.encode('utf-8'))
+    buf.seek(0)
+    html_name = f"{class_name}_学生个人报告_{safe_title}_{date_str}.html"
+    return send_file(
+        buf, as_attachment=True, download_name=html_name,
+        mimetype='text/html; charset=utf-8'
+    )
 
 
 def is_file_locked(file_path, max_retries=3, retry_delay=0.5):
@@ -2798,14 +2891,35 @@ def ocr_recognize():
         logger.error(f"OCR识别异常: {error_msg}\n{error_trace}")
         return jsonify({'error': f'OCR识别失败: {error_msg}'}), 500
 
-def get_prompt_template():
-    """获取提示词模板"""
+def _get_subject_config():
+    """读取学科配置，用于扩展多学科时按学科选提示词等。当前仅 english。"""
     try:
-        if os.path.exists(PROMPT_TEMPLATE_FILE):
-            with open(PROMPT_TEMPLATE_FILE, 'r', encoding='utf-8') as f:
+        if os.path.exists(SUBJECT_CONFIG_FILE):
+            with open(SUBJECT_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {'current': 'english', 'subjects': {'english': {'name': '英语', 'prompt_file': 'prompt_template.txt', 'paper_preset': 'english'}}}
+
+def get_prompt_template(subject=None):
+    """获取提示词模板。subject 为空时使用 subject_config 中的 current 对应学科的 prompt_file。"""
+    cfg = _get_subject_config()
+    sid = (subject or cfg.get('current') or 'english').strip() or 'english'
+    subjects = cfg.get('subjects') or {}
+    prompt_file = (subjects.get(sid) or {}).get('prompt_file') or 'prompt_template.txt'
+    path = os.path.join(CONFIG_DIR, prompt_file)
+    try:
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
                 return f.read().strip()
     except Exception:
         pass
+    if os.path.exists(PROMPT_TEMPLATE_FILE):
+        try:
+            with open(PROMPT_TEMPLATE_FILE, 'r', encoding='utf-8') as f:
+                return f.read().strip()
+        except Exception:
+            pass
     return DEFAULT_PROMPT_TEMPLATE
 
 def save_prompt_template(template):
@@ -3601,6 +3715,203 @@ def generate_answer_sheet():
     buf = io.BytesIO(html.encode('utf-8'))
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name='通用答题卡.html', mimetype='text/html; charset=utf-8')
+
+
+def _load_answer_sheet_templates():
+    """加载答题卡题型模板（按学科预设）。"""
+    try:
+        if os.path.exists(ANSWER_SHEET_TEMPLATES_FILE):
+            with open(ANSWER_SHEET_TEMPLATES_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+@app.route('/api/config/answer_sheet_templates', methods=['GET'])
+def list_answer_sheet_templates():
+    """获取答题卡题型模板列表（学科预设），用于「按题型模板生成答题卡」。"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    raw = _load_answer_sheet_templates()
+    templates = [{'id': sid, 'name': (data.get('name') or sid)} for sid, data in raw.items() if isinstance(data, dict)]
+    return jsonify({'templates': templates})
+
+
+@app.route('/api/config/answer_sheet_templates/<subject_id>', methods=['GET'])
+def get_answer_sheet_template(subject_id):
+    """获取指定学科的答题卡模板详情（选择题区块、主观题区块）。"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    raw = _load_answer_sheet_templates()
+    data = raw.get(subject_id) if isinstance(raw, dict) else None
+    if not data or not isinstance(data, dict):
+        return jsonify({'error': '模板不存在'}), 404
+    return jsonify({
+        'id': subject_id,
+        'name': data.get('name', subject_id),
+        'choice_sections': data.get('choice_sections') or [],
+        'subjective_sections': data.get('subjective_sections') or [],
+    })
+
+
+@app.route('/api/generate/answer_sheet_from_template', methods=['GET'])
+def generate_answer_sheet_from_template():
+    """按题型模板生成答题卡。参数：subject（学科预设 id）、title（标题）、format=html|pdf、show_answers=0|1。"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    subject_id = (request.args.get('subject') or request.args.get('preset') or '').strip() or 'english'
+    title = (request.args.get('title') or '').strip() or '答题卡'
+    output_format = (request.args.get('format') or 'html').lower()
+    show_answers = request.args.get('show_answers', '0') not in ('0', 'false', 'no')
+    raw = _load_answer_sheet_templates()
+    data = raw.get(subject_id) if isinstance(raw, dict) else None
+    if not data or not isinstance(data, dict):
+        return jsonify({'error': '模板不存在，请选择有效学科预设'}), 404
+    try:
+        from utils.answer_sheet_generator import generate_answer_sheet_html, html_to_pdf
+    except ImportError:
+        return jsonify({'error': '答题卡生成模块不可用'}), 500
+    parsed = {
+        'choice_sections': data.get('choice_sections') or [],
+        'choice_answers': {},
+        'subjective_sections': data.get('subjective_sections') or [],
+    }
+    html = generate_answer_sheet_html(parsed, title=title, show_answer_keys=show_answers)
+    safe_title = re.sub(r'[\\/:*?"<>|]', '-', title)
+    if output_format == 'pdf':
+        pdf_name = f"【A4】答题卡-{safe_title}.pdf"
+        pdf_path = os.path.join(EXPORTS_DIR, pdf_name)
+        os.makedirs(EXPORTS_DIR, exist_ok=True)
+        if html_to_pdf(html, pdf_path):
+            return send_file(pdf_path, as_attachment=True, download_name=pdf_name, mimetype='application/pdf')
+        return jsonify({'error': 'PDF 生成失败，请改用 format=html 或安装 weasyprint'}), 500
+    buf = io.BytesIO(html.encode('utf-8'))
+    buf.seek(0)
+    html_name = f"【A4】答题卡-{safe_title}.html"
+    return send_file(buf, as_attachment=True, download_name=html_name, mimetype='text/html; charset=utf-8')
+
+
+def _llm_parse_paper_structure(full_text: str) -> dict:
+    """调用大模型从试卷正文中抽取结构，返回可覆盖/补充的 JSON。"""
+    if not full_text or not minimax_api_key:
+        return {}
+    prompt = """你是一位试卷分析助手。请根据下面这份试卷/答案的正文，严格按 JSON 输出以下信息（不要输出其他内容）：
+1. choice_sections: 选择题区块数组，每项 { "name": "听力/阅读理解/完形填空等", "start": 起始题号, "end": 结束题号 }
+2. choice_answers: 选择题答案对象，题号为键，"A"/"B"/"C"/"D"为值，如 {"1":"A","2":"B"}
+3. subjective_sections: 主观题区块数组，每项 { "name": "语法填空/短文改错/书面表达", "num_questions": 题数, "num_lines": 建议书写行数, "prompt": "题干或材料（书面表达必填，其他可空）" }
+4. essay_prompt: 仅当有书面表达/作文时，提取题干或阅读材料全文，用于附在答题卡上
+
+若某部分无法从正文推断，可省略或给空数组/空对象。只输出一个合法 JSON，不要 markdown 代码块包裹。"""
+    try:
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=30.0)
+        response = client.chat.completions.create(
+            model=minimax_model,
+            messages=[
+                {"role": "user", "content": prompt + "\n\n" + full_text[:2500]}
+            ],
+        )
+        content = (response.choices[0].message.content or "").strip()
+        # 去掉可能的 markdown 代码块
+        if content.startswith("```"):
+            content = re.sub(r"^```\w*\n?", "", content)
+            content = re.sub(r"\n?```\s*$", "", content)
+        return json.loads(content)
+    except Exception:
+        return {}
+
+
+@app.route('/api/generate/answer_sheet_from_paper', methods=['POST'])
+def generate_answer_sheet_from_paper():
+    """根据上传的 Word 试卷/答案文档生成答题卡。支持学科（如英语）选择题、主观题、作文题干。可返回 HTML 或 PDF。"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    try:
+        from utils.paper_parser import parse_paper_docx, parse_paper_docx_with_llm
+        from utils.answer_sheet_generator import generate_answer_sheet_html, html_to_pdf
+    except ImportError as e:
+        return jsonify({'error': f'缺少依赖: {e}。请安装 python-docx: pip install python-docx'}), 500
+
+    file = request.files.get('file') or request.files.get('docx')
+    if not file or not file.filename or not file.filename.lower().endswith('.docx'):
+        return jsonify({'error': '请上传 .docx 格式的试卷或答案文档'}), 400
+
+    title = (request.form.get('title') or request.form.get('sheet_title') or '').strip()
+    if not title:
+        # 从文件名推断，如「高三英语限时练（二）答案」->「限时练2」
+        base = os.path.splitext(file.filename)[0]
+        m = re.search(r'限时练\s*[（(]?(\d+)[)）]?|练\s*(\d+)|第\s*(\d+)', base)
+        if m:
+            title = '限时练' + (m.group(1) or m.group(2) or m.group(3) or '')
+        else:
+            title = base[:20] if base else '答题卡'
+
+    use_llm = request.form.get('use_llm', 'false').lower() in ('true', '1', 'yes')
+    output_format = (request.form.get('format') or 'html').lower()
+    show_answers = request.form.get('show_answers', 'true').lower() in ('true', '1', 'yes')
+
+    os.makedirs(EXPORTS_DIR, exist_ok=True)
+    safe_name = str(uuid.uuid4()) + '_' + (file.filename or 'paper.docx')
+    save_path = os.path.join(EXPORTS_DIR, safe_name)
+    file.save(save_path)
+
+    try:
+        subject_cfg = _get_subject_config()
+        sid = subject_cfg.get('current') or 'english'
+        preset = ((subject_cfg.get('subjects') or {}).get(sid) or {}).get('paper_preset') or 'english'
+        if use_llm and minimax_api_key:
+            def llm_callback(text):
+                return _llm_parse_paper_structure(text)
+            parsed = parse_paper_docx_with_llm(save_path, llm_callback, preset=preset)
+        else:
+            parsed = parse_paper_docx(save_path, preset=preset)
+        if parsed.get('error'):
+            return jsonify({'error': parsed['error'], 'parsed': parsed}), 400
+
+        html = generate_answer_sheet_html(parsed, title=title, show_answer_keys=show_answers)
+
+        if output_format == 'pdf':
+            pdf_name = f"【A4】答题卡-{title}.pdf"
+            pdf_name = re.sub(r'[\\/:*?"<>|]', '-', pdf_name)
+            pdf_path = os.path.join(EXPORTS_DIR, pdf_name)
+            if html_to_pdf(html, pdf_path):
+                return send_file(
+                    pdf_path, as_attachment=True, download_name=pdf_name,
+                    mimetype='application/pdf'
+                )
+            return jsonify({
+                'error': 'PDF 生成失败。请安装 weasyprint: pip install weasyprint，或改用 format=html 下载 HTML 后用浏览器打印为 PDF'
+            }), 500
+
+        buf = io.BytesIO(html.encode('utf-8'))
+        buf.seek(0)
+        html_name = f"【A4】答题卡-{title}.html"
+        html_name = re.sub(r'[\\/:*?"<>|]', '-', html_name)
+        return send_file(
+            buf, as_attachment=True, download_name=html_name,
+            mimetype='text/html; charset=utf-8'
+        )
+    finally:
+        if os.path.isfile(save_path):
+            try:
+                os.remove(save_path)
+            except Exception:
+                pass
+
+
+@app.route('/api/generate/answer_sheet_from_paper/preview')
+def preview_answer_sheet_from_paper():
+    """预览：通过 GET 传入本地已生成的 HTML 文件名（仅用于 PDF 失败时降级）。"""
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    path = request.args.get('path') or request.args.get('name')
+    if not path or '..' in path:
+        return jsonify({'error': '无效路径'}), 400
+    file_path = os.path.join(EXPORTS_DIR, path)
+    if not os.path.isfile(file_path) or not path.endswith('.html'):
+        return jsonify({'error': '文件不存在'}), 404
+    with open(file_path, 'r', encoding='utf-8') as f:
+        return Response(f.read(), mimetype='text/html; charset=utf-8')
 
 
 @app.route('/api/materials', methods=['GET'])
