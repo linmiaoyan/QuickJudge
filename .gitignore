@@ -13,5 +13,29 @@ venv/
 *.egg-info/
 .eggs/
 
-# 本地数据（若不想提交）
+# ---------- QuickJudge：图片与扫描类运行时数据（勿提交）----------
+# 任务下已收试卷扫描图
+data/task_papers/
+# 临时处理图片
+data/temp/
+# 按班级/日期归档的扫描图（jpg/png 等）
+data/classes/
+# data 下任意深度的常见图片（含 materials 上传图、exports 里若存图等）
+data/**/*.png
+data/**/*.jpg
+data/**/*.jpeg
+data/**/*.jpe
+data/**/*.gif
+data/**/*.webp
+data/**/*.bmp
+data/**/*.tif
+data/**/*.tiff
+data/**/*.PNG
+data/**/*.JPG
+data/**/*.JPEG
+# Windows 缩略图
+**/Thumbs.db
+**/ehthumbs.db
+
+# 若希望整库数据都不进 git，可改为取消下行注释（会忽略含 config 在内的全部 data）
 # data/
