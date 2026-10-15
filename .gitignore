@@ -39,5 +39,13 @@ data/**/*.JPEG
 # 备份目录（含完整历史镜像与运行时数据，勿提交）
 QuickJudge-BACKUP*/
 
+# ---------- 学生名单：含真实姓名与学号，严禁提交 ----------
+# 根目录 namelist.csv 用于「从 namelist.csv 导入学生」，属运行时数据，
+# 由各校自行提供，不得进入版本库。
+namelist.csv
+namelist*.csv
+*名单*.csv
+*名单*.xlsx
+
 # 本地活跃副本标记文件（勿提交）
 ACTIVE-DEV.md
