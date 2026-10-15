@@ -13,14 +13,13 @@ venv/
 *.egg-info/
 .eggs/
 
-# ---------- QuickJudge：图片与扫描类运行时数据（勿提交）----------
-# 任务下已收试卷扫描图
-data/task_papers/
-# 临时处理图片
-data/temp/
-# 按班级/日期归档的扫描图（jpg/png 等）
-data/classes/
-# data 下任意深度的常见图片（含 materials 上传图、exports 里若存图等）
+# ---------- 运行时数据：含学生个人信息，严禁提交 ----------
+# data/ 内含学生姓名、学号与密码（config/users.json）、班级名单（students/）、
+# 作文原文与批阅结果（results/、history/）等敏感数据，一律不纳入版本控制。
+# 切勿删除或注释掉下面这行，否则会造成学生个人信息泄漏（2026-10-15 已清理过一次历史）。
+data/
+
+# 兜底规则：即便将来 data/ 规则被改动，data 下的图片也不会被误提交
 data/**/*.png
 data/**/*.jpg
 data/**/*.jpeg
@@ -37,8 +36,8 @@ data/**/*.JPEG
 **/Thumbs.db
 **/ehthumbs.db
 
-# 若希望整库数据都不进 git，可改为取消下行注释（会忽略含 config 在内的全部 data）
-# data/
+# 备份目录（含完整历史镜像与运行时数据，勿提交）
+QuickJudge-BACKUP*/
 
 # 本地活跃副本标记文件（勿提交）
 ACTIVE-DEV.md
