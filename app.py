@@ -24,6 +24,20 @@ _llm_model = os.getenv("LLM_MODEL", "").strip() or os.getenv("MINIMAX_MODEL", "M
 minimax_api_key = _llm_key
 minimax_base_url = _llm_base if _llm_base else "https://api.minimaxi.com/v1"
 minimax_model = _llm_model if _llm_model else "MiniMax-M2.5"
+
+# 文本任务专用模型：承接纯文本任务（译文、班级汇总等），未配置时回退为主模型。
+# 目的：把昂贵的视觉模型留给真正需要"看图"的批阅任务，文本任务用更便宜的模型。
+_llm_text_model = os.getenv("LLM_TEXT_MODEL", "").strip()
+llm_text_model = _llm_text_model if _llm_text_model else minimax_model
+
+
+def _text_model_kwargs(model_name=None):
+    """Qwen3.5 / Qwen3.6 等默认开启思考模式的模型，在文本任务中显式关闭思考，
+    避免思考链膨胀导致变慢、输出翻倍与额外计费；其他模型返回空 dict。"""
+    name = (model_name or llm_text_model or '').lower()
+    if 'qwen3.5' in name or 'qwen3-5' in name or 'qwen3.6' in name or 'qwen3-6' in name:
+        return {'extra_body': {'enable_thinking': False}}
+    return {}
 # End block (15-20)
 
 from openai import OpenAI
@@ -54,6 +68,17 @@ def favicon():
 def logo_file(filename):
     """提供 logo 目录下的图片（如 4.png 横向 logo）"""
     return send_from_directory(LOGO_DIR, filename)
+
+# 教师新手教程（静态 HTML，源文件位于项目内「使用说明」目录）
+GUIDE_FILE = os.path.join(os.path.dirname(__file__), '使用说明', '教师新手教程.html')
+
+@app.route('/guide')
+def teacher_guide():
+    """教师新手教程页面；无需登录即可查看，方便新老师上手"""
+    if os.path.exists(GUIDE_FILE):
+        return send_file(GUIDE_FILE, mimetype='text/html')
+    return Response('教程文件未找到：使用说明/教师新手教程.html', status=404,
+                    mimetype='text/plain; charset=utf-8')
 
 @app.route('/api/me', methods=['GET'])
 def get_current_user():
@@ -472,7 +497,7 @@ SCANNER_ADVANCED_CONFIG_FILE = os.path.join(CONFIG_DIR, 'scanner_advanced_config
 DEFAULT_SCANNER_IMAGE_MODE = 'color'   # grayscale | color
 DEFAULT_SCANNER_SCAN_TYPE = 'double'   # single | double
 
-# 讯飞OCR配置（从环境变量读取，如果没有则使用默认值）
+# 讯飞OCR配置（已停用：讯飞OCR服务已过期，文字识别统一走 llm_ocr_recognize 视觉大模型）
 XF_APP_ID = os.getenv("XF_APP_ID", "6c8f82e6")
 XF_API_SECRET = os.getenv("XF_API_SECRET", "NGQ2ZTg3NWY3NDkxMTMyYWJlYWQwNTJm")
 XF_API_KEY = os.getenv("XF_API_KEY", "73ed4e3a092cc935af22e2c420bd9cd8")
@@ -519,6 +544,69 @@ def assemble_ws_auth_url(requset_url, method="POST", api_key="", api_secret=""):
         "authorization": authorization
     }
     return requset_url + "?" + urlencode(values)
+
+def llm_ocr_recognize(image_path_or_bytes, logger=None):
+    """
+    使用大模型视觉接口（OpenAI 兼容，如硅基流动 Qwen3-VL）进行文字识别。
+    替代已停用的讯飞 OCR（2026-10-15 切换）。
+
+    Args:
+        image_path_or_bytes: 图片路径（str）、图片字节数据（bytes）或 PIL Image 对象
+        logger: 日志记录器（可选）
+
+    Returns:
+        str: 识别出的文本内容，失败返回空字符串
+    """
+    if not minimax_api_key:
+        if logger:
+            logger.warning("未配置 LLM_API_KEY，无法调用大模型识图")
+        return ''
+    try:
+        # 统一取到 PIL Image
+        if isinstance(image_path_or_bytes, str):
+            image = Image.open(image_path_or_bytes)
+        elif isinstance(image_path_or_bytes, bytes):
+            image = Image.open(io.BytesIO(image_path_or_bytes))
+        elif hasattr(image_path_or_bytes, 'save'):
+            image = image_path_or_bytes
+        else:
+            raise ValueError("不支持的图片输入类型")
+
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+
+        # 长边限制 2000 像素，与项目其它环节保持一致
+        max_size = 2000
+        if max(image.size) > max_size:
+            ratio = max_size / max(image.size)
+            new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+
+        img_io = io.BytesIO()
+        image.save(img_io, format='PNG')
+        data_url = 'data:image/png;base64,' + base64.b64encode(img_io.getvalue()).decode('utf-8')
+
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=120.0)
+        response = client.chat.completions.create(
+            model=minimax_model,
+            messages=[
+                {"role": "system", "content": "你是OCR文字识别引擎。只输出图片中识别到的文字，逐字还原，保留原有段落与换行，不翻译、不点评、不添加任何解释性内容。若图中没有文字，输出空。"},
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                    {"type": "text", "text": "请识别图片中的全部文字。"}
+                ]}
+            ],
+            temperature=0.1,
+            max_tokens=4000
+        )
+        text = (response.choices[0].message.content or '').strip()
+        if logger and text:
+            logger.info(f"大模型识图 识别成功，文本长度: {len(text)}")
+        return text
+    except Exception as e:
+        if logger:
+            logger.warning(f"大模型识图 识别失败: {e}")
+        return ''
 
 def xunfei_ocr_recognize(image_path_or_bytes, logger=None):
     """
@@ -2542,12 +2630,14 @@ def translate_essay_to_chinese(text, logger=None):
     try:
         client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key)
         response = client.chat.completions.create(
-            model=minimax_model,
+            model=llm_text_model,
             messages=[
                 {"role": "system", "content": "你是翻译助手。将用户给出的英文作文或文本翻译成中文，保持段落与语气，不要批注或点评，只输出译文。"},
                 {"role": "user", "content": text.strip()}
             ],
-            temperature=0.3
+            temperature=0.3,
+            max_tokens=3000,
+            **_text_model_kwargs()
         )
         out = (response.choices[0].message.content or '').strip()
         if logger and out:
@@ -2765,30 +2855,29 @@ def ocr_recognize():
                     new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
                     image = image.resize(new_size, Image.Resampling.LANCZOS)
                 
-                # OCR 识别：使用讯飞OCR
+                # OCR 识别：使用大模型视觉识图（原讯飞OCR已过期停用）
                 result = None
                 text_from_result = ''
 
-                # 使用讯飞OCR进行识别
                 try:
-                    logger.info(f"使用讯飞OCR识别文件: {filename}")
+                    logger.info(f"使用大模型识图识别文件: {filename}")
                     # 将PIL Image转换为字节数据
                     img_io = io.BytesIO()
                     image.save(img_io, format='PNG')
                     img_bytes = img_io.getvalue()
-                    
-                    text_from_result = xunfei_ocr_recognize(img_bytes, logger)
+
+                    text_from_result = llm_ocr_recognize(img_bytes, logger)
                     if text_from_result and text_from_result.strip():
                         result = {'text': text_from_result}
-                        logger.info(f"讯飞OCR 识别成功，文本长度: {len(text_from_result)}")
+                        logger.info(f"大模型识图 识别成功，文本长度: {len(text_from_result)}")
                     else:
-                        logger.warning("讯飞OCR 返回空文本")
-                except Exception as xf_error:
-                    logger.error(f"讯飞OCR 识别失败: {xf_error}")
+                        logger.warning("大模型识图 返回空文本")
+                except Exception as ocr_error:
+                    logger.error(f"大模型识图 识别失败: {ocr_error}")
                     text_from_result = ''
                     result = None
 
-                # 处理讯飞OCR返回的文本
+                # 处理识别返回的文本
                 text = text_from_result if text_from_result else ''
                 
                 # 尝试从文本中提取学号
@@ -3053,7 +3142,8 @@ def vision_grade():
                                     {"type": "text", "text": user_prompt}
                                 ]}
                             ],
-                            temperature=0.7
+                            temperature=0.25,
+                            max_tokens=3000
                         )
                         raw = (response.choices[0].message.content or '').strip()
                         last_err = None
@@ -3096,12 +3186,14 @@ def vision_grade():
             summary_prompt += "\n\n请基于以上个人报告，生成一份班级整体评价报告，包括：\n1. 整体水平评估\n2. 共同优点\n3. 普遍问题\n4. 教学建议\n5. 好词好句：从学生作文或批阅点评中摘录 5-10 条佳句，单独作为一小节，每行一条，格式为「- 句子」"
             try:
                 class_response = client.chat.completions.create(
-                    model=minimax_model,
+                    model=llm_text_model,
                     messages=[
                         {"role": "system", "content": "你是一位经验丰富的教师，擅长分析班级整体学习情况，并能从作文中提炼好词好句。"},
                         {"role": "user", "content": summary_prompt}
                     ],
-                    temperature=0.7
+                    temperature=0.7,
+                    max_tokens=6000,
+                    **_text_model_kwargs()
                 )
                 class_evaluation = class_response.choices[0].message.content or ''
             except Exception as e:
@@ -3148,12 +3240,14 @@ def vision_class_report():
                 summary_prompt += f"\n【{report_data.get('student_id', fp)}】\n{report_data.get('report', '')}\n"
         summary_prompt += "\n\n请基于以上个人报告，生成一份班级整体评价报告，包括：\n1. 整体水平评估\n2. 共同优点\n3. 普遍问题\n4. 教学建议\n5. 好词好句：从学生作文或批阅点评中摘录 5-10 条佳句，单独作为一小节，每行一条，格式为「- 句子」"
         class_response = client.chat.completions.create(
-            model=minimax_model,
+            model=llm_text_model,
             messages=[
                 {"role": "system", "content": "你是一位经验丰富的教师，擅长分析班级整体学习情况，并能从作文中提炼好词好句。"},
                 {"role": "user", "content": summary_prompt}
             ],
-            temperature=0.7
+            temperature=0.7,
+            max_tokens=6000,
+            **_text_model_kwargs()
         )
         class_evaluation = class_response.choices[0].message.content or ''
         if save_to_class_center_flag:
@@ -3224,7 +3318,8 @@ def grade_essays():
                         {"role": "system", "content": "你是一位经验丰富的教师，擅长批阅作文和总结报告。"},
                         {"role": "user", "content": prompt}
                     ],
-                    temperature=0.7
+                    temperature=0.25,
+                    max_tokens=3000
                 )
                 
                 report = response.choices[0].message.content
@@ -3259,12 +3354,14 @@ def grade_essays():
             # 获取班级评价
             try:
                 class_response = client.chat.completions.create(
-                    model=minimax_model,
+                    model=llm_text_model,
                     messages=[
                         {"role": "system", "content": "你是一位经验丰富的教师，擅长分析班级整体学习情况。"},
                         {"role": "user", "content": summary_prompt}
                     ],
-                    temperature=0.7
+                    temperature=0.7,
+                    max_tokens=6000,
+                    **_text_model_kwargs()
                 )
                 class_evaluation = class_response.choices[0].message.content
             except Exception as e:
@@ -3810,6 +3907,7 @@ def _llm_parse_paper_structure(full_text: str) -> dict:
             messages=[
                 {"role": "user", "content": prompt + "\n\n" + full_text[:2500]}
             ],
+            max_tokens=4000
         )
         content = (response.choices[0].message.content or "").strip()
         # 去掉可能的 markdown 代码块

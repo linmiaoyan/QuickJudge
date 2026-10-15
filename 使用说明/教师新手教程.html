@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QuickJudge 教师新手教程</title>
+<style>
+  :root{
+    --blue:#2563eb;
+    --blue-dark:#1d4ed8;
+    --blue-soft:#eff6ff;
+    --ink:#111827;
+    --ink-2:#374151;
+    --muted:#6b7280;
+    --muted-2:#9ca3af;
+    --line:#e5e7eb;
+    --bg:#f5f5f5;
+    --card:#ffffff;
+    --green:#10b981;
+    --green-soft:#ecfdf5;
+    --amber:#f59e0b;
+    --amber-soft:#fffbeb;
+    --red:#ef4444;
+    --red-soft:#fef2f2;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:16px;
+    line-height:1.75;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:900px;margin:0 auto;padding:0 20px 80px;}
+
+  /* ============ 封面 ============ */
+  .cover{
+    background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);
+    color:#fff;
+    padding:56px 0 48px;
+    margin-bottom:0;
+  }
+  .cover .wrap{padding-bottom:0;}
+  .cover .kicker{
+    display:inline-block;
+    font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+    background:rgba(255,255,255,.18);
+    border:1px solid rgba(255,255,255,.35);
+    padding:5px 12px;border-radius:999px;margin-bottom:20px;
+  }
+  .cover h1{margin:0 0 12px;font-size:40px;line-height:1.25;font-weight:700;letter-spacing:-.01em;}
+  .cover .sub{margin:0;font-size:17px;color:rgba(255,255,255,.9);max-width:640px;}
+  .cover .meta{
+    margin-top:28px;padding-top:20px;border-top:1px solid rgba(255,255,255,.25);
+    display:flex;flex-wrap:wrap;gap:28px;font-size:13.5px;color:rgba(255,255,255,.86);
+  }
+  .cover .meta b{display:block;color:#fff;font-size:15px;font-weight:600;margin-top:2px;}
+
+  /* ============ 目录 ============ */
+  .toc{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:22px 26px;margin:-32px 0 36px;position:relative;
+    box-shadow:0 6px 24px rgba(17,24,39,.07);
+  }
+  .toc h2{margin:0 0 14px;font-size:15px;letter-spacing:.08em;color:var(--muted);font-weight:600;}
+  .toc ol{margin:0;padding:0;list-style:none;columns:2;column-gap:32px;}
+  .toc li{margin-bottom:7px;break-inside:avoid;}
+  .toc a{color:var(--ink-2);text-decoration:none;font-size:14.5px;}
+  .toc a:hover{color:var(--blue);text-decoration:underline;}
+  .toc .num{display:inline-block;min-width:22px;color:var(--blue);font-weight:600;font-variant-numeric:tabular-nums;}
+
+  /* ============ 章节 ============ */
+  h2.chap{
+    font-size:25px;margin:56px 0 6px;font-weight:700;letter-spacing:-.01em;
+    scroll-margin-top:24px;
+  }
+  h2.chap .n{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:34px;height:34px;border-radius:9px;background:var(--blue);color:#fff;
+    font-size:16px;font-weight:700;margin-right:12px;vertical-align:2px;
+  }
+  h3.sec{font-size:18px;margin:32px 0 10px;font-weight:650;scroll-margin-top:24px;}
+  h3.sec .tag{
+    display:inline-block;font-size:11.5px;font-weight:600;letter-spacing:.04em;
+    color:var(--blue);background:var(--blue-soft);border-radius:6px;
+    padding:2px 8px;margin-left:8px;vertical-align:2px;
+  }
+  p{margin:10px 0;}
+  .lead{color:var(--ink-2);font-size:16.5px;}
+
+  /* ============ 卡片 / 表格 ============ */
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px;background:var(--card);
+        border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  th,td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;}
+  th{background:#fafafa;font-weight:600;color:var(--ink-2);font-size:13.5px;white-space:nowrap;}
+  tr:last-child td{border-bottom:none;}
+  td code,p code,li code{background:#f1f5f9;border-radius:5px;padding:1px 6px;font-size:13px;
+        font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#0f172a;}
+
+  /* ============ 步骤 ============ */
+  ol.steps{counter-reset:s;list-style:none;margin:16px 0;padding:0;}
+  ol.steps>li{
+    counter-increment:s;position:relative;padding:0 0 16px 44px;
+    border-left:2px solid var(--line);margin-left:15px;
+  }
+  ol.steps>li:last-child{border-left-color:transparent;padding-bottom:0;}
+  ol.steps>li::before{
+    content:counter(s);position:absolute;left:-16px;top:-2px;
+    width:30px;height:30px;border-radius:50%;background:var(--blue);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;
+  }
+  ol.steps>li>b{display:block;margin-bottom:2px;}
+  ol.steps ul{margin:6px 0 0;padding-left:20px;}
+  ol.steps ul li{margin-bottom:4px;}
+
+  ul.plain{margin:10px 0;padding-left:22px;}
+  ul.plain li{margin-bottom:5px;}
+
+  /* ============ 提示框 ============ */
+  .box{border-radius:10px;padding:13px 16px;margin:16px 0;font-size:14.5px;border-left:4px solid;}
+  .box p:first-child{margin-top:0;}
+  .box p:last-child{margin-bottom:0;}
+  .box b{font-weight:650;}
+  .tip{background:var(--blue-soft);border-color:var(--blue);}
+  .ok{background:var(--green-soft);border-color:var(--green);}
+  .warn{background:var(--amber-soft);border-color:var(--amber);}
+  .stop{background:var(--red-soft);border-color:var(--red);}
+
+  /* ============ 界面示意 ============ */
+  .fig{
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:18px;margin:20px 0;display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap;
+  }
+  .mock{
+    width:190px;flex:0 0 auto;border-radius:10px;overflow:hidden;
+    background:#1e293b;box-shadow:0 4px 18px rgba(17,24,39,.16);font-size:13.5px;
+  }
+  .mock .top{background:var(--blue);padding:12px 14px;color:#fff;font-size:12px;letter-spacing:.04em;}
+  .mock a,.mock span.it{display:block;color:rgba(255,255,255,.72);padding:10px 14px;
+        border-left:3px solid transparent;text-decoration:none;}
+  .mock span.it.on{background:rgba(255,255,255,.14);color:#fff;border-left-color:#93c5fd;font-weight:600;}
+  .fig .legend{flex:1 1 320px;min-width:260px;}
+  .fig .legend dl{margin:0;}
+  .fig .legend dt{font-weight:650;font-size:14.5px;margin-top:11px;}
+  .fig .legend dt:first-child{margin-top:0;}
+  .fig .legend dd{margin:2px 0 0;color:var(--muted);font-size:13.5px;}
+
+  /* ============ 流程图 ============ */
+  .flow{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;margin:20px 0;}
+  .flow .node{
+    flex:1 1 130px;min-width:130px;background:var(--card);border:2px solid var(--line);
+    border-radius:11px;padding:13px 14px;position:relative;
+  }
+  .flow .node .h{font-weight:650;font-size:14.5px;margin-bottom:3px;}
+  .flow .node .d{font-size:12.5px;color:var(--muted);line-height:1.6;}
+  .flow .node .step-no{
+    position:absolute;top:-10px;left:13px;background:var(--blue);color:#fff;
+    font-size:11px;font-weight:700;border-radius:999px;padding:1px 8px;letter-spacing:.04em;
+  }
+  .flow .node:last-child{border-color:var(--blue);background:var(--blue-soft);}
+
+  /* ============ 速查卡 ============ */
+  .cheat{
+    background:var(--card);border:2px solid var(--ink);border-radius:14px;
+    padding:26px 28px;margin:24px 0;
+  }
+  .cheat h4{margin:0 0 4px;font-size:19px;}
+  .cheat .hint{color:var(--muted);font-size:13px;margin-bottom:18px;}
+  .cheat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;}
+  .cheat-grid h5{margin:0 0 6px;font-size:14px;color:var(--blue);letter-spacing:.03em;}
+  .cheat-grid ul{margin:0;padding-left:18px;font-size:13.5px;}
+  .cheat-grid ul li{margin-bottom:4px;}
+
+  /* ============ FAQ ============ */
+  details{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-bottom:9px;overflow:hidden;}
+  details[open]{box-shadow:0 2px 12px rgba(17,24,39,.06);}
+  summary{cursor:pointer;padding:13px 16px;font-weight:600;font-size:15px;list-style:none;
+          display:flex;gap:10px;align-items:flex-start;}
+  summary::-webkit-details-marker{display:none;}
+  summary::before{content:"Q";color:var(--blue);font-weight:700;flex:0 0 auto;}
+  summary:hover{background:#fafafa;}
+  details .ans{padding:0 16px 15px 42px;font-size:14.5px;color:var(--ink-2);}
+  details .ans p:first-child{margin-top:0;}
+  details .ans p:last-child{margin-bottom:0;}
+
+  hr.sep{border:none;border-top:1px solid var(--line);margin:40px 0;}
+  .foot{color:var(--muted-2);font-size:13px;text-align:center;margin-top:48px;}
+
+  @media (max-width:620px){
+    .cover h1{font-size:29px;}
+    .toc ol{columns:1;}
+    .wrap{padding:0 16px 60px;}
+    .fig{flex-direction:column;}
+    .mock{width:100%;}
+  }
+  @media print{
+    body{background:#fff;font-size:11.5pt;}
+    .cover{background:#fff;color:#000;padding:0 0 12pt;}
+    .cover .kicker{border-color:#999;color:#333;background:none;}
+    .cover .sub,.cover .meta{color:#333;}
+    .cover .meta b{color:#000;}
+    .cover .meta{border-top-color:#ccc;}
+    .toc{box-shadow:none;margin:16pt 0;break-inside:avoid;}
+    h2.chap{break-before:page;break-after:avoid;}
+    h2.chap:first-of-type{break-before:auto;}
+    h3.sec{break-after:avoid;}
+    table,details,.box,.fig,.cheat{break-inside:avoid;}
+    .mock{box-shadow:none;border:1px solid #ccc;}
+    details .ans{display:block !important;}
+    details{border:1px solid #ccc;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= 封面 ================= -->
+<header class="cover">
+  <div class="wrap">
+    <span class="kicker">QuickJudge · 教师手册</span>
+    <h1>QuickJudge 教师新手教程</h1>
+    <p class="sub">从登录到提交一份班级批阅报告——跟着做一遍，30 分钟就能上手。</p>
+    <div class="meta">
+      <div>适用角色<b>教师 / 管理员</b></div>
+      <div>上手时间<b>约 30 分钟</b></div>
+      <div>版本<b>2026-10-15</b></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ================= 目录 ================= -->
+<nav class="toc">
+  <h2>目录</h2>
+  <ol>
+    <li><a href="#c1"><span class="num">1</span>三分钟认识 QuickJudge</a></li>
+    <li><a href="#c2"><span class="num">2</span>登录与账号</a></li>
+    <li><a href="#c3"><span class="num">3</span>界面地图</a></li>
+    <li><a href="#c4"><span class="num">4</span>标准工作流</a></li>
+    <li><a href="#c5"><span class="num">5</span>分步操作详解</a></li>
+    <li><a href="#c6"><span class="num">6</span>学生端怎么用</a></li>
+    <li><a href="#c7"><span class="num">7</span>常见问题 FAQ</a></li>
+    <li><a href="#c8"><span class="num">8</span>使用规范与提醒</a></li>
+    <li><a href="#a1"><span class="num">A</span>一页速查卡</a></li>
+    <li><a href="#a2"><span class="num">B</span>名词解释</a></li>
+  </ol>
+</nav>
+
+<!-- ================= 1 ================= -->
+<h2 class="chap" id="c1"><span class="n">1</span>三分钟认识 QuickJudge</h2>
+<p class="lead">QuickJudge 是一套「<b>拍照就能批</b>」的作文与试卷智能批阅平台。学生写完的作文拍下来，系统自动认字、自动按你的要求批阅，并汇总成班级报告。</p>
+
+<table>
+  <tr><th style="width:150px">能力</th><th>说明</th></tr>
+  <tr><td>🔍 智能识图</td><td>手机拍照、扫描仪扫描或直接上传图片，自动把手写作文转成文字，并自动认出学生的 6 位学号</td></tr>
+  <tr><td>✍️ 智能批阅</td><td>按你设定的批阅要求（评分、优点、问题、改进建议、修改意见）逐篇批阅，<b>批阅标准由你写</b></td></tr>
+  <tr><td>📊 班级分析</td><td>把整批作文汇总成一份班级报告：整体水平、共同优点、普遍问题、教学建议、好词好句</td></tr>
+  <tr><td>🧑‍🏫 人工阅卷</td><td>打分板连续批阅，支持单评 / 双评 / 仲裁分差、按老师分配任务</td></tr>
+  <tr><td>📄 组卷与答题卡</td><td>内置题库选题发布练习；一键生成试卷、答题卡、参考答案（Word / PDF），直接打印</td></tr>
+  <tr><td>🏫 班级中心</td><td>按班级、按日期查看历次批阅报告，导出答题情况与班级报表</td></tr>
+  <tr><td>👨‍🎓 学生自查</td><td>学生用自己的学号登录，可看到自己的历次批阅报告（原文 + 评语）</td></tr>
+</table>
+
+<div class="box tip">
+  <p><b>一句话流程：</b>选题布置 → 打印发放 → 收卷拍照 → 上传识别批阅 → 看班级报告。</p>
+</div>
+
+<!-- ================= 2 ================= -->
+<h2 class="chap" id="c2"><span class="n">2</span>登录与账号</h2>
+
+<h3 class="sec">2.1 从哪里打开</h3>
+<p>在浏览器（Chrome / Edge / Safari 均可）中打开下面任一地址：</p>
+<table>
+  <tr><th style="width:190px">场景</th><th>地址</th></tr>
+  <tr><td>在运行服务的这台电脑上</td><td><code>http://localhost:5001</code></td></tr>
+  <tr><td>同一局域网的其他电脑 / 手机</td><td><code>http://运行服务的电脑IP:5001</code>（IP 找管理员确认，一般是 <code>10.x.x.x</code>）</td></tr>
+</table>
+<div class="box warn">
+  <p><b>服务需要先启动。</b>如果打开地址显示无法访问，多半是服务没开——请找管理员启动一次（macOS / Linux 执行 <code>.venv/bin/python app.py</code>，Windows 执行 <code>.venv\Scripts\python app.py</code>）。</p>
+</div>
+
+<h3 class="sec">2.2 三种角色</h3>
+<table>
+  <tr><th style="width:96px">角色</th><th style="width:200px">账号形式</th><th>能用什么</th></tr>
+  <tr><td><b>学生</b></td><td>6 位学号，如 <code>250101</code></td><td>登录后只看到「我的报告」，查看自己历次批阅记录</td></tr>
+  <tr><td><b>教师</b></td><td>工号或手机号，如 <code>T001</code></td><td>组卷布置、文件管理、智能阅卷、阅卷管理、班级中心</td></tr>
+  <tr><td><b>管理员</b></td><td><code>admin</code></td><td>教师全部功能 + 导入学生名单、生成教师注册邀请码</td></tr>
+</table>
+
+<h3 class="sec">2.3 登录三步</h3>
+<ol class="steps">
+  <li><b>打开网址</b><span style="color:var(--muted);font-size:14px">看到蓝色标题和「请使用学号/工号登录」即可</span></li>
+  <li><b>输入账号与密码</b><span style="color:var(--muted);font-size:14px">学生填 6 位学号；教师填工号或手机号</span></li>
+  <li><b>点「登录」</b><span style="color:var(--muted);font-size:14px">登录成功进入首页；失败会在下方红字提示「账号或密码错误」</span></li>
+</ol>
+
+<h3 class="sec">2.4 账号从哪来</h3>
+<table>
+  <tr><th style="width:110px">对象</th><th>获取方式</th><th style="width:190px">初始密码</th></tr>
+  <tr><td>学生</td><td>由管理员批量导入名单（或用教师账号在文件管理里单个添加）</td><td>= 学号本身</td></tr>
+  <tr><td>教师</td><td>登录页点「<b>教师注册</b>」自助注册，需要管理员提供的<b>邀请码</b></td><td>注册时自己设定</td></tr>
+  <tr><td>管理员</td><td>系统内置账号，联系技术负责人</td><td>—</td></tr>
+</table>
+
+<div class="box warn">
+  <p><b>教师注册需要邀请码。</b>邀请码由管理员生成（管理员登录后 → 右上角「⚙️ 配置」→ 邀请码区域 → 「生成随机邀请码」）。一个邀请码可限定使用次数，请按需生成、用完即止。</p>
+</div>
+
+<div class="box warn">
+  <p><b>演示账号请在正式使用前改掉密码。</b>系统预置了演示用的教师与管理员账号（登录页底部有提示），仅供试用与培训，请勿在真实教学中继续使用默认密码。</p>
+</div>
+
+<div class="box stop">
+  <p><b>忘记密码怎么办？</b>系统目前<b>没有自助找回密码</b>功能，需要联系管理员在后台重置（重置后密码为学号或指定值）。请提醒学生首次登录后牢记密码；如经常忘记，可统一由管理员重置为标准初始密码。</p>
+</div>
+
+<!-- ================= 3 ================= -->
+<h2 class="chap" id="c3"><span class="n">3</span>界面地图</h2>
+<p>登录后，左侧是导航栏。教师能看到 6 个菜单，学生只看到 2 个。</p>
+
+<table>
+  <tr><th style="width:150px">菜单</th><th>做什么</th><th style="width:120px">使用频率</th></tr>
+  <tr><td>🏠 首页</td><td>使用流程提示、最新试卷、改卷情况与报表一览</td><td>看一眼就走</td></tr>
+  <tr><td>📝 组卷布置</td><td>从题库挑作文题、管理素材与答题卡，发布练习给班级</td><td>布置作业时</td></tr>
+  <tr><td>📁 文件管理</td><td>扫描 / 上传试卷图片，创建班级并归档，框选识别区域</td><td><b>高频</b></td></tr>
+  <tr><td>🔍 智能阅卷</td><td>一键「识别并批阅」，查看识别文本与批阅报告</td><td><b>核心</b></td></tr>
+  <tr><td>🧮 阅卷管理</td><td>导出试卷与答题卡、创建人工阅卷任务、我的阅卷（打分板）</td><td>大规模阅卷时</td></tr>
+  <tr><td>🏫 班级中心</td><td>按班级查看历次报告、成绩报表，导出数据</td><td>讲评 / 归档</td></tr>
+  <tr><td>📋 我的报告</td><td><i>仅学生可见</i>，查看自己的历次批阅记录</td><td>—</td></tr>
+</table>
+
+<div class="fig">
+  <div class="mock">
+    <div class="top">QuickJudge 教师端</div>
+    <span class="it">首页</span>
+    <span class="it">组卷布置</span>
+    <span class="it on">文件管理 ←上传在这里</span>
+    <span class="it on">智能阅卷 ←批阅在这里</span>
+    <span class="it">阅卷管理</span>
+    <span class="it">班级中心</span>
+  </div>
+  <div class="legend">
+    <dl>
+      <dt>记住这条主线</dt>
+      <dd>图片先进「文件管理」，批阅都在「智能阅卷」，成果留在「班级中心」。</dd>
+      <dt>右上角两个按钮</dt>
+      <dd>「⚙️ 配置」里能改扫描仪路径、批阅提示词等；「退出」结束当前登录。</dd>
+      <dt>按钮颜色约定</dt>
+      <dd><span style="color:var(--blue)">蓝色</span>＝主要动作，<span style="color:var(--green)">绿色</span>＝执行 / 成功，<span style="color:var(--amber)">黄色</span>＝取消 / 返回，<span style="color:var(--red)">红色</span>＝删除等危险操作。</dd>
+    </dl>
+  </div>
+</div>
+
+<!-- ================= 4 ================= -->
+<h2 class="chap" id="c4"><span class="n">4</span>标准工作流</h2>
+<p>一次完整的作文批阅，按下面六步走。第一次建议照做；熟悉之后可以跳到「极简路径」。</p>
+
+<div class="flow">
+  <div class="node"><span class="step-no">①</span><div class="h">组卷布置</div><div class="d">选题 → 加入篮子 → 去布置 → 勾选班级学生 → 确认</div></div>
+  <div class="node"><span class="step-no">②</span><div class="h">阅卷管理</div><div class="d">导出试卷 / 答题卡（Word、PDF），打印发放</div></div>
+  <div class="node"><span class="step-no">③</span><div class="h">学生作答</div><div class="d">作文纸最上方写清 6 位学号</div></div>
+  <div class="node"><span class="step-no">④</span><div class="h">文件管理</div><div class="d">扫描或拍照上传 → 归档到班级</div></div>
+  <div class="node"><span class="step-no">⑤</span><div class="h">智能阅卷</div><div class="d">框选区域 → 识别并批阅 → 看报告</div></div>
+  <div class="node"><span class="step-no">⑥</span><div class="h">讲评与归档</div><div class="d">班级中心看班级报告，导出 Excel</div></div>
+</div>
+
+<div class="box ok">
+  <p><b>极简路径（只想快速批一批作文）：</b>④ 文件管理上传图片 → ⑤ 智能阅卷点「识别并批阅」。四步之内拿到每篇评语。适合平时小练笔、临时抽查。</p>
+</div>
+
+<!-- ================= 5 ================= -->
+<h2 class="chap" id="c5"><span class="n">5</span>分步操作详解</h2>
+
+<h3 class="sec">5.1 组卷布置 —— 选题并发布练习<span class="tag">布置作业时用</span></h3>
+<p>用途：从平台内置题库挑一道作文题，配好素材和答题卡，作为一次「练习」发布给指定班级。</p>
+<ol class="steps">
+  <li><b>进入「组卷布置」</b><span style="color:var(--muted);font-size:14px">左侧点一下即可</span></li>
+  <li><b>选择题库类型</b>
+    <ul>
+      <li><b>教材同步练习</b>——按教材单元配套的写作任务</li>
+      <li><b>应用文题库</b>——通知、书信、演讲稿等</li>
+      <li><b>读后续写题库</b>——提供原文与两段首句</li>
+      <li><b>自定义出题</b>——自己写题目要求</li>
+    </ul>
+  </li>
+  <li><b>筛选与预览</b><span style="color:var(--muted);font-size:14px">用上方的筛选、搜索缩小范围，点开题目看详情</span></li>
+  <li><b>加入篮子</b><span style="color:var(--muted);font-size:14px">挑中的题目点「加入篮子」，再点右下角「去布置」</span></li>
+  <li><b>勾选班级与学生</b><span style="color:var(--muted);font-size:14px">在弹出的「选择班级与学生布置」窗口里勾选，点「确认布置」</span></li>
+</ol>
+<p>页面顶部的配套按钮：</p>
+<table>
+  <tr><th style="width:250px">按钮</th><th>作用</th></tr>
+  <tr><td>编辑作文素材</td><td>维护可复用的写作素材（名句、范文片段等），支持「下载为 ZIP 备份」</td></tr>
+  <tr><td>编辑通用答题卡</td><td>在平台内直接编辑答题卡版式，保存即生效，支持「下载为 HTML 备份」</td></tr>
+  <tr><td>预览 / 打印答题卡</td><td>直接调起打印，<b>不用先下载再传回</b></td></tr>
+  <tr><td>📄 从试卷 Word 生成答题卡</td><td>把现成的试卷 Word 上传，自动识别题型生成配套答题卡</td></tr>
+  <tr><td>📋 按题型模板生成答题卡</td><td>手动选择题型组合，快速套模板生成</td></tr>
+  <tr><td>➕ 添加素材</td><td>新增一条自定义素材</td></tr>
+</table>
+
+<h3 class="sec">5.2 阅卷管理 —— 导出答题卡与试卷<span class="tag">发放前用</span></h3>
+<p>用途：把练习变成纸质材料发下去，并管理人工阅卷任务。</p>
+<h3 class="sec" style="font-size:16px;margin-top:20px;">① 导出试卷与答题卡</h3>
+<ol class="steps">
+  <li><b>进入「阅卷管理」</b><span style="color:var(--muted);font-size:14px">默认停在「阅卷管理」子页签，可切到「我的阅卷」</span></li>
+  <li><b>找到对应的练习，点「导出试卷」</b></li>
+  <li><b>勾选导出内容</b>
+    <ul>
+      <li>试卷（Word）——题面，A4 排版</li>
+      <li>答题卡（PDF）——学生作答用，带学号填写区</li>
+      <li>参考答案（Word）——讲评用</li>
+    </ul>
+  </li>
+  <li><b>点「确定」保存到本机</b><span style="color:var(--muted);font-size:14px">再打印发放</span></li>
+</ol>
+
+<h3 class="sec" style="font-size:16px">② 一键导出数据</h3>
+<table>
+  <tr><th style="width:200px">按钮</th><th>导出什么</th></tr>
+  <tr><td>导出答题情况</td><td>逐生的学号、批阅报告等内容，用于成绩录入与归档（<b>若本批还没有批阅结果，导出会是空表</b>，会有提示）</td></tr>
+  <tr><td>导出班级报告</td><td>班级整体评价报告，可选导出格式</td></tr>
+</table>
+
+<h3 class="sec" style="font-size:16px">③ 创建人工阅卷任务（需要多位老师协同时用）</h3>
+<ol class="steps">
+  <li><b>点「创建阅卷任务」</b><span style="color:var(--muted);font-size:14px">弹出两步向导</span></li>
+  <li><b>第 1 步：选练习</b><span style="color:var(--muted);font-size:14px">列表只显示近 1 个月、且包含主观题（问答题、整句批改、半句批改、句子默写、篇章默写、应用文、读后续写）的练习</span></li>
+  <li><b>第 2 步：阅卷设置</b>
+    <ul>
+      <li>逐题型设定<b>批阅模式</b>：机评 / 单评 / 双评</li>
+      <li>选择单评或双评的老师</li>
+      <li>填写「需要仲裁的分差」与仲裁老师——两位老师给分差异超过该值时会自动转仲裁</li>
+      <li>选择<b>分配规则</b>：按老师数量平均分配，或按老师所带班级的提交人数分配</li>
+      <li>选择阅卷时<b>是否显示机评分数</b>（正式考试建议选「否」，避免先入为主）</li>
+    </ul>
+  </li>
+  <li><b>点「保存」</b><span style="color:var(--muted);font-size:14px">至少有一个题型选了人工批阅（单评 / 双评）才能创建成功</span></li>
+</ol>
+<div class="box tip">
+  <p><b>「上传试卷（识码归类）」</b>按钮用于把已有的试卷图片直接上传，系统按答题卡上的二维码自动归类到学生。若提示暂不可用，请走「文件管理 → 上传 → 归档班级 → 智能阅卷」这条常规路径。</p>
+</div>
+
+<h3 class="sec">5.3 文件管理 —— 上传与归档<span class="tag">高频操作</span></h3>
+<p>用途：把纸质作文变成系统里的图片，并按班级归档。</p>
+
+<h3 class="sec" style="font-size:16px;margin-top:20px;">先分清两种卷</h3>
+<table>
+  <tr><th style="width:130px">类型</th><th>特征</th><th>后续怎么批</th></tr>
+  <tr><td><b>📷 标准卷</b></td><td>用平台生成的答题卡，带二维码、规范的答题区域和学号填写区</td><td>归档到班级后直接批阅；二维码自动归档功能<b>即将上线</b>，目前先用班级归档</td></tr>
+  <tr><td><b>📄 不标准卷</b></td><td>平时的卷子、以往的试卷，没有二维码</td><td>导入后需要在「智能阅卷」里用「<b>🎯 识别区域选择</b>」框选作文区域，再批阅</td></tr>
+</table>
+
+<h3 class="sec" style="font-size:16px">上传步骤</h3>
+<ol class="steps">
+  <li><b>进入「文件管理」，先在左侧创建或选择班级</b><span style="color:var(--muted);font-size:14px">输入班级名称点「创建」；已建过的直接点选。归档到哪个班级，报告就归到哪个班级</span></li>
+  <li><b>点「📷 标准卷」或「📄 不标准卷」</b><span style="color:var(--muted);font-size:14px">会跳出说明与两个导入方式</span></li>
+  <li><b>选择导入方式</b>
+    <ul>
+      <li><b>扫描仪</b>——连接扫描仪连续扫描（依赖 Windows 上的 NAPS2 工具；扫描进度显示为「已扫描 → 已识别 → 已上传」三步）</li>
+      <li><b>本地图片上传</b>——手机上拍好照片先传到电脑，再整批选择上传</li>
+    </ul>
+  </li>
+  <li><b>在「🖼️ 图片文件」中勾选图片</b><span style="color:var(--muted);font-size:14px">可点「✅ 全选」；勾选后会出现「🗑️ 删除选中」「🎯 识别区域选择」「📝 前往批阅」</span></li>
+  <li><b>点「📝 前往批阅」跳到智能阅卷</b><span style="color:var(--muted);font-size:14px">也可以先「🎯 识别区域选择」框好区域再过去</span></li>
+</ol>
+
+<div class="box tip">
+  <p><b>必须做的事：让学生在作文纸最上方写清 6 位学号</b>（如 <code>250101</code>）。系统会自动识别并归档到对应学生；识别不到时，可在「智能阅卷」里点「👤 设置学号」手动指定。<b>学号必须是 6 位数字</b>，否则无法归档。</p>
+</div>
+
+<h3 class="sec" style="font-size:16px">拍照 / 扫描质量要求 —— 直接决定识别准确率</h3>
+<div class="box ok">
+  <p><b>做到这几点，识别准确率能上一个台阶：</b></p>
+  <ul class="plain" style="margin-bottom:0">
+    <li>光线均匀，<b>不要有阴影和反光</b>（避开台灯直射、窗边背光）</li>
+    <li>纸张放正，<b>四角完整</b>，不要拍歪、不要缺角</li>
+    <li>分辨率够高、字迹清晰，建议图片宽度 <b>1600 像素以上</b></li>
+    <li><b>一次一张</b>，不要把多张叠在一起或把桌面杂物拍进去</li>
+    <li>铅笔字、颜色过淡的字迹，请学生用黑笔重描或改深色笔书写</li>
+    <li>涂改太多会影响识别，建议要求学生在原文上划一条横线后重写</li>
+  </ul>
+</div>
+
+<h3 class="sec">5.4 智能阅卷 —— 一键识别并批阅<span class="tag">核心步骤</span></h3>
+<p>用途：把图片变成「识别文本」和「批阅报告」。</p>
+<ol class="steps">
+  <li><b>在「文件管理」勾选要批阅的图片</b><span style="color:var(--muted);font-size:14px">或从阅卷管理的「任务试卷」里勾选后点「前往批阅」，会自动带入</span></li>
+  <li><b>切换到「智能阅卷」</b><span style="color:var(--muted);font-size:14px">上方会出现「📸 已选图片预览」，先确认选对了、图够清晰</span></li>
+  <li><b>（不标准卷 / 手写卷）点「🎯 识别区域选择」</b><span style="color:var(--muted);font-size:14px">在图上框出作文正文区域，避免把姓名栏、题目、页眉页脚一起识别进去</span></li>
+  <li><b>（可选）点「✏️ 编辑批阅提示词」调整批阅要求</b><span style="color:var(--muted);font-size:14px">见下方说明，一次设定长期生效</span></li>
+  <li><b>点「🚀 识别并批阅」</b><span style="color:var(--muted);font-size:14px">出现进度提示。<b>每篇约 30–60 秒</b>，期间请勿关闭页面、勿重复点击</span></li>
+  <li><b>查看结果</b><span style="color:var(--muted);font-size:14px">页面出现「📝 OCR 识别结果」和「📋 批阅结果」两块；结果页底部可点「📊 生成班级报告」，把本批学生汇总成班级分析</span></li>
+</ol>
+
+<div class="box tip">
+  <p><b>批阅提示词（决定批阅风格的关键）</b></p>
+  <p>编辑框里用 <code>{essay_text}</code> 作为作文占位符，系统会自动替换成学生作文内容。<b>改动后点保存，长期生效</b>，无需每篇重设。</p>
+  <p style="margin-bottom:4px">默认模板要求输出：总体评分 / 优点分析 / 问题指出 / 改进建议 / 具体修改意见，并用中文回复。</p>
+  <p style="margin-bottom:4px">如果想更贴合你的评分标准，可以改成这样：</p>
+  <pre style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:13px;overflow:auto;margin:8px 0 0;line-height:1.65;">请按高一英语作文评分标准批阅下面这篇作文，严格输出以下四部分：
+1. 总分（满分 25 分）及分项分（内容 / 语言 / 结构，各占比请注明）
+2. 优点 2 条，各附一个原文中的例子
+3. 问题 2 条，逐条给出修改后的句子
+4. 一句话总评（不超过 30 字）
+
+作文内容：
+{essay_text}
+
+请用中文回复。</pre>
+</div>
+
+<div class="box warn">
+  <p><b>效率建议：</b>一次勾选 <b>5–10 篇</b>最稳。批量很大时请分成几批跑——几十篇一起提交等待时间长，中途万一网络波动会更麻烦。</p>
+</div>
+
+<h3 class="sec">5.5 人工阅卷 —— 打分板<span class="tag">需要复核或联考时用</span></h3>
+<ol class="steps">
+  <li><b>「阅卷管理」→「人工阅卷」</b><span style="color:var(--muted);font-size:14px">列出待批阅的试卷，点开进入打分板</span></li>
+  <li><b>用打分板快速给分</b>
+    <ul>
+      <li>「满分」「零分」一键给极端分</li>
+      <li>「+0.5 分」微调，也可直接输入分数</li>
+      <li>右侧可展开「试题答案」对照</li>
+    </ul>
+  </li>
+  <li><b>点「保存并下一人 &gt;」连续批阅</b><span style="color:var(--muted);font-size:14px">不用反复返回列表</span></li>
+  <li><b>用「我的阅卷」跟踪进度</b><span style="color:var(--muted);font-size:14px">可按「全部 / 待批阅 / 已完成」筛选；顶部「阅卷进度（按任务）」查看各任务完成情况</span></li>
+</ol>
+<div class="box tip">
+  <p>双评模式下，系统按创建任务时设定的分配规则自动派卷；两位老师给分差异超过设定阈值，会转给仲裁老师处理。</p>
+</div>
+
+<h3 class="sec">5.6 班级中心与我的报告 —— 看成果<span class="tag">讲评 / 归档</span></h3>
+<ol class="steps">
+  <li><b>「班级中心」列出所有班级</b><span style="color:var(--muted);font-size:14px">每个班显示日期批次数量与学生人数</span></li>
+  <li><b>点「历次报告」</b><span style="color:var(--muted);font-size:14px">按日期列出该班每次批阅，显示当次涉及的学生数；可查看当前班级学生名单</span></li>
+  <li><b>点「成绩报表」</b><span style="color:var(--muted);font-size:14px">学号与分数联动展示，用于横向对比与成绩录入</span></li>
+</ol>
+<div class="box warn">
+  <p><b>班级中心里没有内容？</b>多半是这两个原因：① 上传时<b>没有选中班级</b>，图片没归到任何班；② 学生的<b>学号没被识别出来</b>（不是 6 位数字，或没写在作文上方）。回「文件管理」检查归档，或在「智能阅卷」用「👤 设置学号」补上。</p>
+</div>
+
+<!-- ================= 6 ================= -->
+<h2 class="chap" id="c6"><span class="n">6</span>学生端怎么用</h2>
+<p>学生使用非常简单。下面这段可以直接复制发给学生（微信群、班级公告都行）：</p>
+<div class="box tip" style="border-left-width:4px">
+  <p>同学你好：</p>
+  <p>在浏览器打开 <b>http://（老师提供的地址）:5001</b>，用你的 <b>6 位学号</b>登录，密码默认也是你的学号。登录后点左侧「我的报告」，就能看到自己每一次作文的<b>批阅报告</b>——里面包含识别出的作文原文、评分和老师的评语。</p>
+  <p style="margin-bottom:0">写作文时请记得：<b>把 6 位学号写在作文纸最上方显眼的位置</b>，字迹写清楚，别写连笔，这样系统才能准确认出来。</p>
+</div>
+
+<!-- ================= 7 ================= -->
+<h2 class="chap" id="c7"><span class="n">7</span>常见问题 FAQ</h2>
+
+<details open><summary>点了「识别并批阅」一直转圈，或者报错怎么办？</summary>
+<div class="ans">
+  <p>按顺序排查：</p>
+  <ul class="plain">
+    <li>确认已经<b>勾选了图片</b>（没勾选时按钮是灰的，或者会提示先去文件管理选图）</li>
+    <li>确认运行服务的电脑<b>能访问外网</b>——识别与批阅由云端大模型完成，断网就一定会失败</li>
+    <li>把这一次的数量<b>减少到 5 张以内</b>重试，排除单张图片过大或损坏</li>
+    <li>仍不行就<b>把操作时间、报错文字告诉技术负责人</b>，他需要看服务窗口的日志</li>
+  </ul>
+</div>
+</details>
+
+<details><summary>一篇要等多久？一次能批多少？</summary>
+<div class="ans">
+  <p>单篇约 <b>30–60 秒</b>（包含图片识别 + 生成批阅报告两步）。一次建议 <b>5–10 篇</b>，页面会有进度提示。批量很大的时候请分批提交，跑批期间不要关闭页面。</p>
+</div>
+</details>
+
+<details><summary>识别出来有错字、漏字怎么办？</summary>
+<div class="ans">
+  <p>手写连笔、涂改、光线不好是最常见的原因。可以这样改善：</p>
+  <ul class="plain">
+    <li>拍照时提高清晰度，避免阴影和反光（见 5.3 的质量要求）</li>
+    <li>用「🎯 识别区域选择」<b>只框作文正文部分</b>，把姓名栏、题目、页眉页脚排除掉</li>
+    <li>在批阅提示词里加一句约束，例如「<i>看不清的字用 □ 占位，不要猜测</i>」</li>
+    <li>关键内容（分数、学号）以人工复核为准——机器结果是辅助，不是最终判定</li>
+  </ul>
+</div>
+</details>
+
+<details><summary>同一篇作文，两次批阅分数不一样？</summary>
+<div class="ans">
+  <p>系统已经把批阅的随机性调得很低，但大模型仍可能有 ±1 分的浮动。建议：① 在提示词里写明明确的评分细则和分档标准；② <b>最终成绩以教师复核为准</b>。如果是统一考试或重要测评，建议结合「人工阅卷」的实体打分板使用。</p>
+</div>
+</details>
+
+<details><summary>学号没识别出来，或者归到别人名下了？</summary>
+<div class="ans">
+  <ul class="plain">
+    <li>先确认学号是 <b>6 位数字</b>——非 6 位数字的学号系统无法自动归档</li>
+    <li>提醒学生把学号写在<b>作文纸最上方</b>的显眼位置，字写清楚</li>
+    <li>识别完成后，在「智能阅卷」点「<b>👤 设置学号</b>」手动指定正确的学生</li>
+    <li>归错人的记录，可请技术负责人从班级中心的数据文件里修正</li>
+  </ul>
+</div>
+</details>
+
+<details><summary>在 Mac 电脑上点扫描仪报错？</summary>
+<div class="ans">
+  <p>扫描仪功能依赖 Windows 上的 NAPS2 工具，在 macOS 上不可用（页面会提示初始化失败），这属正常现象。改用「<b>本地图片上传</b>」即可——用手机拍照后传到电脑再整批上传，批阅效果完全一样。另外服务启动时打印的一段扫描相关报错也可以忽略，不影响主功能。</p>
+</div>
+</details>
+
+<details><summary>数据存在哪里？会不会丢？</summary>
+<div class="ans">
+  <p>所有数据都保存在<b>运行服务的这台电脑上</b>（项目目录下的 <code>data</code> 文件夹：班级、学生名单、批阅结果、历史记录都在里面）。</p>
+  <p><b>请不要删除或移动 <code>data</code> 文件夹。</b>建议每月把整个 <code>data</code> 目录复制一份到移动硬盘或网盘做备份；换电脑时也只需拷贝这个目录。</p>
+</div>
+</details>
+
+<details><summary>学生登录后看不到自己的报告？</summary>
+<div class="ans">
+  <ul class="plain">
+    <li>确认学生用的是 <b>6 位学号</b>登录，且账号里确实有这个学号</li>
+    <li>确认这篇作文的学号被正确识别、并且图片<b>已归档到班级</b>——只有归到班级的记录才会出现在报告里</li>
+    <li>让学生点一下「刷新」或重新登录一次</li>
+  </ul>
+</div>
+</details>
+
+<details><summary>想让另一位老师也能用，怎么加账号？</summary>
+<div class="ans">
+  <p>请管理员登录 → 右上角「⚙️ 配置」→ 找到邀请码区域 → 点「生成随机邀请码」（可限定使用次数）→ 把邀请码给这位老师。对方在登录页点「<b>教师注册</b>」，填邀请码、账号（建议用手机号）和密码即可开通。</p>
+</div>
+</details>
+
+<details><summary>学生名单怎么一次性导进去？</summary>
+<div class="ans">
+  <p>管理员在「⚙️ 配置」里可以：① 点「<b>从根目录 namelist.csv 导入</b>」——用项目里已有的名单文件；② 点「<b>上传 CSV</b>」——上传自己的名单表。</p>
+  <p>CSV 只有两列，第一行是表头，格式为：</p>
+  <pre style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13px;margin:6px 0 0;">学生姓名,登录账号
+示例甲,250101
+示例乙,250102</pre>
+  <p style="margin-top:8px">导入后学生的初始密码就是自己的登录账号（学号）。重复导入不会覆盖已存在账号的密码。</p>
+</div>
+</details>
+
+<!-- ================= 8 ================= -->
+<h2 class="chap" id="c8"><span class="n">8</span>使用规范与提醒</h2>
+
+<div class="box ok">
+  <p><b>推荐做法</b></p>
+  <ul class="plain" style="margin-bottom:0">
+    <li>每学期/每单元第一次使用时，先把<b>班级建好</b>、把学生名单导进去，后面所有操作都会顺很多</li>
+    <li>让学生养成「<b>作文纸上方写 6 位学号</b>」的习惯，这一条能省掉八成的人工纠错</li>
+    <li>批阅提示词一次调好，全学期复用；换文体（应用文、读后续写）时可另存一份说明让技术负责人切换</li>
+    <li>每批控制在 5–10 篇，逐批批阅，边批边看结果，发现识别偏差及时调整拍照方式</li>
+    <li>每月备份一次 <code>data</code> 目录</li>
+  </ul>
+</div>
+
+<div class="box warn">
+  <p><b>请注意</b></p>
+  <ul class="plain" style="margin-bottom:0">
+    <li><b>AI 批阅是辅助，不是最终判定。</b>分数与评语请以教师复核为准，尤其是升学相关的重要测评</li>
+    <li>批阅需要把学生作文图片传到云端大模型处理。请遵守学校的<b>数据使用与隐私规定</b>，不要把与教学无关的图片、含个人隐私的内容上传</li>
+    <li>不要把服务地址和账号密码发到班级群里（学生端只需要学号登录入口）</li>
+    <li>每个批阅周期结束后，及时清理不再需要的图片，避免磁盘占满</li>
+    <li>学生如使用他人学号登录，会看到他人的报告——请务必强调账号使用规范</li>
+  </ul>
+</div>
+
+<hr class="sep">
+
+<!-- ================= 附录 A ================= -->
+<h2 class="chap" id="a1"><span class="n">A</span>一页速查卡</h2>
+<p style="color:var(--muted);font-size:14px">建议打印出来贴在办公桌旁，或存为图片放在手机里。</p>
+
+<div class="cheat">
+  <h4>QuickJudge 教师速查卡</h4>
+  <p class="hint">地址 http://（本机）localhost:5001 ｜ 教师用手机号/工号登录，学生用 6 位学号登录</p>
+  <div class="cheat-grid">
+    <div>
+      <h5>① 布置</h5>
+      <ul>
+        <li>组卷布置 → 选题库类型</li>
+        <li>筛选 → 加入篮子 → 去布置</li>
+        <li>勾班级学生 → 确认布置</li>
+      </ul>
+    </div>
+    <div>
+      <h5>② 发放</h5>
+      <ul>
+        <li>阅卷管理 → 导出试卷</li>
+        <li>勾重命题：试卷+答题卡+答案</li>
+        <li>打印发放，学生写 6 位学号</li>
+      </ul>
+    </div>
+    <div>
+      <h5>③ 上传</h5>
+      <ul>
+        <li>文件管理 → 先选/建班级</li>
+        <li>标准卷 / 不标准卷</li>
+        <li>扫描仪 或 本地上传</li>
+        <li>勾图片 → 前往批阅</li>
+      </ul>
+    </div>
+    <div>
+      <h5>④ 批阅</h5>
+      <ul>
+        <li>智能阅卷 → 确认预览图</li>
+        <li>（不标准卷）识别区域选择</li>
+        <li>识别并批阅（每篇 30–60 秒）</li>
+        <li>结果页 → 生成班级报告</li>
+      </ul>
+    </div>
+    <div>
+      <h5>⑤ 看结果</h5>
+      <ul>
+        <li>班级中心 → 历次报告</li>
+        <li>成绩报表（学号+分数）</li>
+        <li>导出答题情况 / 班级报告</li>
+      </ul>
+    </div>
+    <div>
+      <h5>⚠️ 三条铁律</h5>
+      <ul>
+        <li>一次 5–10 篇，别贪多</li>
+        <li>学号必须 6 位数字、写在纸最上方</li>
+        <li>分数以人工复核为准</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 附录 B ================= -->
+<h2 class="chap" id="a2"><span class="n">B</span>名词解释</h2>
+<table>
+  <tr><th style="width:170px">名词</th><th>含义</th></tr>
+  <tr><td>标准卷</td><td>用平台生成的答题卡印出来的卷子，带二维码、规范答题区和学号填写区</td></tr>
+  <tr><td>不标准卷</td><td>平时或以往的卷子，没有平台二维码，需要手动框选识别区域</td></tr>
+  <tr><td>识别区域选择</td><td>在图片上框出真正要识别的部分（作文正文），排除姓名栏、题目等干扰</td></tr>
+  <tr><td>批阅提示词</td><td>告诉 AI「按什么标准、输出哪几部分」的模板，用 <code>{essay_text}</code> 代表作文正文</td></tr>
+  <tr><td>组卷布置</td><td>从题库选题并发布给班级，形成一次「练习」</td></tr>
+  <tr><td>阅卷任务</td><td>把一次练习的批阅工作分配给多位老师，可设单评 / 双评 / 仲裁</td></tr>
+  <tr><td>单评 / 双评</td><td>一篇由 1 位老师打分，或由 2 位老师分别打分</td></tr>
+  <tr><td>仲裁分差</td><td>双评时两位老师给分差超过这个值，就转给仲裁老师定分</td></tr>
+  <tr><td>班级中心</td><td>存放各班级历次批阅报告与成绩报表的地方</td></tr>
+  <tr><td>机评分数</td><td>AI 给出的分数（可与人工阅卷对照，或选择阅卷时不显示）</td></tr>
+</table>
+
+<p class="foot">
+  QuickJudge 教师新手教程 · 2026-10-15 版<br>
+  使用中遇到教程没覆盖的问题，请记录下来反馈给技术负责人，我们会补充进下一版。
+</p>
+
+</div>
+</body>
+</html>

@@ -39,3 +39,6 @@ data/**/*.JPEG
 
 # 若希望整库数据都不进 git，可改为取消下行注释（会忽略含 config 在内的全部 data）
 # data/
+
+# 本地活跃副本标记文件（勿提交）
+ACTIVE-DEV.md
