@@ -447,7 +447,11 @@ function renderJob(j) {
     if (r.error) {
       return `<div class="jobitem err"><span class="dot"></span><span class="nm">${esc(r.student_id || '未识别')}</span><span>${esc(r.error)}</span></div>`;
     }
-    return `<div class="jobitem ok"><span class="dot"></span><span class="nm">${esc(r.student_id || '—')} ${esc(r.name || '')}</span><span>${esc(r.score == null ? '' : r.score)}${esc(r.level ? ' · ' + r.level : '')}</span></div>`;
+    // 学号没能唯一落到名单上：明确标出来，别让老师以为已经归档到位
+    const warn = r.sid_note
+      ? `<span title="${esc(r.sid_note)}" style="margin-left:6px;padding:1px 6px;border-radius:9px;background:#fff4e5;color:#b26a00;border:1px solid #ffd8a8;font-size:11px;">待确认</span>`
+      : '';
+    return `<div class="jobitem ok"><span class="dot"></span><span class="nm">${esc(r.student_id || '—')} ${esc(r.name || '')}${warn}</span><span>${esc(r.score == null ? '' : r.score)}${esc(r.level ? ' · ' + r.level : '')}</span></div>`;
   }).join('');
 
   const foot = $('#jobFoot');
