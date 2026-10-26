@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>学生报告 v2 · 版式示意</title>
+<style>
+  :root{
+    --ink:#1f2328; --ink2:#4b5563; --muted:#8b95a1; --line:#e5e7eb;
+    --paper:#ffffff; --bg:#f3f4f6; --red:#c62828; --green:#0f7b52;
+    --blue:#1d4ed8; --amber:#b45309; --soft:#f8f9fb;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Segoe UI","Microsoft YaHei",-apple-system,sans-serif;
+    font-size:14px;line-height:1.7;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:820px;margin:26px auto 60px;padding:0 16px;}
+  .tip{background:#fff;border:1px dashed #c7ccd4;border-radius:10px;padding:10px 14px;
+    font-size:12.5px;color:var(--ink2);margin-bottom:16px;}
+  .tip b{color:var(--ink);}
+
+  .paper{background:var(--paper);border:1px solid var(--line);border-radius:14px;
+    padding:34px 38px 30px;box-shadow:0 1px 2px rgba(16,24,40,.04),0 12px 32px rgba(16,24,40,.06);}
+
+  /* ---- 卷头 ---- */
+  .rhead{display:flex;justify-content:space-between;align-items:flex-end;
+    border-bottom:2px solid var(--ink);padding-bottom:10px;margin-bottom:6px;gap:16px;flex-wrap:wrap;}
+  .rhead h1{font-size:19px;margin:0;font-weight:700;letter-spacing:.3px;}
+  .rhead .meta{font-size:12.5px;color:var(--ink2);text-align:right;line-height:1.9;}
+  .band{display:flex;gap:22px;flex-wrap:wrap;align-items:baseline;
+    padding:12px 0 14px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink2);}
+  .band .big{font-size:26px;font-weight:700;color:var(--ink);line-height:1;}
+  .band .big small{font-size:13px;font-weight:400;color:var(--muted);margin-left:2px;}
+  .band .sep{color:#d1d5db;}
+  .band .warn{color:var(--red);}
+
+  /* ---- 段落标题 ---- */
+  .sec{margin-top:26px;}
+  .sec>h2{font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:8px;font-weight:700;}
+  .sec>h2 .no{display:inline-flex;width:20px;height:20px;border-radius:6px;background:var(--ink);
+    color:#fff;font-size:11.5px;align-items:center;justify-content:center;font-weight:600;flex:none;}
+  .sec>h2 .hint{font-weight:400;font-size:12px;color:var(--muted);margin-left:auto;}
+
+  /* ---- 1 语篇批改 ---- */
+  .essay{font-family:Georgia,"Times New Roman",serif;font-size:14.5px;line-height:2.15;
+    white-space:pre-wrap;padding:16px 18px;background:var(--soft);border-radius:10px;border:1px solid #eef0f3;}
+  .essay del{color:var(--red);text-decoration:line-through;text-decoration-thickness:1.5px;
+    text-decoration-color:var(--red);}
+  .essay ins{color:var(--green);text-decoration:none;font-weight:600;}
+  .essay sup.mk{color:var(--red);font-size:9.5px;font-weight:700;vertical-align:super;
+    margin-left:1px;font-family:"Segoe UI",sans-serif;}
+  .legend{font-size:11.5px;color:var(--muted);margin:8px 2px 0;display:flex;gap:16px;flex-wrap:wrap;}
+  .legend i{font-style:normal;}
+  .legend .d{color:var(--red);text-decoration:line-through;}
+  .legend .n{color:var(--green);font-weight:600;}
+
+  .causes{margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  .causes .ch{background:var(--soft);padding:8px 13px;font-size:12.5px;font-weight:600;
+    border-bottom:1px solid var(--line);color:var(--ink2);}
+  .causes ol{margin:0;padding:6px 14px 10px 34px;}
+  .causes li{font-size:12.8px;padding:3px 0;color:var(--ink2);}
+  .causes li b{color:var(--ink);}
+  .causes li .t{display:inline-block;background:#fdecec;color:var(--red);border-radius:4px;
+    padding:0 5px;font-size:11px;margin-right:5px;font-weight:600;}
+
+  /* ---- 2 高级词汇表 ---- */
+  table.v{width:100%;border-collapse:collapse;font-size:13px;}
+  table.v th{text-align:left;font-size:11.5px;color:var(--muted);font-weight:600;
+    padding:0 10px 6px 0;border-bottom:1px solid var(--line);}
+  table.v td{padding:11px 10px 11px 0;border-bottom:1px solid #f0f2f5;vertical-align:top;}
+  table.v tr:last-child td{border-bottom:none;}
+  .o{color:var(--ink2);text-decoration:line-through;text-decoration-color:#c9ced6;}
+  .up{color:var(--green);font-weight:600;}
+  .sent{font-family:Georgia,serif;color:var(--ink);font-size:13px;}
+  .why{font-size:12.2px;color:var(--muted);margin-top:3px;}
+
+  /* ---- 3 / 4 卡片 ---- */
+  .card{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#fff;}
+  .card .orig{font-family:Georgia,serif;font-size:13px;color:var(--ink2);text-decoration:line-through;
+    text-decoration-color:#c9ced6;margin-bottom:6px;}
+  .card .new{font-family:Georgia,serif;font-size:14px;color:var(--ink);}
+  .card .new b{color:var(--green);font-weight:600;}
+  .tags{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0;}
+  .tag{font-size:11px;padding:1.5px 7px;border-radius:99px;background:#eef2ff;color:var(--blue);font-weight:600;}
+  .tag.g{background:#eafaf2;color:var(--green);}
+  .tag.a{background:#fff6e6;color:var(--amber);}
+  .card .note{font-size:12.2px;color:var(--ink2);margin-top:8px;padding-top:8px;border-top:1px dashed #eceff3;}
+
+  /* ---- 5 范文 ---- */
+  .model{background:#fbfcfe;border:1px solid #e3e8ef;border-left:3px solid var(--blue);
+    border-radius:8px;padding:15px 18px;font-family:Georgia,serif;font-size:14px;line-height:2;
+    white-space:pre-wrap;}
+  .mnote{font-size:12.2px;color:var(--ink2);background:#fffbea;border:1px solid #f5e7b8;
+    border-radius:8px;padding:9px 12px;margin-top:10px;}
+
+  /* ---- 6 语料 ---- */
+  .pt{margin-bottom:16px;}
+  .pt .ph{font-size:13px;font-weight:700;color:var(--ink);padding:6px 0 8px;border-bottom:1px solid var(--line);margin-bottom:4px;}
+  .it{padding:9px 0 9px 2px;border-bottom:1px dotted #eceff3;}
+  .it:last-child{border-bottom:none;}
+  .it .en{font-family:Georgia,serif;font-size:13.5px;}
+  .it .cn{font-size:12.8px;color:var(--ink2);margin-top:2px;}
+  .it .use{font-size:11.5px;color:var(--muted);margin-top:3px;}
+  .pit{font-size:12.5px;color:var(--ink2);}
+  .pit .x{color:var(--red);text-decoration:line-through;text-decoration-color:#e3a5a5;}
+  .pit .y{color:var(--green);font-weight:600;}
+
+  .foot{margin-top:26px;padding-top:10px;border-top:1px solid var(--line);
+    font-size:11.5px;color:var(--muted);display:flex;justify-content:space-between;}
+
+  @media print{
+    body{background:#fff;}
+    .wrap{max-width:none;margin:0;padding:0;}
+    .tip{display:none;}
+    .paper{border:none;box-shadow:none;border-radius:0;padding:0;}
+    .sec{break-inside:avoid;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="tip">
+    <b>版式示意（非系统实际输出）</b>　同一份真实卷子（姓名与学号已匿名化）——「张明轩 7/15」——按新结构重排：
+    语篇内联标注 → 高级词汇 → 高级句式 → 逻辑衔接 → 个性化范文 → 按要点的专属语料。
+    原文按范例中的划改还原，词汇/句式/衔接/范文/语料为人工示范条目。
+  </div>
+
+  <div class="paper">
+
+    <div class="rhead">
+      <div>
+        <h1>张明轩 · 作文批改报告</h1>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:4px;">应用文写作 · 建议类 · 给校方写信</div>
+      </div>
+      <div class="meta">
+        2023 级 1 班　|　学号 239999（已匿名化）<br>
+        作答时间 2025/12/20 16:51
+      </div>
+    </div>
+
+    <div class="band">
+      <span><span class="big">7</span><small> / 15</small></span>
+      <span class="sep">|</span>
+      <span>班级最高 <b>12</b></span>
+      <span>班级平均 <b>8.2</b></span>
+      <span class="sep">|</span>
+      <span>词数 <b class="warn">实写 150</b> / 要求 60</span>
+      <span class="sep">|</span>
+      <span>读不准 <b>2</b> 处</span>
+    </div>
+
+    <!-- 1 语篇批改 -->
+    <div class="sec">
+      <h2><span class="no">1</span>语篇批改<span class="hint">红色划掉原写法 · 绿色是改法 · 编号见下方错因</span></h2>
+      <div class="essay" id="essay"></div>
+      <div class="legend">
+        <i><span class="d">划掉</span> 学生原写法</i>
+        <i><span class="n">绿色</span> 应改成</i>
+        <i><sup class="mk" style="color:var(--red)">n</sup> 错因编号</i>
+      </div>
+
+      <div class="causes">
+        <div class="ch">错因速查（13 处）</div>
+        <ol id="causes"></ol>
+      </div>
+    </div>
+
+    <!-- 2 高级词汇 -->
+    <div class="sec">
+      <h2><span class="no">2</span>高级词汇<span class="hint">你写对了，但可以更准、更地道</span></h2>
+      <table class="v">
+        <thead><tr><th style="width:24%">原表达</th><th style="width:26%">升级</th><th>放进整句</th></tr></thead>
+        <tbody id="vocab"></tbody>
+      </table>
+    </div>
+
+    <!-- 3 高级句式 -->
+    <div class="sec">
+      <h2><span class="no">3</span>高级句式<span class="hint">换句型 + 同时把内容说满</span></h2>
+      <div id="patterns"></div>
+    </div>
+
+    <!-- 4 逻辑衔接 -->
+    <div class="sec">
+      <h2><span class="no">4</span>逻辑衔接<span class="hint">先看两句是什么关系，再选衔接词</span></h2>
+      <div id="cohesion"></div>
+    </div>
+
+    <!-- 5 个性化范文 -->
+    <div class="sec">
+      <h2><span class="no">5</span>个性化范文<span class="hint">用你的思路、你的素材，只把语言换掉</span></h2>
+      <div class="model" id="model"></div>
+      <div class="mnote" id="mnote"></div>
+    </div>
+
+    <!-- 6 专属语料 -->
+    <div class="sec">
+      <h2><span class="no">6</span>本题专属语料<span class="hint">按要点分组 · 每条配翻译，直接背</span></h2>
+      <div id="corpus"></div>
+
+      <div class="causes" style="margin-top:14px;">
+        <div class="ch">本话题两个高频坑</div>
+        <div style="padding:9px 13px 11px;font-size:12.5px;">
+          <div class="pit" style="margin-bottom:6px;">
+            <span class="x">During whole day school life may enhance a vast stress for student.</span><br>
+            → <span class="y">A whole day at school can impose considerable pressure on students.</span>
+          </div>
+          <div class="pit">
+            <span class="x">not only does increase a joy and confidence in campus</span><br>
+            → <span class="y">it will not only increase joy and confidence on campus</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <span>第 1 页 / 共 1 页　·　版式示意</span>
+      <span>QuickJudge</span>
+    </div>
+  </div>
+</div>
+
+<script>
+const DATA = {
+  text: `Dear Sir or Madam,
+I'm writting to you about our school's new colum "Song of the Day." This is a wonderful suggestion to enrich our school life. During whole day school life may enhance a vast stress for student, especially a day work without entertainment. To create students and professors's joy, we can keep the colum for a long time. If we open the new colum, not only does increase a joy and confidence in campus, but also reduce despression. What's more, it ggrows up a sense of feeling wonderful things.
+
+Thus, here are my suggestion for the colum. First and foremost, choosing the perfect time to listen to music is important. We can air it every afternoon. Besides, the song quality and style should be selected before airing, and they need to be classical.
+
+Last but not least, we can't ignore the whole staff's requirement.
+
+I hope this suggestion will be taken into consideration.`,
+
+  errors: [
+    {type:'拼写', quote:'writting', fix:'writing', why:'write 加 -ing 先去不发音的 e，也不能双写 t'},
+    {type:'拼写', quote:'colum', fix:'column', why:'column 结尾 -mn 里的 n 不发音，但必须写出来（全文 4 处同错）'},
+    {type:'冠词 + 断句', quote:'During whole day school life', fix:'During the whole day, school life', why:'day 前缺 the；状语和主语粘在一起，读不出谁修饰谁'},
+    {type:'搭配', quote:'enhance a vast stress', fix:'cause great stress', why:'enhance 只接收益类名词（reputation、chance）；压力要用 cause / impose'},
+    {type:'单复数', quote:'for student', fix:'for students', why:'泛指全体学生要用复数'},
+    {type:'缺介词', quote:'a day work', fix:'a day of work', why:'两个名词不能直接叠加，要用 of 连接'},
+    {type:'所有格', quote:"students and professors's joy", fix:'the joy of students and professors', why:"并列名词共同所有时 's 只加在最后一个词；此处用 of 结构更自然"},
+    {type:'成分残缺', quote:'not only does increase', fix:'it will not only increase', why:'not only 提前引起部分倒装，主语和助动词都不能省'},
+    {type:'介词', quote:'in campus', fix:'on campus', why:'campus 固定搭配 on，不用 in'},
+    {type:'拼写', quote:'despression', fix:'depression', why:'depress 只有一个 s'},
+    {type:'拼写 + 搭配', quote:'ggrows up a sense', fix:'cultivates a sense', why:'grow up 是不及物「长大」，不能带宾语；「培养」用 cultivate'},
+    {type:'单复数', quote:'my suggestion', fix:'my suggestions', why:'Here are 后面要接复数'},
+    {type:'单复数', quote:"the whole staff's requirement", fix:"the whole staff's requirements", why:'全体教师提的要求不止一条'}
+  ],
+
+  vocab: [
+    {original:'a wonderful suggestion to enrich our school life',
+     upgrade:'an inspiring proposal that would add colour to campus life',
+     sentence:'This is an inspiring proposal that would add colour to campus life.',
+     why:'wonderful 太笼统；enrich 换成 add colour to，读者立刻有画面'},
+    {original:'enhance a vast stress',
+     upgrade:'impose considerable pressure on',
+     sentence:'A whole day at school can impose considerable pressure on students.',
+     why:'considerable 才常修饰 pressure；impose…on 是「施加压力」的标准搭配'},
+    {original:'keep the colum for a long time',
+     upgrade:'keep the column running on a long-term basis',
+     sentence:'We should keep the column running on a long-term basis.',
+     why:'keep sth running 表示「让机制持续运转」，比 keep + 名词准确'},
+    {original:'ggrows up a sense of feeling wonderful things',
+     upgrade:'cultivates an appreciation of the beautiful things around us',
+     sentence:'It cultivates an appreciation of the beautiful things around us.',
+     why:'cultivate 是「培养（素养）」的标准动词；appreciation 比 a sense of feeling 更凝练'}
+  ],
+
+  patterns: [
+    {original:'We can air it every afternoon.',
+     improved:'Airing it every afternoon would give everyone a moment to breathe.',
+     technique:'动名词作主语',
+     added:'补出结果——给师生一个喘息的机会',
+     why:'从「播不播」变成「播了会怎样」，一句陈述就变成了论证'},
+    {original:'First and foremost, choosing the perfect time to listen to music is important.',
+     improved:'What matters most is not when we play the music, but when students most need it.',
+     technique:'what 引导主语从句 + not…but…',
+     added:'把「时间重要」具体成「学生最需要的时候」',
+     why:'主语从句让重心后移；not…but… 让判断有对照，不再是一句空话'},
+    {original:'Besides, the song quality and style should be selected before airing, and they need to be classical.',
+     improved:'Equally important is the screening of songs: each piece should be checked for lyrics and mood before it goes on air.',
+     technique:'完全倒装（表语前置）',
+     added:'把 quality and style 具体化为歌词与情绪，并补出「筛选」这个动作',
+     why:'倒装让「同等重要」这层递进关系直接显形，冒号后顺势给出细则'}
+  ],
+
+  cohesion: [
+    {original:'During whole day school life may enhance a vast stress for student, especially a day work without entertainment.',
+     improved:'Admittedly, a full day at school can be rewarding. However, it also imposes considerable pressure on students, especially on a day filled with work and no entertainment.',
+     relation:'转折（让步 → 转折）',
+     before:'（无）', after:'Admittedly … However',
+     why:'上一句还在夸「丰富校园生活」，这一句转去讲压力，中间没有转折信号，阅卷人容易判成跑题'},
+    {original:"What's more, it ggrows up a sense of feeling wonderful things.",
+     improved:'More importantly, it cultivates an appreciation of the beautiful things around us.',
+     relation:'递进',
+     before:"What's more", after:'More importantly',
+     why:'前句讲减压、本句讲审美，是「更进一层」；What\'s more 只是并列补充，压不住这个层次'},
+    {original:'Thus, here are my suggestion for the colum.',
+     improved:'With this in mind, I would like to offer a few suggestions.',
+     relation:'目的过渡',
+     before:'Thus', after:'With this in mind',
+     why:'上文是「支持理由」，下文是「建议」，两者不是因果；用「考虑到这一点」才接得上'}
+  ],
+
+  model: `Dear Sir or Madam,
+
+I am writing to express my support for the new column "Song of the Day". A well-chosen song can lift the spirits of an entire campus.
+
+Admittedly, a school day is rewarding, yet it also imposes considerable pressure on students. More importantly, the column cultivates an appreciation of the beautiful things around us.
+
+With this in mind, I have two suggestions. First, air the programme right after lunch, when students need a lift most. Second, screen each song for lyrics and mood before it goes on air.
+
+I would appreciate it if my suggestions could be taken into account.
+
+Yours,
+Li Hua`,
+
+  mnote: '改写说明：保留你原有的三个点（支持理由 / 播放时机 / 歌曲筛选），素材一律用你自己的，没有换成本题常见的「点歌」「校园广播站」。第 2、3、4 段的升级项基本都用进去了。全文约 105 词，仍比题目要求的 60 词多——严格限词时可删掉第二段第二句，只留「减压」一个理由。',
+
+  corpus: [
+    {point:'要点 1 · 表达对「每日金曲」栏目的看法', items:[
+      {text:'I am writing to express my wholehearted support for the proposed "Song of the Day" column.',
+       trans:'我写信是为了对拟设的「每日金曲」栏目表达我全力的支持。',
+       use:'开头段第一句，直接表态'},
+      {text:'A well-chosen song can lift the spirits of an entire campus in a way that a dozen notices cannot.',
+       trans:'一首选得恰当的歌，能以十几张通知都做不到的方式振奋整个校园。',
+       use:'表态后补理由，用对比撑住观点'},
+      {text:'It is not merely entertainment but a timely remedy for the pressure of a long school day.',
+       trans:'它不仅是娱乐，更是对漫长校园生活压力的一剂及时良药。',
+       use:'想把立意拔高时用 not merely…but…'}
+    ]},
+    {point:'要点 2 · 对栏目内容或形式提出建议', items:[
+      {text:'It would be advisable to air the programme right after the lunch break, when students need a lift most.',
+       trans:'建议在午休刚结束时播放，那是学生最需要提神的时候。',
+       use:'第一条建议 + 时间状语从句给理由'},
+      {text:'Each song should be screened for its lyrics and mood before it goes on air.',
+       trans:'每首歌播出前都应筛一遍歌词和情绪基调。',
+       use:'第二条建议，screen 比 choose 更像「把关」'},
+      {text:'Leaving room for students to request songs would turn the column into a shared campus ritual.',
+       trans:'留出学生点歌的空间，会把栏目变成全校共享的仪式。',
+       use:'备用建议 / 结尾升华'}
+    ]}
+  ]
+};
+
+const esc = s => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+/* 语篇内联标注：按 quote 定位、重叠跳过，编号对应下方错因 */
+function annotate(text, errors) {
+  const marks = [];
+  errors.forEach((e, i) => {
+    const q = (e.quote || '').trim();
+    if (!q) return;
+    const at = text.indexOf(q);
+    if (at < 0) { console.warn('定位失败', q); return; }
+    marks.push({ at, end: at + q.length, i, e });
+  });
+  marks.sort((a, b) => a.at - b.at);
+  let out = '', cur = 0;
+  const kept = [];
+  for (const m of marks) {
+    if (m.at < cur) continue;
+    out += esc(text.slice(cur, m.at));
+    out += '<del>' + esc(text.slice(m.at, m.end)) + '</del>'
+         + '<ins>' + esc(m.e.fix || '') + '</ins>'
+         + '<sup class="mk">' + (m.i + 1) + '</sup>';
+    kept.push(m.i);
+    cur = m.end;
+  }
+  return { html: out + esc(text.slice(cur)), kept };
+}
+
+const { html, kept } = annotate(DATA.text, DATA.errors);
+document.getElementById('essay').innerHTML = html;
+document.getElementById('causes').innerHTML = DATA.errors.map((e, i) =>
+  '<li><span class="t">' + esc(e.type) + '</span><b>' + esc(e.fix) + '</b>　' + esc(e.why) + '</li>'
+).join('');
+document.querySelector('.causes .ch').textContent = '错因速查（' + DATA.errors.length + ' 处）';
+
+document.getElementById('vocab').innerHTML = DATA.vocab.map(v =>
+  '<tr><td class="o">' + esc(v.original) + '</td>'
+  + '<td class="up">' + esc(v.upgrade) + '</td>'
+  + '<td><div class="sent">' + esc(v.sentence) + '</div><div class="why">' + esc(v.why) + '</div></td></tr>'
+).join('');
+
+document.getElementById('patterns').innerHTML = DATA.patterns.map(p =>
+  '<div class="card"><div class="orig">' + esc(p.original) + '</div>'
+  + '<div class="new">' + esc(p.improved) + '</div>'
+  + '<div class="tags"><span class="tag">' + esc(p.technique) + '</span>'
+  + '<span class="tag g">扩了：' + esc(p.added) + '</span></div>'
+  + '<div class="note">' + esc(p.why) + '</div></div>'
+).join('');
+
+document.getElementById('cohesion').innerHTML = DATA.cohesion.map(c =>
+  '<div class="card"><div class="orig">' + esc(c.original) + '</div>'
+  + '<div class="new">' + esc(c.improved) + '</div>'
+  + '<div class="tags"><span class="tag a">' + esc(c.relation) + '</span>'
+  + '<span class="tag">' + esc(c.before) + ' → ' + esc(c.after) + '</span></div>'
+  + '<div class="note">' + esc(c.why) + '</div></div>'
+).join('');
+
+document.getElementById('model').textContent = DATA.model;
+document.getElementById('mnote').textContent = DATA.mnote;
+
+document.getElementById('corpus').innerHTML = DATA.corpus.map(p =>
+  '<div class="pt"><div class="ph">' + esc(p.point) + '</div>'
+  + p.items.map(it =>
+      '<div class="it"><div class="en">' + esc(it.text) + '</div>'
+      + '<div class="cn">' + esc(it.trans) + '</div>'
+      + '<div class="use">▸ ' + esc(it.use) + '</div></div>'
+    ).join('')
+  + '</div>'
+).join('');
+</script>
+</body>
+</html>

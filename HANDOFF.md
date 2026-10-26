@@ -79,17 +79,20 @@ POST /api/station/scan  (auto=1 默认)
 | 临时区条目 | `_new_staging_item()` | 5423 |
 | 入库 | `_commit_staging_item()` | 5484 |
 | 对外序列化 | `_public_record()`（挂 essay / batch / quality） | 6083 |
-| 作文提示词 | `ESSAY_PROMPT_TEMPLATE` | 6325 |
-| 语料提示词 | `CORPUS_PROMPT` | 6392 |
-| 佳句提示词 | `AWARD_PROMPT` | 6405 |
+| 作文提示词 | `ESSAY_PROMPT_TEMPLATE`（语篇改错 + 词汇/句式/衔接升级 + 个性化范文） | 6443 |
+| 语料提示词 | `CORPUS_PROMPT`（points 分组 + 逐条翻译） | 6558 |
+| 佳句提示词 | `AWARD_PROMPT` | 6578 |
 | 送图压缩 | `_img_to_data_url(max_size=2400)` | 6425 |
 | 卷面体检（本地） | `image_quality_metrics()` / `quality_badge()` | 6454 |
 | 字迹体检（模型） | `assess_handwriting()` + `HANDWRITING_PROMPT` | 6575 |
-| 结果归一化 | `_norm_essay_result()`（含 `illegible` 过滤） | 6725 |
-| 作文批阅 | `_vision_grade_essay(page, requirements, max_score, model, quality)` | 6838 |
-| 语料缓存 | `_get_topic_corpus()`（精确指纹 + Jaccard≥0.55 模糊复用） | 6981 |
-| 佳句评选 | `_pick_awards()` | 7030 |
-| 自动流水线 | `_auto_pipeline()` / `_start_auto_batch()` | 7090 / 7240 |
+| 读不准过滤 | `_norm_essay_result()`（含 `illegible` 过滤） | 6924 |
+| 批阅结果归一化 | `_clip` / `_locate_quote`（quote 定位三级回退） | 6894 / 6902 |
+| 范文超词数压缩 | `_essay_words` / `_fit_model_essay` | 7117 / 7129 |
+| 作文批阅 | `_vision_grade_essay(page, requirements, max_score, model, quality)` | 7166 |
+| 语料归一化 | `_norm_corpus()`（points[].items[text/trans/usage]） | 7330 |
+| 语料缓存 | `_get_topic_corpus()`（精确指纹 + Jaccard≥0.55 模糊复用，只认 v2） | 7373 |
+| 佳句评选 | `_pick_awards()` | 7421 |
+| 自动流水线 | `_auto_pipeline()` / `_start_auto_batch()` | 约 7560 / 7710 |
 | 用户端接口 | `/api/portal/*` | 7388 起 |
 
 ---
@@ -112,7 +115,7 @@ data/
 ```
 
 **批次 JSON 的关键字段**（前端直接消费）：
-`job{status,stage,done,total,message}`、`topic{title,requirements,key}`、`corpus{phrases,sentences,patterns,pitfalls}`、
+`job{status,stage,done,total,message}`、`topic{title,requirements,key}`、`corpus{points[{point,items[{text,trans,usage}]}],pitfalls[{point,wrong,right}]}`（v2，带 `version:2`；老批次仍是 phrases/sentences/patterns）、
 `awards{awards[],standard,pool_size}`、`results[{student_id,name,score,level,model,quality,illegible,error}]`。
 
 ---
@@ -199,6 +202,12 @@ data/
 3. 全批得分完全相同时会写 `warning` 提示抽查（这是模型"抄示例"的信号，不是正常现象）。
 4. 语料缓存靠题干指纹 + 字符二元组 Jaccard≥0.55 模糊命中，题干大改会重新生成（正常）。
 5. `data/` 整目录被 `.gitignore` 忽略（含学生个人信息），别把它提交上去。
+6. **报告 v2 让单篇批阅从 ~45s 涨到 ~200s**（8B，输出量 3 倍）。40 篇串行要 2 小时以上。
+   要提速只有三条路：压输出配额、并发批阅（当前是串行）、或对「只求分数」的场景走 fast 档。
+7. **8B 的衔接判断偏弱**：容易把「Moreover → Furthermore」这种同义替换当成衔接升级，偶尔还会把
+   `Indeed` 标成因果。提示词已加限制（只报"该有却没有 / 关系用错"），但仍会漏，别指望它替代老师。
+8. 范文超词数靠二次压缩兜底（`_fit_model_essay`）：8B 实测会写到 2–3 倍，压一次能落回要求词数，
+   但要多吃一次文本模型调用（约 +5s、几分钱）。
 
 ---
 
@@ -235,6 +244,24 @@ data/
 
 验证状态：`py_compile` 通过；`/station`、`/portal`、`/api/station/staging`、`/api/station/context` 均 200；
 `/api/station/handwriting` 对真实记录返回 200 且结构正确；两个模板的 `<script>` 段经 Node 语法校验通过。
+
+### 12.1 学生报告 v2（2026-10-26 20:20 起）
+
+按老师给的 4 份范例 PDF（2023级1/2班 × 应用文 / 高三教学测试）重排学生报告页。
+设计文档：`docs/report-v2-design.md`；真实输出预览：`docs/preview-report-v2.html`。
+
+| 文件 | 改动 |
+|---|---|
+| `app.py` | 三个提示词重写：`errors` 改中文类型 + 强制可定位、`rewrites` 拆成 `vocab_upgrades` / `pattern_upgrades` / `cohesion`、新增 `content_upgrade`（读后续写）、`model_essay` + `model_essay_note`、`word_count`；`CORPUS_PROMPT` 改成按要点分组且逐条带翻译 |
+| `app.py` | 新增 `_clip` / `_locate_quote` / `_essay_words` / `_fit_model_essay` / `_norm_corpus`；`_norm_essay_result` 增清洗、去重、按原文位置排序；`CORPUS_VERSION=2`（老缓存不再命中，会重生成一次）；`_vision_grade_essay` 加 20015 重试 + `max_tokens=6000`；`corpus_ready` 兼容 v2 |
+| `templates/portal.html` | `essayHtml()` 重排为 8 段：字迹可靠度 → 要点覆盖 → **语篇批改（原文内联划改 + 编号 + 错因速查）** → 本篇佳句 → 高级词汇 → 高级句式 → 逻辑衔接/内容提升 → 个性化范文；新增 `inlineMarks()` / `annotateHtml()`；`batchHtml()` 支持 `points` 并**修掉 sentences 是对象却被 `esc()` 打印成 `{'sentence': …}` 的老 bug** |
+
+**实测（卢潇，满分 25）**：得分 18；9 处错误 **9/9 可在原文定位**；产出 3 条词汇升级 / 2 条句式 / 2 条衔接 / 一篇个性化范文。
+耗时 **209.6s**（原链路约 45s）——输出量涨了 3 倍，这是 v2 的主要代价，见第 10 节。
+
+**兼容策略**：老记录没有新字段时自动降级——`pattern_upgrades` 缺失就走原来的 `rewrites` 列表，
+语料没有 `points` 就走 v1 的 phrases/sentences/patterns。不需要重批历史数据。
+
 
 ---
 

@@ -98,6 +98,51 @@
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
 }
 
+/* 登录页：账号密码提示 */
+.login-help {
+    margin-top: 16px;
+    padding: 12px 14px;
+    background: var(--bg-gray);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    text-align: left;
+    font-size: 12.5px;
+    line-height: 1.8;
+    color: var(--text-secondary);
+}
+.login-help-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+.login-help-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+}
+.login-help-row .who {
+    flex: 0 0 46px;
+    color: var(--text-muted);
+}
+.login-help code {
+    background: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0 5px;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11.5px;
+    color: var(--primary-blue);
+    white-space: nowrap;
+}
+.login-help-foot {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--border-color);
+    font-size: 11.5px;
+    color: var(--text-muted);
+}
+
 /* ========== 主内容区与标签页 ========== */
 .admin-content .tab-content {
     display: none;

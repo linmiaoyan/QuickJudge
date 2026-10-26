@@ -86,6 +86,7 @@
             }
         });
     </script>
+    <link rel="stylesheet" href="/static/css/bootstrap-icons.css">
     <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/scan.css">
 </head>
@@ -157,16 +158,55 @@
             <div class="sidebar-logo-wrap" style="padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.15); margin-bottom: 8px;">
                 <img src="/logo/4.png" alt="QuickJudge" style="max-height: 40px; width: 100%; object-fit: contain; display: block;">
             </div>
-            <a href="javascript:void(0)" class="sidebar-item active" data-tab="home" onclick="switchTab('home', event)">首页</a>
-            <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="assign" onclick="switchTab('assign', event)">组卷布置</a>
-            <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="files" onclick="switchTab('files', event)">文件管理</a>
-            <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="ocr" onclick="switchTab('ocr', event)">智能阅卷</a>
-            <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="grading" onclick="switchTab('grading', event)">阅卷管理</a>
-            <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="center" onclick="switchTab('center', event)">班级中心</a>
-            <a href="/station" target="_blank" rel="noopener" class="sidebar-item sidebar-teacher" title="打开扫描工作站（本机专用，新标签页）">🖨️ 扫描工作站</a>
-            <a href="/portal" target="_blank" rel="noopener" class="sidebar-item" title="打开试卷门户（任意设备可访问，新标签页）">🌐 试卷门户</a>
-            <a href="/guide" target="_blank" rel="noopener" class="sidebar-item sidebar-help" title="打开教师新手教程（新标签页）">📘 使用教程</a>
-            <a href="javascript:void(0)" class="sidebar-item sidebar-student" data-tab="my-reports" onclick="switchTab('my-reports', event)" style="display: none;">我的报告</a>
+            <!-- ① 概览 -->
+            <div class="sidebar-group">
+                <div class="sidebar-group-title">概览</div>
+                <a href="javascript:void(0)" class="sidebar-item active" data-tab="home" onclick="switchTab('home', event)">
+                    <i class="bi bi-house-door"></i><span class="sidebar-label">首页</span>
+                </a>
+                <a href="javascript:void(0)" class="sidebar-item sidebar-student" data-tab="my-reports" onclick="switchTab('my-reports', event)" style="display: none;">
+                    <i class="bi bi-file-earmark-text"></i><span class="sidebar-label">我的报告</span>
+                </a>
+            </div>
+
+            <!-- ② 阅卷主流程（按 1→4 顺序排列） -->
+            <div class="sidebar-group sidebar-teacher">
+                <div class="sidebar-group-title">阅卷流程</div>
+                <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="assign" onclick="switchTab('assign', event)" title="第 1 步：选作文题、布置练习任务">
+                    <i class="bi bi-journal-plus"></i><span class="sidebar-label">组卷布置</span><span class="sidebar-step">1</span>
+                </a>
+                <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="grading" onclick="switchTab('grading', event)" title="第 2 步：上传试卷并归类、管理阅卷任务">
+                    <i class="bi bi-inboxes"></i><span class="sidebar-label">阅卷管理</span><span class="sidebar-step">2</span>
+                </a>
+                <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="ocr" onclick="switchTab('ocr', event)" title="第 3 步：识别手写内容并自动批阅">
+                    <i class="bi bi-magic"></i><span class="sidebar-label">智能阅卷</span><span class="sidebar-step">3</span>
+                </a>
+                <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="center" onclick="switchTab('center', event)" title="第 4 步：查看班级成绩与批阅报告">
+                    <i class="bi bi-people"></i><span class="sidebar-label">班级中心</span><span class="sidebar-step">4</span>
+                </a>
+            </div>
+
+            <!-- ③ 文件与扫描 -->
+            <div class="sidebar-group sidebar-teacher">
+                <div class="sidebar-group-title">文件与扫描</div>
+                <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="files" onclick="switchTab('files', event)" title="按班级查看扫描文件夹、归档与批量管理">
+                    <i class="bi bi-folder2-open"></i><span class="sidebar-label">文件管理</span>
+                </a>
+                <a href="/station" target="_blank" rel="noopener" class="sidebar-item sidebar-teacher" title="打开扫描工作站（本机专用，新标签页）">
+                    <i class="bi bi-printer"></i><span class="sidebar-label">扫描工作站</span><i class="bi bi-box-arrow-up-right sidebar-ext"></i>
+                </a>
+            </div>
+
+            <!-- ④ 其他入口 -->
+            <div class="sidebar-group">
+                <div class="sidebar-group-title">其他入口</div>
+                <a href="/portal" target="_blank" rel="noopener" class="sidebar-item" title="打开试卷门户（任意设备可访问，新标签页）">
+                    <i class="bi bi-globe2"></i><span class="sidebar-label">试卷门户</span><i class="bi bi-box-arrow-up-right sidebar-ext"></i>
+                </a>
+                <a href="/guide" target="_blank" rel="noopener" class="sidebar-item" title="打开教师新手教程（新标签页）">
+                    <i class="bi bi-book"></i><span class="sidebar-label">使用教程</span><i class="bi bi-box-arrow-up-right sidebar-ext"></i>
+                </a>
+            </div>
         </aside>
 
         <main class="admin-content">

@@ -84,6 +84,30 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;}
 .pill.gray{background:#f3f4f6;color:var(--text2);border-color:var(--line);}
 
+.classcard.on{border-color:var(--primary);box-shadow:0 0 0 2px rgba(37,99,235,.18);}
+.classcard.on .t::after{content:"当前查看";margin-left:auto;font-size:10.5px;font-weight:500;color:var(--primary);}
+
+/* 当前查看范围 */
+.statscope{display:flex;align-items:center;gap:10px;margin:0 0 10px;font-size:12.5px;color:var(--text2);}
+.statscope b{color:var(--primary-dark);font-weight:600;}
+.statscope .btn{padding:3px 9px;font-size:12px;}
+
+/* 详情区班级切换 */
+.classswitch{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-4px 0 14px;}
+.classswitch .cslab{font-size:12px;color:var(--muted);}
+.classswitch .cs{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:5px 12px;border-radius:999px;
+  border:1px solid var(--line);background:#fff;color:var(--text2);cursor:pointer;transition:.15s;font-family:inherit;}
+.classswitch .cs i{font-style:normal;font-size:11px;color:var(--muted);}
+.classswitch .cs:hover{border-color:var(--primary);color:var(--primary);}
+.classswitch .cs.on{background:var(--primary);border-color:var(--primary);color:#fff;}
+.classswitch .cs.on i{color:rgba(255,255,255,.8);}
+
+/* 加载 / 出错占位 */
+.loadingbox,.errbox{grid-column:1/-1;display:flex;align-items:center;gap:10px;justify-content:center;
+  background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:40px 20px;font-size:13.5px;color:var(--text2);}
+.errbox{color:#b91c1c;border-color:#fecaca;background:#fef2f2;}
+.spin.dark{border-color:#e5e7eb;border-top-color:var(--primary);}
+
 /* 记录列表 */
 .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
 .toolbar .spacer{flex:1;}
@@ -173,6 +197,47 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .awarditem{display:flex;gap:8px;font-size:12.5px;}
 .awarditem .who{flex:none;color:var(--muted);font-family:ui-monospace,Consolas,monospace;}
 .awarditem .q{color:#92400e;font-style:italic;}
+
+/* ---------- 报告 v2：语篇批改 / 词汇句式衔接 / 范文 / 按要点语料 ---------- */
+.essaybody{font-family:Georgia,"Times New Roman",serif;font-size:13.5px;line-height:2.05;
+  white-space:pre-wrap;word-break:break-word;background:#fbfcfd;border:1px solid var(--line-soft);
+  border-radius:9px;padding:11px 13px;}
+.essaybody del{color:#b91c1c;text-decoration:line-through;text-decoration-thickness:1.5px;text-decoration-color:#b91c1c;}
+.essaybody ins{color:#047857;text-decoration:none;font-weight:600;}
+.essaybody sup.mk{color:#b91c1c;font-size:9px;font-weight:700;margin-left:1px;}
+.causenote{font-size:11px;color:var(--muted);margin:8px 0 3px;}
+.causes{margin:0;padding-left:19px;}
+.causes li{font-size:12px;line-height:1.65;color:var(--text2);padding:3px 0;border-bottom:1px dashed var(--line-soft);}
+.causes li:last-child{border-bottom:none;}
+.causes li .ty{display:inline-block;font-size:10.5px;padding:0 5px;border-radius:4px;background:#fef2f2;
+  color:#991b1b;border:1px solid #fecaca;margin-right:5px;}
+.causes li b{color:#047857;font-weight:600;margin-right:5px;}
+.causes li .w{color:var(--muted);}
+.causes li.nono{list-style:none;margin-left:-14px;}
+.upg{padding:8px 0;border-bottom:1px dashed var(--line-soft);}
+.upg:last-child{border-bottom:none;}
+.upg .ln1{font-size:13px;line-height:1.7;}
+.upg .o{color:var(--text2);text-decoration:line-through;text-decoration-color:#cbd5e1;}
+.upg .ar{color:var(--muted);margin:0 5px;}
+.upg .n{color:#047857;font-weight:600;}
+.upg .big{font-size:13.5px;line-height:1.75;color:#1d4ed8;margin-top:3px;}
+.upg .why{font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.6;}
+.tags2{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;}
+.lab{font-size:10.5px;padding:1px 6px;border-radius:5px;background:var(--primary-soft);color:var(--primary-dark);}
+.lab.g{background:#ecfdf5;color:#047857;}
+.lab.a{background:#fffbeb;color:#b45309;}
+.modelbox{background:#f8fafc;border:1px solid var(--line-soft);border-left:3px solid var(--primary);
+  border-radius:8px;padding:10px 12px;font-family:Georgia,serif;font-size:13px;line-height:1.95;white-space:pre-wrap;}
+.mnote{font-size:11.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;
+  padding:7px 9px;margin-top:7px;line-height:1.6;}
+.cp{margin-top:9px;}
+.cph{font-size:12px;font-weight:600;color:var(--text2);padding-bottom:3px;
+  border-bottom:1px solid var(--line-soft);margin-bottom:4px;}
+.ci{padding:4px 0;border-bottom:1px dashed var(--line-soft);}
+.ci:last-child{border-bottom:none;}
+.ci .en{font-size:12.8px;line-height:1.6;}
+.ci .cn{font-size:11.8px;color:var(--text2);}
+.ci .cu{font-size:11px;color:var(--muted);}
 textarea{
   width:100%;min-height:120px;border:1px solid var(--line);border-radius:10px;padding:11px;
   font-family:inherit;font-size:13.5px;line-height:1.7;resize:vertical;outline:none;
@@ -242,6 +307,10 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
 
     <!-- 教师视图 -->
     <div id="teacherView" class="hidden">
+      <div class="statscope hidden" id="statScope">
+        <span>当前查看：<b id="statScopeName"></b></span>
+        <button class="btn sm" id="statScopeBack">返回全部班级</button>
+      </div>
       <div class="stats">
         <div class="stat"><div class="n" id="tTotal">0</div><div class="l">已扫描试卷</div></div>
         <div class="stat g"><div class="n" id="tDone">0</div><div class="l">已批阅</div></div>
@@ -253,6 +322,7 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
 
       <div id="detailBox" class="hidden">
         <h2 class="sec" id="detailTitle"></h2>
+        <div class="classswitch hidden" id="classSwitch"></div>
         <div class="toolbar">
           <button class="btn sm" id="backToClassesBtn">← 返回班级</button>
           <select id="statusFilter" style="width:auto;min-width:130px;padding:8px 12px;font-size:13.5px;">
@@ -314,7 +384,7 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 let ME = null, CTX = null, VIEW = { class_name: '', status: '', student_id: '' };
-let RECORDS = [], EDIT_ID = null;
+let RECORDS = [], EDIT_ID = null, LOAD_SEQ = 0;
 
 function toast(msg, type) {
   const el = document.createElement('div');
@@ -383,6 +453,7 @@ async function enterApp() {
   $('#studentView').classList.toggle('hidden', isTeacher);
   $('#teacherView').classList.toggle('hidden', !isTeacher);
   $('#detailBox').classList.add('hidden');
+  VIEW = { class_name: '', status: '', student_id: '' };
   try {
     CTX = await api('/api/portal/overview');
   } catch (e) { toast(e.message, 'err'); return; }
@@ -438,6 +509,40 @@ const ERR_TYPE_CN = {
   spelling: '拼写', chinese_english: '中式英语', punctuation: '标点', structure: '结构'
 };
 
+/* ---- 报告 v2：把错误逐条画到原文上 ---- */
+function inlineMarks(text, errs) {
+  const marks = [];
+  errs.forEach((e, i) => {
+    const q = (e.quote || '').trim();
+    if (!q) return;
+    const at = text.indexOf(q);
+    if (at < 0) return;                 // 定位不上：仍进错因表，只是不划线
+    marks.push({ at, end: at + q.length, e });
+  });
+  marks.sort((a, b) => a.at - b.at);
+  const out = [];
+  let cur = 0;
+  marks.forEach(m => {
+    if (m.at < cur) return;             // 与前一条区间重叠：跳过，避免嵌套错乱
+    m.no = out.length + 1;              // 编号只给真正画上去的，保证和纸面对得上
+    out.push(m);
+    cur = m.end;
+  });
+  return out;
+}
+
+function annotateHtml(text, marks) {
+  let out = '', cur = 0;
+  marks.forEach(m => {
+    out += esc(text.slice(cur, m.at))
+      + '<del>' + esc(text.slice(m.at, m.end)) + '</del>'
+      + (m.e.fix ? '<ins>' + esc(m.e.fix) + '</ins>' : '')
+      + '<sup class="mk">' + m.no + '</sup>';
+    cur = m.end;
+  });
+  return out + esc(text.slice(cur));
+}
+
 function essayHtml(r, anon) {
   const e = r.essay;
   if (!e || typeof e !== 'object') return '';
@@ -479,28 +584,44 @@ function essayHtml(r, anon) {
       + '</div></div>';
   }
 
-  // 2) 语言错误
+  // 2) 语篇批改：先在原文上划改，再按编号给错因
   const errs = e.errors || [];
+  const txt = (e.text || '').trim();
   if (errs.length) {
-    h += '<div class="eblk"><div class="eh">✍️ 语言错误<span class="cnt">' + errs.length + ' 处</span></div><div class="eb">'
-      + errs.map(x => '<div class="err"><span class="ty">' + esc(ERR_TYPE_CN[x.type] || x.type || '错误') + '</span><div class="body">'
-        + (x.quote ? '<span class="q">' + esc(x.quote) + '</span> ' : '')
-        + (x.fix ? '<span class="f">→ ' + esc(x.fix) + '</span>' : '')
+    const marks = txt ? inlineMarks(txt, errs) : [];
+    const wc = e.word_count || {};
+    const wcNote = (wc.required || wc.actual)
+      ? '　' + (wc.required ? '要求 ' + wc.required + ' 词 / ' : '')
+        + '实写 ' + (wc.actual || '—') + ' 词'
+      : '';
+    if (marks.length) {
+      const inl = marks.map(m => m.e);
+      const rest = errs.filter(x => inl.indexOf(x) < 0);   // 位置重叠/定位失败的条目
+      const row = (x, no) => '<li' + (no ? ' value="' + no + '"' : ' class="nono"') + '>'
+        + (no ? '' : '<span class="ty" style="background:#f3f4f6;color:var(--muted);border-color:var(--line)">位置重叠</span>')
+        + '<span class="ty">' + esc(ERR_TYPE_CN[x.type] || x.type || '错误') + '</span>'
+        + (x.fix ? '<b>' + esc(x.fix) + '</b>' : '')
         + (x.why ? '<span class="w">' + esc(x.why) + '</span>' : '')
-        + '</div></div>').join('')
-      + '</div></div>';
+        + '</li>';
+      h += '<div class="eblk"><div class="eh">📝 语篇批改'
+        + '<span class="cnt">' + marks.length + ' 处 · 划掉的是错处' + esc(wcNote) + '</span></div><div class="eb">'
+        + '<div class="essaybody">' + annotateHtml(txt, marks) + '</div>'
+        + '<div class="causenote">编号对应下面的错因' + (rest.length ? '（最后 ' + rest.length + ' 条与上文位置重叠，未单独划线）' : '') + '：</div>'
+        + '<ol class="causes">' + inl.map((x, i) => row(x, i + 1)).join('') + rest.map(x => row(x, 0)).join('') + '</ol>'
+        + '</div></div>';
+    } else {
+      // 老数据（只有清单、没有可定位的原文）→ 退回列表式
+      h += '<div class="eblk"><div class="eh">✍️ 语言错误<span class="cnt">' + errs.length + ' 处' + esc(wcNote) + '</span></div><div class="eb">'
+        + errs.map(x => '<div class="err"><span class="ty">' + esc(ERR_TYPE_CN[x.type] || x.type || '错误') + '</span><div class="body">'
+          + (x.quote ? '<span class="q">' + esc(x.quote) + '</span> ' : '')
+          + (x.fix ? '<span class="f">→ ' + esc(x.fix) + '</span>' : '')
+          + (x.why ? '<span class="w">' + esc(x.why) + '</span>' : '')
+          + '</div></div>').join('')
+        + '</div></div>';
+    }
   }
 
-  // 3) 个性化句子修改
-  const rw = e.rewrites || [];
-  if (rw.length) {
-    h += '<div class="eblk"><div class="eh">🔧 这几句可以写得更好<span class="cnt">' + rw.length + ' 句</span></div><div class="eb">'
-      + rw.map(x => '<div class="rw"><div class="o">' + esc(x.original) + '</div><div class="n">' + esc(x.improved)
-        + (x.focus ? '<span class="fo">（' + esc(x.focus) + '）</span>' : '') + '</div></div>').join('')
-      + '</div></div>';
-  }
-
-  // 4) 本篇佳句
+  // 3) 本篇佳句：先给一句写得好的，别让整页都是错
   const aw = e.sentence_award || {};
   if (aw.quote) {
     h += '<div class="eblk"><div class="eh">⭐ 本篇佳句</div><div class="eb">'
@@ -508,7 +629,71 @@ function essayHtml(r, anon) {
       + (aw.why ? '<span class="wh">' + esc(aw.why) + '</span>' : '') + '</div></div></div>';
   }
 
-  // 5) 批次级：话题语料 + 同学佳句
+  // 4) 高级词汇：原表达 → 升级 → 放进整句
+  const voc = e.vocab_upgrades || [];
+  if (voc.length) {
+    h += '<div class="eblk"><div class="eh">🆙 高级词汇<span class="cnt">' + voc.length + ' 条 · 你写对了，但可以更准</span></div><div class="eb">'
+      + voc.map(v => '<div class="upg"><div class="ln1"><span class="o">' + esc(v.original) + '</span>'
+          + '<span class="ar">→</span><span class="n">' + esc(v.upgrade) + '</span></div>'
+          + (v.sentence ? '<div class="big">' + esc(v.sentence) + '</div>' : '')
+          + (v.why ? '<div class="why">' + esc(v.why) + '</div>' : '')
+          + '</div>').join('')
+      + '</div></div>';
+  }
+
+  // 5) 高级句式：换句型 + 补内容；老数据只有 rewrites
+  const pat = e.pattern_upgrades || [];
+  if (pat.length) {
+    h += '<div class="eblk"><div class="eh">🧩 高级句式<span class="cnt">' + pat.length + ' 句 · 换句型的同时把内容说满</span></div><div class="eb">'
+      + pat.map(p => '<div class="upg"><div class="ln1"><span class="o">' + esc(p.original) + '</span></div>'
+          + '<div class="big">' + esc(p.improved) + '</div>'
+          + '<div class="tags2">' + (p.technique ? '<span class="lab">' + esc(p.technique) + '</span>' : '')
+          + (p.added ? '<span class="lab g">扩了：' + esc(p.added) + '</span>' : '') + '</div>'
+          + (p.why ? '<div class="why">' + esc(p.why) + '</div>' : '')
+          + '</div>').join('')
+      + '</div></div>';
+  } else if ((e.rewrites || []).length) {
+    h += '<div class="eblk"><div class="eh">🔧 这几句可以写得更好<span class="cnt">' + e.rewrites.length + ' 句</span></div><div class="eb">'
+      + e.rewrites.map(x => '<div class="rw"><div class="o">' + esc(x.original) + '</div><div class="n">' + esc(x.improved)
+        + (x.focus ? '<span class="fo">（' + esc(x.focus) + '）</span>' : '') + '</div></div>').join('')
+      + '</div></div>';
+  }
+
+  // 6) 逻辑衔接（应用文）/ 内容提升（读后续写）
+  const coh = e.cohesion || [];
+  if (coh.length) {
+    h += '<div class="eblk"><div class="eh">🔗 逻辑衔接<span class="cnt">' + coh.length + ' 处 · 先看关系，再选衔接词</span></div><div class="eb">'
+      + coh.map(c => '<div class="upg"><div class="ln1"><span class="o">' + esc(c.original) + '</span></div>'
+          + '<div class="big">' + esc(c.improved) + '</div>'
+          + '<div class="tags2">' + (c.relation ? '<span class="lab a">' + esc(c.relation) + '</span>' : '')
+          + (c.after ? '<span class="lab">' + esc(c.before || '无') + ' → ' + esc(c.after) + '</span>' : '') + '</div>'
+          + (c.why ? '<div class="why">' + esc(c.why) + '</div>' : '')
+          + '</div>').join('')
+      + '</div></div>';
+  }
+  const cug = e.content_upgrade || [];
+  if (cug.length) {
+    h += '<div class="eblk"><div class="eh">🎬 内容提升<span class="cnt">' + cug.length + ' 处 · 按情节节点</span></div><div class="eb">'
+      + cug.map(c => '<div class="upg"><div class="ln1"><span class="o">' + esc(c.original) + '</span></div>'
+          + '<div class="big">' + esc(c.improved) + '</div>'
+          + '<div class="tags2">' + (c.node ? '<span class="lab a">' + esc(c.node) + '</span>' : '')
+          + (c.added ? '<span class="lab g">补了：' + esc(c.added) + '</span>' : '') + '</div>'
+          + (c.why ? '<div class="why">' + esc(c.why) + '</div>' : '')
+          + '</div>').join('')
+      + '</div></div>';
+  }
+
+  // 7) 个性化范文：用这个学生的思路和素材
+  if (e.model_essay) {
+    const wm = (e.word_count || {}).model;
+    h += '<div class="eblk"><div class="eh">📄 个性化范文<span class="cnt">'
+      + (wm ? wm + ' 词 · ' : '') + '用你的思路和素材，只把语言换掉</span></div><div class="eb">'
+      + '<div class="modelbox">' + esc(e.model_essay) + '</div>'
+      + (e.model_essay_note ? '<div class="mnote">' + esc(e.model_essay_note) + '</div>' : '')
+      + '</div></div>';
+  }
+
+  // 8) 批次级：本题专属语料 + 同学佳句
   h += batchHtml(r, anon);
   return h;
 }
@@ -519,20 +704,46 @@ function batchHtml(r, anon) {
   const co = b.corpus || {};
   const aws = b.awards || [];
   let corpusHtml = '';
-  if ((co.sentences || []).length) {
-    corpusHtml += '<div class="h">可直接套用的句子</div>' + co.sentences.map(s => '<div class="li">' + esc(s) + '</div>').join('');
-  }
-  if ((co.phrases || []).length) {
-    corpusHtml += '<div class="h">高频短语</div>' + co.phrases.map(s => '<div class="li">' + esc(s) + '</div>').join('');
-  }
-  if ((co.patterns || []).length) {
-    corpusHtml += '<div class="h">可迁移句式</div>' + co.patterns.map(p =>
-      '<div class="li"><span class="tag">模板</span>' + esc(p.pattern || '')
-      + (p.scene ? ' <span style="color:var(--muted)">（' + esc(p.scene) + '）</span>' : '') + '</div>').join('');
+
+  // v2：按要点分组，每条带翻译（points[].items[{text,trans,usage}]）
+  if ((co.points || []).length) {
+    corpusHtml += co.points.map(pt => {
+      const items = (pt.items || []).map(it => {
+        const en = typeof it === 'string' ? it : (it.text || '');
+        const cn = typeof it === 'string' ? '' : (it.trans || '');
+        const use = typeof it === 'string' ? '' : (it.usage || '');
+        if (!en) return '';
+        return '<div class="ci"><div class="en">' + esc(en) + '</div>'
+          + (cn ? '<div class="cn">' + esc(cn) + '</div>' : '')
+          + (use ? '<div class="cu">▸ ' + esc(use) + '</div>' : '') + '</div>';
+      }).join('');
+      return (items ? '<div class="cp">' + (pt.point ? '<div class="cph">' + esc(pt.point) + '</div>' : '') + items + '</div>' : '');
+    }).join('');
+  } else {
+    // v1 兼容：sentences 是 {sentence, meaning} 而不是字符串，旧版直接 esc() 会打印 Python dict
+    const sent = (co.sentences || []).map(s => typeof s === 'string' ? s : (s.sentence || '')).filter(Boolean);
+    const phr = (co.phrases || []).map(s => typeof s === 'string' ? s : (s.text || '')).filter(Boolean);
+    if (sent.length) {
+      corpusHtml += '<div class="h">可直接套用的句子</div>'
+        + (co.sentences || []).map(s => typeof s === 'string'
+            ? '<div class="li">' + esc(s) + '</div>'
+            : '<div class="li">' + esc(s.sentence || '')
+              + (s.meaning ? '<span style="color:var(--muted)">　' + esc(s.meaning) + '</span>' : '') + '</div>'
+          ).join('');
+    }
+    if (phr.length) {
+      corpusHtml += '<div class="h">高频短语</div>' + phr.map(s => '<div class="li">' + esc(s) + '</div>').join('');
+    }
+    if ((co.patterns || []).length) {
+      corpusHtml += '<div class="h">可迁移句式</div>' + co.patterns.map(p =>
+        '<div class="li"><span class="tag">模板</span>' + esc(p.pattern || '')
+        + (p.scene ? ' <span style="color:var(--muted)">（' + esc(p.scene) + '）</span>' : '') + '</div>').join('');
+    }
   }
   if ((co.pitfalls || []).length) {
     corpusHtml += '<div class="h">本话题易错</div>' + co.pitfalls.map(p =>
-      '<div class="li"><span style="color:#991b1b">' + esc(p.wrong || '') + '</span> → <span style="color:#047857">' + esc(p.right || '') + '</span></div>').join('');
+      '<div class="li">' + (p.point ? '<span style="color:var(--muted)">' + esc(p.point) + '　</span>' : '')
+      + '<span style="color:#991b1b">' + esc(p.wrong || '') + '</span> → <span style="color:#047857">' + esc(p.right || '') + '</span></div>').join('');
   }
   let awHtml = '';
   if (aws.length) {
@@ -546,8 +757,9 @@ function batchHtml(r, anon) {
       }).join('') + '</div>';
   }
   if (!corpusHtml && !awHtml) return '';
+  const coTitle = (co.points || []).length ? '📚 本题专属语料（按要点 · 带翻译）' : '📚 本话题语料包';
   let inner = '';
-  if (corpusHtml) inner += '<details><summary>📚 本话题语料包</summary><div class="inner">' + corpusHtml + '</div></details>';
+  if (corpusHtml) inner += '<details><summary>' + coTitle + '</summary><div class="inner">' + corpusHtml + '</div></details>';
   if (awHtml) inner += '<details open><summary>🌟 本批同学佳句</summary><div class="inner">' + awHtml + '</div></details>';
   return '<div class="edu">' + inner + '</div>';
 }
@@ -671,19 +883,88 @@ function renderTeacher() {
       catch (err) { toast(err.message, 'err'); }
     });
   }
+  syncClassView();
+}
+
+/* ---------- 班级切换：选中态 / 切换条 / 统计范围 ---------- */
+function syncClassView() {
+  const cn = VIEW.class_name || '';
+  $$('#classGrid [data-class]').forEach(el => el.classList.toggle('on', el.dataset.class === cn));
+  const sw = $('#classSwitch');
+  if (!cn) {
+    if (sw) { sw.classList.add('hidden'); sw.innerHTML = ''; }
+    resetStatsScope();
+    return;
+  }
+  renderClassSwitch(cn);
+  applyClassStats(cn);
+}
+
+function renderClassSwitch(cname) {
+  const sw = $('#classSwitch');
+  if (!sw) return;
+  const cls = (CTX && CTX.classes) || [];
+  if (cls.length < 2) { sw.classList.add('hidden'); sw.innerHTML = ''; return; }
+  sw.classList.remove('hidden');
+  sw.innerHTML = '<span class="cslab">切换班级</span>' + cls.map(c =>
+    '<button type="button" class="cs' + (c.class_name === cname ? ' on' : '') + '" data-cs="' + esc(c.class_name) + '">'
+    + esc(c.class_name) + '<i>' + c.total + ' 份</i></button>').join('');
+  $$('[data-cs]', sw).forEach(b => b.onclick = () => openClass(b.dataset.cs));
+}
+
+function applyClassStats(cname) {
+  const c = ((CTX && CTX.classes) || []).find(x => x.class_name === cname);
+  if (!c) { resetStatsScope(); return; }
+  $('#tTotal').textContent = c.total;
+  $('#tDone').textContent = c.graded;
+  $('#tWait').textContent = c.pending;
+  $('#statScopeName').textContent = cname + '（' + c.total + ' 份）';
+  $('#statScope').classList.remove('hidden');
+}
+
+function resetStatsScope() {
+  const box = $('#statScope');
+  if (box) box.classList.add('hidden');
+  if (!CTX) return;
+  $('#tTotal').textContent = CTX.total || 0;
+  $('#tDone').textContent = CTX.graded || 0;
+  $('#tWait').textContent = CTX.pending || 0;
+}
+
+/* 详情区滚动：避开吸顶的顶栏，保证「班级 · 已扫描试卷」标题可见 */
+function scrollToDetail() {
+  const bar = document.querySelector('.topbar');
+  const off = (bar ? bar.offsetHeight : 0) + 14;
+  const y = $('#detailBox').getBoundingClientRect().top + window.scrollY - off;
+  window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+}
+
+function showRecordsLoading(cname) {
+  $('#teacherRecords').innerHTML =
+    '<div class="loadingbox"><span class="spin dark"></span>正在加载 ' + esc(cname) + ' 班的试卷…</div>';
 }
 
 async function openClass(cname) {
-  VIEW = { class_name: cname, status: '', student_id: '' };
-  $('#statusFilter').value = '';
-  $('#sidSearch').value = '';
-  $('#detailBox').classList.remove('hidden');
-  $('#detailTitle').textContent = cname + ' · 已扫描试卷';
-  await loadTeacherRecords();
-  $('#detailBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const same = VIEW.class_name === cname && !$('#detailBox').classList.contains('hidden');
+  if (!same) {
+    VIEW = { class_name: cname, status: '', student_id: '' };
+    $('#statusFilter').value = '';
+    $('#sidSearch').value = '';
+    $('#detailBox').classList.remove('hidden');
+    $('#detailTitle').textContent = cname + ' · 已扫描试卷';
+    showRecordsLoading(cname);      // 先清掉上一个班的列表，避免切换瞬间看到旧内容
+    syncClassView();
+    await loadTeacherRecords();     // 内容填好再滚动，否则页面高度不够会滚不到位
+  }
+  scrollToDetail();
 }
 
-$('#backToClassesBtn').onclick = () => { $('#detailBox').classList.add('hidden'); };
+$('#backToClassesBtn').onclick = () => {
+  $('#detailBox').classList.add('hidden');
+  VIEW = { class_name: '', status: '', student_id: '' };
+  syncClassView();
+};
+$('#statScopeBack').onclick = () => $('#backToClassesBtn').click();
 $('#applyFilterBtn').onclick = () => {
   VIEW.status = $('#statusFilter').value;
   VIEW.student_id = $('#sidSearch').value.trim();
@@ -693,17 +974,28 @@ $('#sidSearch').addEventListener('keydown', e => { if (e.key === 'Enter') $('#ap
 $('#statusFilter').onchange = () => { VIEW.status = $('#statusFilter').value; loadTeacherRecords(); };
 
 async function loadTeacherRecords() {
+  const seq = ++LOAD_SEQ;
   const qs = new URLSearchParams();
   if (VIEW.class_name) qs.set('class_name', VIEW.class_name);
   if (VIEW.status) qs.set('status', VIEW.status);
   if (VIEW.student_id) qs.set('student_id', VIEW.student_id);
   let data;
   try { data = await api('/api/portal/records?' + qs.toString()); }
-  catch (e) { toast(e.message, 'err'); return; }
+  catch (e) {
+    if (seq !== LOAD_SEQ) return;                    // 已经有更新的请求，忽略这次失败
+    toast(e.message, 'err');
+    $('#teacherRecords').innerHTML = '<div class="errbox">加载失败：' + esc(e.message) + '　请重试或切换班级。</div>';
+    return;
+  }
+  if (seq !== LOAD_SEQ) return;                      // 过期响应丢弃，防止慢请求覆盖新班级
   RECORDS = data.records || [];
   const box = $('#teacherRecords');
+  const filtered = !!(VIEW.status || VIEW.student_id);
+  $('#detailTitle').innerHTML = esc(VIEW.class_name || '全部班级') + ' · 已扫描试卷'
+    + ' <span class="cnt">共 ' + RECORDS.length + ' 份' + (filtered ? '（已筛选）' : '') + '</span>';
   if (!RECORDS.length) {
-    box.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="big">🗂️</div>该筛选条件下没有试卷。</div>';
+    box.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="big">🗂️</div>'
+      + (filtered ? '该筛选条件下没有试卷。' : '这个班级还没有试卷。') + '</div>';
     return;
   }
   const statsHtml = errStats(RECORDS);

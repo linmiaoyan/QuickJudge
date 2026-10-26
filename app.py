@@ -10,6 +10,8 @@ import uuid
 import random
 import string
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 try:
@@ -1159,10 +1161,13 @@ def create_class():
 
 def student_id_to_class_code(student_id):
     """
-    根据学号推导班级编码。两种学号格式并存：
+    根据**完整**学号推导班级编码。两种学号格式并存：
 
-    · 旧版 6 位：前2位年份 + 第3-4位班号 + 第5-6位座号（230205 -> 23年2班5号 -> 班级 2302）；
-    · 新版 4 位（2026 级起，不再带年级前缀）：前2位班号 + 后2位班内座号（1426 -> 14班26号 -> 班级 14）。
+    · 6 位（当前主用）：前2位年级 + 第3-4位班号 + 第5-6位座号（260101 -> 26级1班01号 -> 班级 2601）；
+    · 4 位（2026 级起的老格式，现已退化为「后四位」写法）：前2位班号 + 后2位座号（1426 -> 14班26号 -> 班级 14）。
+
+    ⚠️ 高一学生卷面只写**后四位**（260101 写成 0101），那种输入必须先经
+    `resolve_student_id()` 回查成完整学号再调本函数，否则会被当成「14 班」。
 
     非纯数字或长度不符时返回 None。
     """
@@ -1174,6 +1179,90 @@ def student_id_to_class_code(student_id):
     if len(s) == 4:
         return s[:2]
     return None
+
+
+_STUDENT_INDEX_CACHE = {'key': None, 'ids': set(), 'names': {}, 'by_suffix': {}}
+
+
+def _student_index():
+    """学生学号索引（按账号表 mtime+size 缓存）：完整学号集合、学号→姓名、后四位→[完整学号]。"""
+    try:
+        st = os.stat(USERS_FILE)
+        key = (st.st_mtime, st.st_size)
+    except OSError:
+        key = None
+    cache = _STUDENT_INDEX_CACHE
+    if key is not None and cache['key'] == key:
+        return cache
+    ids, names, by_suffix = set(), {}, {}
+    try:
+        for u in load_users():
+            if u.get('role') != 'student':
+                continue
+            sid = str(u.get('id') or '').strip()
+            if not sid.isdigit():
+                continue
+            ids.add(sid)
+            names[sid] = (u.get('name') or '').strip()
+            if len(sid) >= 4:
+                by_suffix.setdefault(sid[-4:], []).append(sid)
+    except Exception as e:
+        print('构建学号索引失败: %s' % e)
+    cache.update({'key': key, 'ids': ids, 'names': names, 'by_suffix': by_suffix})
+    return cache
+
+
+def _four_digit_grade_prefix():
+    """哪个年级的卷面只写学号后四位（返回学号前两位的年级码，如 '26'）。
+
+    现实依据：只有当前高一这一届按「后四位」写学号，高二高三写完整六位。
+    六位学号 = 年级2位 + 班号2位 + 座号2位，而三个年级的班号、座号完全同构，
+    所以**班号无法跨年级消歧**，只能靠这个年级前缀补全。
+    学年初换届时改这里（或用环境变量 FOUR_DIGIT_GRADE 覆盖）。
+    """
+    v = (os.environ.get('FOUR_DIGIT_GRADE') or '').strip()
+    return v if len(v) == 2 and v.isdigit() else '26'
+
+
+def resolve_student_id(observed, class_no=''):
+    """把卷面上观测到的学号解析成名单里的完整学号。
+
+    高一学生卷面只写**后四位**（260101 写成 0101）。四位号在三个年级间完全撞号
+    （0101 同时对应 240101 / 250101 / 260101），班号也相同，所以不能用班号消歧，
+    只能按 `_four_digit_grade_prefix()` 指定的年级补全：26 + 0101 -> 260101。
+
+    返回 (学号, 说明)：
+      · 说明为空  → 已在名单中唯一命中，可放心入库建号；
+      · 说明非空 → 解析不确定，学号原样返回，由上层标记待确认，**不要**据此建账号。
+    """
+    raw = re.sub(r'[^\d]', '', str(observed or ''))
+    if not raw:
+        return '', '未识别到学号'
+    idx = _student_index()
+
+    if len(raw) == 6:
+        if raw in idx['ids']:
+            return raw, ''
+        return raw, '学号不在名单中'
+
+    if len(raw) == 4:
+        cn = re.sub(r'[^\d]', '', str(class_no or ''))
+        cn = cn[-2:].zfill(2) if cn else ''
+        # 主路径：后四位前两位本身就是班号，直接补年级前缀
+        guess = _four_digit_grade_prefix() + raw
+        if guess in idx['ids']:
+            if cn and cn != raw[:2]:
+                return guess, '班号「%s」与后四位「%s」不一致，已按学号归档' % (cn, raw[:2])
+            return guess, ''
+        # 兜底：前缀补全不中，再看全表是否只有一个匹配
+        cands = sorted(idx['by_suffix'].get(raw, []))
+        if len(cands) == 1:
+            return cands[0], ''
+        if not cands:
+            return raw, '后四位在名单中无匹配'
+        return raw, '后四位对应多人（%s），需人工确认' % ' / '.join(cands[:4])
+
+    return raw, '学号位数异常（%d 位）' % len(raw)
 
 
 def ensure_class_for_student(student_id, student_name=None):
@@ -1222,20 +1311,37 @@ def _clean_person_name(name):
     return s[:4] if 2 <= len(s) <= 4 else ''
 
 
-def _ensure_student_registry(student_id, name=''):
+def _ensure_student_registry(student_id, name='', class_no=''):
     """认出学号后自动完成「建班 + 进名单 + 建学生账号」，老师不需要再做任何归档动作。
 
-    返回 (class_code, display_name)。学号不合法时返回 ('', '')。
+    两条硬规矩：
+      · **学号是主键，姓名以名单为准**。中文手写姓名识别不稳（同一张图会给出多个
+        答案），所以 OCR 姓名只在名单里查不到该学号时才作为兜底；
+      · **解析不出的学号不建账号**。宁可让这条记录带「待确认」标记，也不要把一个
+        猜错的学号写进名单，否则以后每次批阅都会沿用错的。
+
+    返回 (class_code, display_name, resolved_id, note)。note 非空表示解析不确定。
     """
-    sid = str(student_id or '').strip()
+    raw = str(student_id or '').strip()
+    sid, note = resolve_student_id(raw, class_no)
+    if not sid:
+        return '', '', raw, note or '学号为空'
     class_code = student_id_to_class_code(sid)
     if not class_code:
-        return '', ''
+        return '', '', sid, note or '学号位数异常'
+
+    idx = _student_index()
+    roster_name = idx['names'].get(sid) or ''
+    if sid not in idx['ids']:
+        # 不在名单：不建班、不建号，也不拿后四位去推班级（会推出一个不存在的班），
+        # 由上层把它归到「待确认」，老师一眼能看到哪些卷子没认准。
+        return '', '', sid, note or '学号不在名单中'
+
     name = _clean_person_name(name)
 
     # 1) 班级目录 + 名单
     try:
-        ensure_class_for_student(sid, name or None)
+        ensure_class_for_student(sid, roster_name or None)
     except Exception as e:
         print('自动建班失败: %s' % e)
 
@@ -1244,18 +1350,17 @@ def _ensure_student_registry(student_id, name=''):
         users = load_users()
         hit = next((u for u in users if str(u.get('id', '')) == sid), None)
         if hit is None:
-            users.append({'id': sid, 'name': name or sid, 'role': 'student', 'password': sid})
+            users.append({'id': sid, 'name': roster_name or name or sid,
+                          'role': 'student', 'password': sid})
             save_users(users)
-        elif name and not str(hit.get('name') or '').strip():
-            # 名单里已有该学号但没名字，用识别到的姓名补上
-            hit['name'] = name
+        elif roster_name and str(hit.get('name') or '').strip() != roster_name:
+            # 名单是权威来源：账号上若留着早期 OCR 猜的姓名，这里纠正过来
+            hit['name'] = roster_name
             save_users(users)
-        else:
-            name = str(hit.get('name') or '').strip() or name
     except Exception as e:
         print('自动建学生账号失败: %s' % e)
 
-    return class_code, name
+    return class_code, roster_name or name, sid, ''
 
 
 def _task_papers_count(task_id):
@@ -5494,10 +5599,15 @@ def _commit_staging_item(item, student_id, class_name, task_id, note, crop, rota
         return False, '图片文件缺失，无法提交'
     student_id = (student_id or '').strip()
     class_name = (class_name or '').strip()
+    if student_id and len(re.sub(r'[^\d]', '', student_id)) == 4:
+        # 高一学生卷面/手工录入可能只有后四位，能唯一回查就换成完整学号
+        full_sid, sid_note = resolve_student_id(student_id, '')
+        if not sid_note:
+            student_id = full_sid
     if not class_name and student_id:
         class_name = student_id_to_class_code(student_id) or ''
     if not class_name:
-        return False, '请先指定班级（或填写学号，系统会按学号自动归档：4 位学号前 2 位是班级，6 位学号前 4 位是班级）'
+        return False, '请先指定班级（或填写学号，系统会按学号自动归档：6 位学号前 4 位是班级；高一可只填后四位，系统按名单回查）'
 
     clean_regions = _clean_regions(regions if regions is not None else item.get('regions'))
     # 区域优先：有区域时整页原样保存，裁切在各区域取图时按需进行，便于日后调整
@@ -5666,7 +5776,8 @@ def station_job(batch_id):
         'results': b.get('results') or [],
         'record_ids': b.get('record_ids') or [],
         'failed': b.get('failed') or [],
-        'corpus_ready': bool((b.get('corpus') or {}).get('phrases')),
+        'corpus_ready': bool((b.get('corpus') or {}).get('points')
+                             or (b.get('corpus') or {}).get('phrases')),
         'awards': (b.get('awards') or {}).get('awards') or [],
     })
 
@@ -5879,10 +5990,16 @@ def station_detect_id(item_id):
         text = llm_ocr_recognize(img) or ''
     except Exception as e:
         return jsonify({'error': '识别失败：%s' % e}), 500
-    guess = extract_student_id(text) or ''
+    guess_seen = extract_student_id(text) or ''
+    # 高一卷面只有后四位，这里先尝试回查成完整学号，再据完整学号推班级
+    guess, guess_note = resolve_student_id(guess_seen, item.get('class_name') or '')
+    if guess_note:
+        guess = guess_seen  # 解析不确定就保留原样，交给老师确认
     item['ocr_text'] = text[:4000]
     item['student_id_guess'] = guess
-    if guess:
+    item['student_id_seen'] = guess_seen
+    item['sid_note'] = guess_note
+    if guess and not guess_note:
         item['student_id'] = guess
         if not item.get('class_name'):
             item['class_name'] = student_id_to_class_code(guess) or ''
@@ -5890,7 +6007,8 @@ def station_detect_id(item_id):
     if not text:
         return jsonify({'ok': False, 'error': '未能识别出文字，请检查图片或手动填写学号', 'item': item,
                         'candidates': []})
-    return jsonify({'ok': True, 'student_id': guess, 'ocr_text': item['ocr_text'],
+    return jsonify({'ok': True, 'student_id': guess, 'student_id_seen': guess_seen,
+                    'sid_note': guess_note, 'ocr_text': item['ocr_text'],
                     'item': item, 'candidates': _student_id_candidates(guess, item.get('class_name', ''))})
 
 
@@ -6326,7 +6444,7 @@ ESSAY_PROMPT_TEMPLATE = '''你正在批阅一份中国高一学生的英语作�
 
 图片说明：第 1 张是整页试卷；若还有第 2 张，那是同一页顶部「班级 / 姓名 / 学号」栏的放大特写，读学号以特写为准。
 
-请完成以下五件事，然后严格按 JSON 输出。
+请完成以下六件事，然后严格按 JSON 输出。
 
 一、读表头
 识别班级号、姓名、学号。学号为 4 位数字：前 2 位是班级号，后 2 位是班内座号。
@@ -6351,12 +6469,54 @@ evidence 摘录学生原文片段作为依据。若学生写了大量与题目�
 并在 issues 里明确指出「偏离题意」。
 注意：requirements 只写「内容要点」（该写什么），词数要求、书写要求、格式要求都不是要点，不要列进去。
 
-四、语言与表达
-· errors：逐条列出真实存在的语言错误，type 取 grammar / tense / agreement / article / preposition /
-  collocation / word_choice / spelling / chinese_english / punctuation / structure 之一。
-  quote 必须是原文片段（可直接在 text 里搜到），fix 给出改后写法，why 一句话说明原因。不要为凑数编造。
-· rewrites：挑 2-3 句「没有语法错误、但可以写得更好」的句子，improved 给改写，focus 说明改写着力点。
+四、语篇改错（这些条目会被直接画到学生原文上）
+逐条列出真实存在的语言错误。要求：
+· type 只能取以下中文标签之一：拼写 / 大小写 / 冠词 / 介词 / 单复数 / 所有格 / 固定搭配 /
+  用词 / 语态 / 时态 / 动词不定式 / 句子成分残缺 / 表达冗余 / 表达混乱；
+  若本题是读后续写，另可用：分词 / 动名词 / 连词 / 代词 / 词性误用 / 并列结构 / 从句 / 标点 /
+  逗号连接两个完整句子。
+· quote 必须从 text 里原样复制，不超过 8 个词（按空格数算，超长的会被系统舍弃），并且在 text 中只出现一次——
+  系统靠它在原文上划掉错处、贴上改法。做不到唯一就换一段更长的片段。
+· fix 只写改后的写法，不要写「应改为」；why 用一句话说明错在哪条规则上（这是给学生的错因）。
+· 同一处不要重复报；拼写和语法重合时只报一条，取更具体的那一类。
+· 有几处报几处，不要凑数；改前改后一模一样的不许出现。错误很多时最多 8 条，优先报影响理解的。
+· 完全正确的作文返回空数组。
+
+五、表达升级（回答「这几句怎么写得更好」）
+· vocab_upgrades：3-4 条。挑「没有语法错误、但用词平」的表达（不是错句，错句归 errors）。
+  original 从 text 原样摘（可以是词组）；upgrade 给更准或更地道的表达，不要生僻词；
+  sentence 给出把升级项放回句子后的完整句子，必须保留学生原意与原有信息（不要顺带塞进别的新信息）；
+  why 一句话说明为什么更好（搭配更地道 / 语义更准 / 语域更合适）。
+· pattern_upgrades：2 条句式升级（最多 3 条）。
+  original 从 text 原样摘一句；improved 必须同时「换句型 + 补内容」；
+  technique 写手法名（非谓语作状语 / 定语从句 / 名词性从句 / 强调句 / 倒装 / 独立主格 / 平行结构 等）；
+  added 写补了什么内容（如「补出结果：给师生一个喘息的机会」）——只换同义词不许算升级；
+  why 一句话说明效果。
+· cohesion：2 条逻辑衔接升级，只看衔接手段，不修语法（语法问题归 errors）。
+  original 摘原句；improved 改写后必须真的出现衔接手段；
+  relation 只能取：并列 / 递进 / 转折 / 因果 / 举例 / 对比 / 总结 / 目的；
+  before 写原句用的衔接词（没有就写「无」），after 写改后用的衔接词，
+  优先从这些常用词里选：however / therefore / as a result / moreover / furthermore / in addition /
+  for example / by contrast / above all / to begin with / more importantly / with this in mind；
+  所选的词必须真的表达 relation 说的那种关系，别硬套；
+  why 点明这两句之间到底是什么关系（学生常常用错关系，比如该转折却用了 Thus）。
+  **只报「该有却没有」或「关系用错」两类**；原句衔接词本来就用对了、改后只是换个近义词
+  （如 Moreover → Furthermore），不算升级，不要报。宁可一条都不给，也不要凑。
+· content_upgrade：仅当本题是「读后续写」时填 2-3 条（情节推进 / 细节 / 情感层次），字段同 cohesion，
+  但把 relation 换成 node（如「第一段承接」「第二段转折」）；不是读后续写必须返回空数组 []。
 · sentence_award：本篇最出彩的一句（只在确实存在时填写，否则 quote 留空）。
+
+五·补、个性化范文
+· model_essay：贴着这个学生写的「升级版」，不是通用范文。
+  保留他的要点顺序、观点和素材——地名、活动名、人物一律沿用原文，不许换成别的景点或活动；
+  把上面 vocab_upgrades / pattern_upgrades / cohesion 的升级真的用进去；
+  **词数是硬指标**：题目给了词数就落在要求的 0.9–1.1 倍之内；题目没给就与原文词数相当（原文 ±15%）。
+  宁可少写一个次要细节，也不要超词数——超词数的范文会把学生教坏；
+  分段与原文一致，称呼与落款照抄原文。
+· model_essay_note：一两句话，说明保留了什么、动了几处、还差什么（诚实说清这版为什么还不是满分）。
+  若学生原文把事实写错了（如把杭州写成北京），范文里改对，并在 note 里点明这一点。
+· word_count：actual 数一下 text 的实写词数；required 从题干里找「80 词左右」这类要求填数字，
+  题干没写就填 null。
 
 五、评分
 满分 {max_score} 分。权重：内容要点 40%、语言准确性 35%、结构衔接 15%、书写与卷面 10%。
@@ -6370,8 +6530,14 @@ evidence 摘录学生原文片段作为依据。若学生写了大量与题目�
   "text": "学生作文全文",
   "illegible": [{"as_read": "你写成的样子", "guess": "猜的原词", "where": "第2段第1行", "why": "连笔"}],
   "requirements_check": [{"point": "要点", "status": "covered", "evidence": "原文片段"}],
-  "errors": [{"type": "grammar", "quote": "原文片段", "fix": "修改后", "why": "一句话说明"}],
-  "rewrites": [{"original": "原句", "improved": "改写后的句子", "focus": "句式/用词/连贯"}],
+  "errors": [{"type": "拼写", "quote": "原文片段", "fix": "改后写法", "why": "错在哪条规则"}],
+  "vocab_upgrades": [{"original": "原文里的表达", "upgrade": "更准的表达", "sentence": "放进句子后的完整句子", "why": "为什么更好"}],
+  "pattern_upgrades": [{"original": "原句", "improved": "改写句", "technique": "手法名", "added": "补了什么内容", "why": "为什么更好"}],
+  "cohesion": [{"original": "原句", "improved": "改写句", "relation": "递进", "before": "无", "after": "More importantly", "why": "两句是什么关系"}],
+  "content_upgrade": [],
+  "model_essay": "个性化范文全文（保留称呼与落款）",
+  "model_essay_note": "保留了什么、动了几处、还差什么",
+  "word_count": {"actual": 0, "required": null},
   "sentence_award": {"quote": "本篇最出彩的一句", "why": "好在哪里"},
   "score": "本次得分（填数字）", "max_score": {max_score}, "level": "优秀|良好|合格|待改进",
   "strengths": ["具体亮点"],
@@ -6382,25 +6548,32 @@ evidence 摘录学生原文片段作为依据。若学生写了大量与题目�
 注意：上面 JSON 里的 "本次得分（填数字）" 与 "优秀|良好|合格|待改进" 都只是占位说明，
 必须替换成你实际判定的数值与等级，不能原样输出。
 
-comment 要求：先肯定亮点，再指出 1-2 处最值得改的地方（对应上面的 errors / rewrites），
-最后给 1-3 条可执行建议；180 字以内，语气温和具体；不要出现「AI」「系统」「模型」「学号」等字样。
+comment 要求：先肯定亮点，再指出 1-2 处最值得改的地方（对应上面的 errors / pattern_upgrades / cohesion，
+不要复述整张清单），最后给 1-3 条可执行建议；180 字以内，语气温和具体；不要出现「AI」「系统」「模型」「学号」等字样。
 
 题目要求（若此处为空，说明这是本批第一份，请从图片中的题干自行提取并写入 task.requirements）：
 {requirements}
 '''
 
-CORPUS_PROMPT = '''你是高中英语写作教研员。下面是一道高一英语写作任务的题干与要点。
+CORPUS_PROMPT = '''你是高中英语写作教研员。下面是一道英语写作任务的题干与要点。
 
-请为学生准备一份「话题语料包」，全批同学共用，要求：
-1. phrases：8 条该话题高频、地道、高一学生能直接用的短语或搭配，格式为「英文（中文释义）」。不要生僻词。
-2. sentences：6 个可直接套用的句子，覆盖开头段、主体展开、结尾段，句型要有变化
-   （倒装、非谓语、定语从句、强调句等至少各出现一次），每句不超过 25 词，并附中文大意。
-3. patterns：3 个可迁移的句式模板，用 [方括号] 标出可替换部分，并注明适用场景。
-4. pitfalls：3 条中国学生在该话题下最容易犯的错误，每条给出「错误写法 → 正确写法」。
+请为学生准备一份「题目专属语料包」，全批同学共用。要求：
+
+1. points：按题干要点分组，每个要点给 2-3 条语料（至少 2 条）。
+   · point 原样抄题干要点（不要改写、不要合并）；
+   · 若要点里混进了「词数」「格式」「书写」这类非内容要求，直接跳过，不要为它生成语料；
+   · items 每条包含：
+     text  一个可直接背诵的英文句子或短语，不超过 22 词，高一学生看得懂，不要生僻词；
+     trans 与 text 逐句对应的中文翻译（必须给——学生靠它背诵）；
+     usage 十个字以内说明用在哪，如「开头表态后补理由」。
+2. 同一组里的句子要有分工：分别承担「表态 / 理由 / 举例或建议」，不要同义反复。
+3. pitfalls：3 条中国学生在该话题下最容易犯的错误，每条给 wrong → right，并用 point 标明属于哪个要点。
+4. 不要写「万能模板句」。每条都必须扣住本题的具体内容（人物、地点、活动名称），
+   换一道题就不该能直接用。
 
 只输出 JSON：
-{"phrases":["..."],"sentences":["..."],"patterns":[{"pattern":"...","scene":"..."}],
- "pitfalls":[{"wrong":"...","right":"..."}]}'''
+{"points":[{"point":"要点原文","items":[{"text":"...","trans":"...","usage":"..."}]}],
+ "pitfalls":[{"point":"要点","wrong":"...","right":"..."}]}'''
 
 AWARD_PROMPT = '''下面是一个班同一道英语写作题中，若干篇作文里各自被判定为「本篇最出彩」的句子。
 
@@ -6722,6 +6895,32 @@ def _as_text_list(v, limit=12):
     return out[:limit]
 
 
+def _clip(v, n):
+    return str(v or '').strip()[:n]
+
+
+def _locate_quote(text, quote):
+    """在原文里找回模型引用的片段，返回原文中的真实子串（找不到返回 ''）。
+
+    模型给的 quote 常与原文差在大小写、空格、弯直引号上；直接 indexOf 会定位失败，
+    整条错误就画不到原文上。这里三级回退：原文整串 → 忽略大小写 → 忽略空白/引号差异。
+    """
+    q = (quote or '').strip()
+    if not q or not text:
+        return ''
+    if q in text:
+        return q
+    i = text.lower().find(q.lower())
+    if i >= 0:
+        return text[i:i + len(q)]
+    compact = re.sub(r'[\s\u2018\u2019\u201c\u201d"\'`]+', '', q)
+    if not compact:
+        return ''
+    pat = r'[\s\u2018\u2019\u201c\u201d"\'`]*'.join(re.escape(c) for c in compact)
+    m = re.search(pat, text, re.I)
+    return m.group(0) if m else ''
+
+
 def _norm_essay_result(data, max_score=ESSAY_MAX_SCORE):
     """把模型返回的原始 JSON 归一化成前端可直接消费的结构。"""
     if not isinstance(data, dict):
@@ -6765,20 +6964,33 @@ def _norm_essay_result(data, max_score=ESSAY_MAX_SCORE):
                      'status': st,
                      'evidence': str(r.get('evidence') or '').strip()[:300]})
 
-    errors = []
+    errors, _seen_err = [], set()
+    text_raw = str(data.get('text') or '').strip()
     for e in (data.get('errors') or []):
         if not isinstance(e, dict):
             continue
-        q = str(e.get('quote') or '').strip()
-        f = str(e.get('fix') or '').strip()
+        q = _clip(e.get('quote'), 200)
+        f = _clip(e.get('fix'), 200)
         if not q and not f:
             continue
         # 「改了等于没改」的条目是模型凑数，丢掉
         if q and f and re.sub(r'\s+', '', q).lower() == re.sub(r'\s+', '', f).lower():
             continue
-        errors.append({'type': str(e.get('type') or 'grammar').strip().lower()[:24],
-                       'quote': q[:200], 'fix': f[:200],
-                       'why': str(e.get('why') or '').strip()[:200]})
+        # 尽量把 quote 换成原文里的真实写法，前端才能逐条画到原文上
+        hit = _locate_quote(text_raw, q) if q else ''
+        if hit:
+            q = hit
+        sig = (re.sub(r'\s+', ' ', q).lower(), re.sub(r'\s+', ' ', f).lower())
+        if sig in _seen_err:      # 同一处重复报（拼写 + 语法各报一次）只留第一条
+            continue
+        _seen_err.add(sig)
+        ty = _clip(e.get('type'), 16) or '语法'
+        if ty.isascii():          # 兼容模型仍返回英文枚举的情况
+            ty = ty.lower()
+        errors.append({'type': ty, 'quote': q, 'fix': f, 'why': _clip(e.get('why'), 200)})
+    # 按在原文中出现的先后排序：前端是从左往右画的，乱序会互相遮蔽
+    errors.sort(key=lambda x: text_raw.find(x['quote']) if x['quote'] and x['quote'] in text_raw else 9999)
+    errors = errors[:14]
 
     rewrites = []
     for w in (data.get('rewrites') or []):
@@ -6789,6 +7001,73 @@ def _norm_essay_result(data, max_score=ESSAY_MAX_SCORE):
             continue
         rewrites.append({'original': o[:240], 'improved': i[:240],
                          'focus': str(w.get('focus') or '').strip()[:40]})
+
+    # ---- 表达升级三块（v2）：词汇 / 句式 / 衔接 ----
+    # 三块都是「原文原句 → 升级后」，只换同义词等于没升级，这类条目直接丢掉。
+    def _same(a, b):
+        return re.sub(r'[\s\W]+', '', a or '').lower() == re.sub(r'[\s\W]+', '', b or '').lower()
+
+    vocab = []
+    for v in (data.get('vocab_upgrades') or []):
+        if not isinstance(v, dict):
+            continue
+        o, up = _clip(v.get('original'), 160), _clip(v.get('upgrade'), 160)
+        if not o or not up or _same(o, up):
+            continue
+        vocab.append({'original': o, 'upgrade': up,
+                      'sentence': _clip(v.get('sentence'), 320),
+                      'why': _clip(v.get('why'), 160)})
+
+    patterns = []
+    for p in (data.get('pattern_upgrades') or []):
+        if not isinstance(p, dict):
+            continue
+        o, im = _clip(p.get('original'), 320), _clip(p.get('improved'), 320)
+        if not o or not im or _same(o, im):
+            continue
+        patterns.append({'original': o, 'improved': im,
+                         'technique': _clip(p.get('technique'), 30),
+                         'added': _clip(p.get('added'), 80),
+                         'why': _clip(p.get('why'), 160)})
+
+    cohesion = []
+    for c in (data.get('cohesion') or []):
+        if not isinstance(c, dict):
+            continue
+        o, im = _clip(c.get('original'), 320), _clip(c.get('improved'), 320)
+        if not o or not im or _same(o, im):
+            continue
+        cohesion.append({'original': o, 'improved': im,
+                         'relation': _clip(c.get('relation'), 12),
+                         'before': _clip(c.get('before'), 30) or '无',
+                         'after': _clip(c.get('after'), 40),
+                         'why': _clip(c.get('why'), 160)})
+
+    # 读后续写专用：按情节节点提升内容（非续写应为空）
+    content_up = []
+    for c in (data.get('content_upgrade') or []):
+        if not isinstance(c, dict):
+            continue
+        o, im = _clip(c.get('original'), 320), _clip(c.get('improved'), 320)
+        if not o or not im or _same(o, im):
+            continue
+        content_up.append({'original': o, 'improved': im,
+                           'node': _clip(c.get('node'), 20) or '情节推进',
+                           'added': _clip(c.get('added'), 80),
+                           'why': _clip(c.get('why'), 160)})
+
+    model_essay = _clip(data.get('model_essay'), 4000)
+    model_note = _clip(data.get('model_essay_note'), 300)
+    # 别把 note 截成半句话：退到最后一个句读
+    if model_note and model_note[-1] not in '。！？.!?':
+        cut = max(model_note.rfind(c) for c in '。；！？.;!?')
+        if cut >= 40:
+            model_note = model_note[:cut + 1]
+    wc = data.get('word_count') if isinstance(data.get('word_count'), dict) else {}
+    actual_wc = _num(wc.get('actual'))
+    if not actual_wc and text_raw:
+        actual_wc = len(re.findall(r"[A-Za-z][A-Za-z'-]*", text_raw))
+    req_wc = _num(wc.get('required'))
 
     aw = data.get('sentence_award') if isinstance(data.get('sentence_award'), dict) else {}
     award = {'quote': str(aw.get('quote') or '').strip()[:300],
@@ -6821,11 +7100,18 @@ def _norm_essay_result(data, max_score=ESSAY_MAX_SCORE):
         'student': {'class_no': cls[:2], 'student_id': sid if len(sid) in (4, 6) else '', 'name': name},
         'task': {'title': str(task.get('title') or '').strip()[:200],
                  'requirements': _as_text_list(task.get('requirements'), 10)},
-        'text': str(data.get('text') or '').strip(),
+        'text': text_raw,
         'illegible': illegible[:12],
         'requirements_check': reqs[:10],
-        'errors': errors[:12],
+        'errors': errors,
         'rewrites': rewrites[:5],
+        'vocab_upgrades': vocab[:6],
+        'pattern_upgrades': patterns[:4],
+        'cohesion': cohesion[:4],
+        'content_upgrade': content_up[:4],
+        'model_essay': model_essay,
+        'model_essay_note': model_note,
+        'word_count': {'actual': int(actual_wc or 0), 'required': int(req_wc) if req_wc else None},
         'sentence_award': award,
         'score': score, 'max_score': mx, 'level': level,
         'strengths': _as_text_list(data.get('strengths'), 6),
@@ -6835,21 +7121,107 @@ def _norm_essay_result(data, max_score=ESSAY_MAX_SCORE):
     }
 
 
-def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=None, quality=None):
+def _essay_words(s):
+    """数英文词数：字母开头、可带连字符或撇号，标点不算。"""
+    return len(re.findall(r"[A-Za-z][A-Za-z'’-]*", s or ''))
+
+
+def _fit_model_essay(essay, note, required):
+    """范文超出题目词数太多时，用文本模型压一次。
+
+    提示词里已经写了「必须落在 0.9–1.1 倍」，但实测 8B 仍会写成一倍半到两倍长；
+    超词数的范文会把「凑字数」的习惯教给学生，所以这里做一次兜底压缩。
+    压缩失败就原样返回——宁长不丢，不要在批阅主流程里抛错。
+    """
+    if not essay or not required:
+        return essay, note
+    try:
+        req = float(required)
+    except (TypeError, ValueError):
+        return essay, note
+    if req < 20 or _essay_words(essay) <= req * 1.35:
+        return essay, note
+    prompt = ('题目要求这篇英语作文约 %d 词，下面这版写了 %d 词，太长了。请重写一版 **不超过 %d 词** 的范文。\n\n'
+              '必须保留：称呼、落款，以及学生写到的每一个地点 / 活动（可以合并进同一句，如 A, B and C）。\n'
+              '必须删掉：重复的形容词、空泛的抒情、同一个意思的第二次表达（如先 "peaceful and unique" 再说 "quite special"）。\n'
+              '结构照这个来：称呼 / 一句说明写信目的 / 二三句按行程列出地点 / 一句期待回复 / 落款。\n'
+              '词数是硬上限，超过 %d 词就是不合格。只输出英文全文，不要任何说明。\n\n%s'
+              % (req, _essay_words(essay), int(req * 1.1), int(req * 1.1), essay))
+    try:
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=90.0)
+        resp = client.chat.completions.create(
+            model=llm_text_model,
+            messages=[{"role": "system", "content": "你是高中英语教师，擅长在不丢失要点的前提下把作文压到规定词数。"},
+                      {"role": "user", "content": prompt}],
+            temperature=0.2, max_tokens=900, **_text_model_kwargs())
+        new = (resp.choices[0].message.content or '').strip()
+    except Exception:
+        return essay, note
+    if not new or _essay_words(new) >= _essay_words(essay):
+        return essay, note
+    tail = '（范文已按题目要求压到约 %d 词，删掉的是重复铺陈。）' % _essay_words(new)
+    return new, ((note or '') + ' ' + tail).strip()
+
+
+# ---------------------------- 并行批阅与重试（实测参数，别随手调） ----------------------------
+# 实测（2026-10-26，temp/bench_concurrency.py，40 张规模推演）：硅基流动侧墙钟在 ~105s / ~153s
+# 呈阶跃而不是线性增长，说明瓶颈是服务端排队，不是本地线程。6 路时 40 张约 12 分钟；
+# 8–12 路只再快 2–3 分钟，却把单张尾延迟从 105s 拉到 153s（老师会以为卡死），所以默认 6 路。
+LLM_BATCH_WORKERS = max(1, min(16, int(os.getenv('LLM_BATCH_WORKERS', '6') or 6)))
+# 多个批次同时跑时共用这一个闸门：3 个班各开 6 路 = 18 个在飞请求，必然触发限流
+LLM_MAX_CONCURRENCY = max(1, min(32, int(os.getenv('LLM_MAX_CONCURRENCY', '8') or 8)))
+_LLM_SEM = threading.BoundedSemaphore(LLM_MAX_CONCURRENCY)
+
+# 送图长边上限：2400 能保住 200dpi 原尺寸；难卷抬到 3300。
+# 注意：只有原图长边 > 2400（即扫描 dpi ≥ 300）时抬 cap 才真正生效，
+# 200dpi 扫出来的 1657px 图抬了也没用——分辨率这条必须先改扫描端 dpi。
+IMG_MAX_DEFAULT = max(1200, int(os.getenv('LLM_IMG_MAX_DEFAULT', '2400') or 2400))
+IMG_MAX_HARD = max(1200, int(os.getenv('LLM_IMG_MAX_HARD', '3300') or 3300))
+
+_LLM_RETRY_HINTS = ('429', 'rate limit', 'too many requests', 'timeout', 'timed out',
+                    'temporarily', 'overloaded', 'busy', '502', '503', '504',
+                    'connection', 'reset by peer', 'json decode', '20015')
+
+
+def _llm_retry(fn, tries=3, base_delay=2.0):
+    """调用模型并重试「值得重试」的失败，返回 (结果, 错误信息)。
+
+    并发后失败几乎都是 429 / 超时 / 网关抖动，退避重试 2–3 次基本都能过；
+    key 错误、参数错误这类确定性失败不重试，避免白花钱。
+    """
+    last = ''
+    for i in range(max(1, tries)):
+        try:
+            with _LLM_SEM:
+                return fn(), ''
+        except Exception as e:
+            last = str(e)
+            low = last.lower()
+            if i >= tries - 1 or not any(h in low for h in _LLM_RETRY_HINTS):
+                break
+            time.sleep(base_delay * (2 ** i))
+    return None, last
+
+
+def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=None,
+                        quality=None, img_max_size=None):
     """批阅一页英语作文：一次调用同时读表头（学号/班级/姓名）与全文。返回 (dict, 错误信息)。
 
-    model   显式指定视觉模型；为空时按 `.env` 的精度档位决定，
-            并把 quality（本地卷面体检结果）传进去用于「难卷自动升档」。
-    quality image_quality_metrics() 的返回，可为 None。
+    model        显式指定视觉模型；为空时按 `.env` 的精度档位决定，
+                 并把 quality（本地卷面体检结果）传进去用于「难卷自动升档」。
+    quality      image_quality_metrics() 的返回，可为 None。
+    img_max_size 送图长边上限；为空时普通卷 2400、难卷 IMG_MAX_HARD（3300）。
     """
     if not minimax_api_key:
         return None, '未配置 LLM_API_KEY，请在 .env 中设置'
     try:
-        use_model = model or resolve_vision_model(hard=bool((quality or {}).get('hard')))
+        hard = bool((quality or {}).get('hard'))
+        use_model = model or resolve_vision_model(hard=hard)
+        page_max = img_max_size or (IMG_MAX_HARD if hard else IMG_MAX_DEFAULT)
         img = _open_image(page) if isinstance(page, str) else page
         if img.mode != 'RGB':
             img = img.convert('RGB')
-        parts = [{'type': 'image_url', 'image_url': {'url': _img_to_data_url(img)}}]
+        parts = [{'type': 'image_url', 'image_url': {'url': _img_to_data_url(img, page_max)}}]
         try:
             head = _transform_image(img, 0, ESSAY_HEADER_RECT)
             if head.size[0] >= 60 and head.size[1] >= 14:
@@ -6861,17 +7233,33 @@ def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=
         parts.append({'type': 'text', 'text': prompt})
 
         client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=240.0)
-        resp = _vision_chat(
-            client,
-            model=use_model,
-            messages=[
-                {"role": "system", "content": "你是经验丰富的高中英语教师，读手写扫描件准确，评分严格但有建设性。"},
-                {"role": "user", "content": parts}
-            ],
-            temperature=0.2,
-            max_tokens=4000
-        )
+
+        def _call():
+            resp = _vision_chat(
+                client,
+                model=use_model,
+                messages=[
+                    {"role": "system", "content": "你是经验丰富的高中英语教师，读手写扫描件准确，评分严格但有建设性。"},
+                    {"role": "user", "content": parts}
+                ],
+                temperature=0.2,
+                max_tokens=6000
+            )
+            # 用量日志：并发调参和成本核算都靠它，别删
+            u = getattr(resp, 'usage', None)
+            if u is not None:
+                print('[essay] %s in=%s out=%s' % (
+                    use_model, getattr(u, 'prompt_tokens', '?'), getattr(u, 'completion_tokens', '?')),
+                    flush=True)
+            return resp
+
+        # 服务端偶发 20015「JSON decode error」（大请求体被网关截断）与限流/超时，退避重试
+        t_call = time.time()
+        resp, cerr = _llm_retry(_call, tries=3)
+        if resp is None:
+            return None, '批阅失败：%s' % cerr
         raw = (resp.choices[0].message.content or '').strip()
+        print('[essay] 耗时 %.1fs（%s）' % (time.time() - t_call, use_model), flush=True)
         data = _loads_lenient(raw)
         if data is None:
             return None, '模型未返回有效 JSON'
@@ -6880,6 +7268,12 @@ def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=
             return None, '模型返回结构异常'
         if not out.get('text') and not out.get('errors'):
             return None, '未能识别出作文内容（可能是空白页或图片过暗）'
+        # 范文超词数兜底：压缩一次，并把实际词数写进 word_count.model 供前端提示
+        wc = out.get('word_count') or {}
+        out['model_essay'], out['model_essay_note'] = _fit_model_essay(
+            out.get('model_essay'), out.get('model_essay_note'), wc.get('required'))
+        wc['model'] = _essay_words(out.get('model_essay'))
+        out['word_count'] = wc
         out['_model'] = use_model
         return out, ''
     except Exception as e:
@@ -6978,49 +7372,94 @@ def _save_corpus_cache(cache):
         print('写入语料缓存失败: %s' % e)
 
 
+CORPUS_VERSION = 2
+
+
+def _norm_corpus(data):
+    """把模型返回的语料归一化成「按要点分组 + 逐条翻译」的结构。
+
+    v2 之前是 phrases/sentences/patterns 三堆按语言形式分类，学生不知道用在哪，
+    而且 sentences 有中文大意、phrases 没有翻译；现在统一成 points[].items[]，
+    每条都必须有 text + trans，usage 可选。
+    """
+    if not isinstance(data, dict):
+        return None
+    points = []
+    for p in (data.get('points') or []):
+        if not isinstance(p, dict):
+            continue
+        items = []
+        for it in (p.get('items') or []):
+            if isinstance(it, str):          # 容错：模型偶尔只给一个字符串数组
+                it = {'text': it}
+            if not isinstance(it, dict):
+                continue
+            t = str(it.get('text') or it.get('en') or '').strip()
+            if not t:
+                continue
+            items.append({'text': t[:240],
+                          'trans': str(it.get('trans') or it.get('翻译') or '').strip()[:240],
+                          'usage': str(it.get('usage') or it.get('scene') or '').strip()[:40]})
+        point = str(p.get('point') or p.get('name') or '').strip()[:120]
+        if items:
+            points.append({'point': point, 'items': items[:4]})
+    pitfalls = []
+    for p in (data.get('pitfalls') or []):
+        if not isinstance(p, dict):
+            continue
+        w = str(p.get('wrong') or '').strip()
+        r = str(p.get('right') or '').strip()
+        if not w and not r:
+            continue
+        pitfalls.append({'point': str(p.get('point') or '').strip()[:60],
+                         'wrong': w[:200], 'right': r[:200]})
+    if not points:
+        return None
+    return {'points': points[:6], 'pitfalls': pitfalls[:5]}
+
+
 def _get_topic_corpus(tkey, topic, force=False):
-    """话题语料：同话题只生成一次，之后全批复用（省 token 的关键）。
+    """题目语料：同题只生成一次，之后全批复用（省 token 的关键）。
 
     先按指纹精确命中；未命中时再做一次相似度匹配（同一道题在不同批次里，
     模型概括出的标题措辞往往不同，只靠散列会重复生成）。
+    缓存只认 v2 结构：老缓存没有翻译、也没按要点分组，命中它等于让学生看旧版。
     """
     cache = _load_corpus_cache()
     if not force:
-        if tkey and isinstance(cache.get(tkey), dict):
-            return cache[tkey], ''
+        hit = cache.get(tkey) if tkey else None
+        if isinstance(hit, dict) and hit.get('version') == CORPUS_VERSION:
+            return hit, ''
         want = _topic_text(topic)
         best_key, best_score = '', 0.0
         for k, v in cache.items():
-            if not isinstance(v, dict):
+            if not isinstance(v, dict) or v.get('version') != CORPUS_VERSION:
                 continue
             score = _topic_similarity(want, _topic_text(v))
             if score > best_score:
                 best_key, best_score = k, score
         if best_key and best_score >= 0.55:
-            hit = dict(cache[best_key])
-            hit['reused_from'] = best_key
-            return hit, ''
+            reused = dict(cache[best_key])
+            reused['reused_from'] = best_key
+            return reused, ''
     if not isinstance(topic, dict):
         return {}, '缺少话题信息'
     prompt = ('题目：%s\n要点：\n%s' % (
         topic.get('title') or '（未提供标题）',
         '\n'.join('· ' + str(r) for r in (topic.get('requirements') or [])) or '（未提供）'))
-    data, err = _llm_json(prompt, CORPUS_PROMPT, max_tokens=1500)
+    data, err = _llm_json(prompt, CORPUS_PROMPT, max_tokens=2000)
     if err:
         return {}, err
-    corpus = {
-        'phrases': _as_text_list(data.get('phrases'), 10),
-        'sentences': _as_text_list(data.get('sentences'), 8),
-        'patterns': [{'pattern': str(p.get('pattern') or '')[:200],
-                      'scene': str(p.get('scene') or '')[:80]}
-                     for p in (data.get('patterns') or []) if isinstance(p, dict)][:5],
-        'pitfalls': [{'wrong': str(p.get('wrong') or '')[:160],
-                      'right': str(p.get('right') or '')[:160]}
-                     for p in (data.get('pitfalls') or []) if isinstance(p, dict)][:5],
+    norm = _norm_corpus(data)
+    if not norm:
+        return {}, '语料结构异常（模型未按要点分组返回）'
+    corpus = dict(norm)
+    corpus.update({
+        'version': CORPUS_VERSION,
         'topic': topic.get('title') or '',
         'requirements': topic.get('requirements') or [],
         'generated_at': _now_str(),
-    }
+    })
     if tkey:
         cache[tkey] = corpus
         _save_corpus_cache(cache)
@@ -7107,29 +7546,82 @@ def _auto_pipeline(batch_id):
         if not pages:
             raise RuntimeError('临时区里找不到这批扫描件（可能已被清空）')
 
-        results, requirements_text = [], ''
-        for idx, it in enumerate(pages):
-            bump(message='正在批阅第 %d/%d 份…' % (idx + 1, len(pages)))
+        # ---------------- 批阅：预热 1 张拿题干 → 其余并行 → 失败补跑 ----------------
+        # 题干是本批共享的（第一份产出、其余复用），所以不能一上来全并行：
+        # 先串行预热 1 张（只等一张），拿到 requirements 再并行剩下的。
+        # 进度写盘只发生在主线程：_save_batch 是「读-改-写」，多线程一起写会丢更新。
+        n = len(pages)
+        results = [None] * n
+        requirements_text = ''
+        state = {'done': 0}
+
+        def _grade_one(idx):
+            """批一张，异常统一折成 error，返回 (idx, 结果)。"""
+            it = pages[idx]
             path = _staging_image_path(it)
             if not path:
-                results.append({'item_id': it['id'], 'error': '图片文件缺失'})
-                bump(done=idx + 1)
-                continue
+                return idx, {'item_id': it['id'], 'error': '图片文件缺失',
+                             'quality': it.get('quality'), 'sec': 0}
+            t0 = time.time()
             res, err = _vision_grade_essay(path, requirements_text, ESSAY_MAX_SCORE,
                                            quality=it.get('quality'))
+            sec = round(time.time() - t0, 1)
             if err:
-                results.append({'item_id': it['id'], 'error': err, 'quality': it.get('quality')})
-            else:
-                # 第一份的题干即为本批题干，后续全部复用，避免重复分析
-                if not requirements_text:
-                    task = res.get('task') or {}
-                    reqs = task.get('requirements') or []
-                    if reqs or task.get('title'):
-                        b['topic'] = {'title': task.get('title', ''), 'requirements': reqs}
-                        requirements_text = '\n'.join('· ' + str(r) for r in reqs)
-                results.append({'item_id': it['id'], 'essay': res, 'quality': it.get('quality')})
-            bump(done=idx + 1)
+                return idx, {'item_id': it['id'], 'error': err,
+                             'quality': it.get('quality'), 'sec': sec}
+            return idx, {'item_id': it['id'], 'essay': res,
+                         'quality': it.get('quality'), 'sec': sec}
 
+        # ① 预热：最多试前 3 张，拿到题干就停（正常只等 1 张的量）
+        for idx in range(min(3, n)):
+            bump(message='正在预热第 %d 张（先确定本批题干）…' % (idx + 1))
+            _, r = _grade_one(idx)
+            results[idx] = r
+            state['done'] += 1
+            if r.get('essay') and not b.get('topic'):
+                task = (r['essay'].get('task') or {})
+                reqs = task.get('requirements') or []
+                if reqs or task.get('title'):
+                    b['topic'] = {'title': task.get('title', ''), 'requirements': reqs}
+                    b['topic']['key'] = _topic_key(b['topic'])
+            bump(done=state['done'])
+            if b.get('topic'):
+                break
+
+        requirements_text = '\n'.join(
+            '· ' + str(x) for x in ((b.get('topic') or {}).get('requirements') or []))
+
+        # ② 其余并行
+        rest = [i for i in range(n) if results[i] is None]
+        if rest:
+            workers = max(1, min(LLM_BATCH_WORKERS, len(rest)))
+            bump(message='正在并行批阅剩余 %d 份（%d 路并行）…' % (len(rest), workers))
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='grade') as ex:
+                futs = {ex.submit(_grade_one, i): i for i in rest}
+                for fut in as_completed(futs):
+                    idx = futs[fut]
+                    try:
+                        _, r = fut.result()
+                    except Exception as e:
+                        it = pages[idx]
+                        r = {'item_id': it['id'], 'error': '批阅异常：%s' % e,
+                             'quality': it.get('quality'), 'sec': 0}
+                    results[idx] = r
+                    state['done'] += 1
+                    bump(done=state['done'],
+                         message='已批阅 %d/%d 份（%d 路并行）…' % (state['done'], n, workers))
+
+        # ③ 失败补跑一次：并发下的失败多为限流/超时，不该让老师手动补
+        bad = [i for i, r in enumerate(results)
+               if r and r.get('error') and '缺失' not in str(r.get('error'))]
+        if bad and len(bad) < n:
+            bump(message='有 %d 份失败，正在补跑…' % len(bad))
+            for idx in bad:
+                _, r = _grade_one(idx)
+                if r.get('essay'):
+                    results[idx] = r
+
+        results = [r for r in results if r]
         ok = [r for r in results if r.get('essay')]
         if not ok:
             raise RuntimeError('本批全部识别失败，请检查模型配置或扫描清晰度')
@@ -7144,9 +7636,28 @@ def _auto_pipeline(batch_id):
         if cerr:
             b['corpus_error'] = cerr
 
-        # 同学佳句（全批判完后一次评选）
+        # 同学佳句：按班级分组评选。老师分批上传时一批里可能混了两个班，
+        # 跨班混着挑「佳句」没有意义，学生端也只该看到自己班的。
         bump(stage='awards', message='正在评选同学佳句…')
-        b['awards'] = _pick_awards(ok)
+        by_class = {}
+        for r in ok:
+            sid_r = str(((r.get('essay') or {}).get('student') or {}).get('student_id') or '')
+            cls_r = (student_id_to_class_code(sid_r) if sid_r else '') or '未分班'
+            by_class.setdefault(cls_r, []).append(r)
+        b['classes'] = sorted(by_class)
+        if len(by_class) <= 1:
+            b['awards'] = _pick_awards(ok)
+        else:
+            all_awards, pool_all, per = [], 0, {}
+            for cls_r, rs in by_class.items():
+                a = _pick_awards(rs)
+                per[cls_r] = {'pool': a.get('pool_size') or 0,
+                              'awards': len(a.get('awards') or [])}
+                all_awards.extend(a.get('awards') or [])
+                pool_all += a.get('pool_size') or 0
+            b['awards'] = {'awards': all_awards[:8],
+                           'standard': '本批跨 %d 个班，佳句按班分别评选' % len(by_class),
+                           'pool_size': pool_all, 'by_class': per}
 
         # 分数雷同是模型「抄示例」的典型信号，明确提示老师抽查，而不是假装正常
         scores = [(r['essay'] or {}).get('score') for r in ok]
@@ -7157,23 +7668,28 @@ def _auto_pipeline(batch_id):
         # 入库
         bump(stage='committing', message='正在归档到用户端…')
         commit_ids, failed = [], []
+        resolved_map = {}
         for r in results:
             it = live.get(r.get('item_id'))
             if not it:
                 continue
             essay = r.get('essay') or {}
             stu = essay.get('student') or {}
-            sid = str(stu.get('student_id') or '').strip() or str(it.get('student_id') or '').strip()
-            cls, resolved_name = _ensure_student_registry(sid, stu.get('name') or '')
+            sid_seen = str(stu.get('student_id') or '').strip() or str(it.get('student_id') or '').strip()
+            # 卷面四位号（高一写后四位）靠班级号回查完整学号；学号是主键，姓名以名单为准
+            cls, resolved_name, sid, sid_note = _ensure_student_registry(
+                sid_seen, stu.get('name') or '', stu.get('class_no') or '')
             if not cls:
-                cls = str(stu.get('class_no') or '').strip()
+                # 学号没落到名单上的卷子统一进「待确认」，不要按后四位硬推班级
+                cls = '待确认' if sid_note else str(stu.get('class_no') or '').strip()
+            resolved_map[r.get('item_id')] = (sid, sid_note, resolved_name)
             extra = {
                 'batch_id': b['id'],
                 'essay': essay,
                 'topic': b.get('topic') or {},
                 'quality': r.get('quality') or {},
                 'auto': True,
-                'student_name': resolved_name or (stu.get('name') or ''),
+                'student_name': resolved_name or '',
                 'essay_text': essay.get('text') or '',
                 'ai_comment': essay.get('comment') or '',
                 'score_text': ('%s/%s' % (_fmt_num(essay.get('score')), _fmt_num(essay.get('max_score')))
@@ -7189,7 +7705,10 @@ def _auto_pipeline(batch_id):
                 },
                 'status': 'graded' if essay else 'pending',
                 'graded_at': _now_str() if essay else '',
-                'needs_review': (not sid) and bool(essay),
+                # 学号没能唯一落到名单上时，这份卷子必须人工确认归属
+                'needs_review': (not sid or bool(sid_note)) and bool(essay),
+                'sid_note': sid_note,
+                'student_id_seen': sid_seen,
             }
             okc, rec = _commit_staging_item(
                 it, sid, cls, b.get('task_id') or '', '自动批阅', None, 0,
@@ -7204,18 +7723,25 @@ def _auto_pipeline(batch_id):
         save_staging([it for it in load_staging() if it.get('id') not in done_ids])
 
         b['record_ids'] = commit_ids
-        b['results'] = [
-            {'item_id': r.get('item_id'),
-             'student_id': ((r.get('essay') or {}).get('student') or {}).get('student_id', ''),
-             'name': ((r.get('essay') or {}).get('student') or {}).get('name', ''),
-             'score': (r.get('essay') or {}).get('score'),
-             'level': (r.get('essay') or {}).get('level', ''),
-             'model': (r.get('essay') or {}).get('_model', ''),
-             'quality': r.get('quality') or {},
-             'illegible': len((r.get('essay') or {}).get('illegible') or []),
-             'error': r.get('error', '')}
-            for r in results
-        ]
+        b['results'] = []
+        for r in results:
+            stu_r = (r.get('essay') or {}).get('student') or {}
+            rsid, rnote, rname = resolved_map.get(r.get('item_id'), ('', '', ''))
+            b['results'].append({
+                'item_id': r.get('item_id'),
+                # 落库学号是回查后的完整学号；seen 是卷面上真实看到的（高一为后四位）
+                'student_id': rsid or stu_r.get('student_id', ''),
+                'student_id_seen': stu_r.get('student_id', ''),
+                'name': rname or stu_r.get('name', ''),
+                'sid_note': rnote,
+                'score': (r.get('essay') or {}).get('score'),
+                'level': (r.get('essay') or {}).get('level', ''),
+                'model': (r.get('essay') or {}).get('_model', ''),
+                'quality': r.get('quality') or {},
+                'illegible': len((r.get('essay') or {}).get('illegible') or []),
+                'sec': r.get('sec', 0),
+                'error': r.get('error', ''),
+            })
         b['failed'] = failed
         done_msg = '已完成 %d 份批阅，可直接在用户端查看' % len(commit_ids)
         # 卷面体检汇总：让老师知道哪几张值得人工过一眼，而不是盲目相信分数

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>QuickJudge · 模型耗时与成本对比</title>
+<style>
+  :root{
+    --ink:#1b2430; --sub:#5d6b7a; --line:#e3e8ee; --bg:#f7f9fb;
+    --head:#eef3f8; --accent:#2f6feb; --good:#0f7b4f; --warn:#b4590b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:40px 28px;background:var(--bg);color:var(--ink);
+       font:15px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;background:#fff;border:1px solid var(--line);
+        border-radius:14px;padding:32px 34px 26px;box-shadow:0 2px 14px rgba(27,36,48,.05)}
+  h1{margin:0 0 6px;font-size:22px;letter-spacing:.2px}
+  .meta{color:var(--sub);font-size:13px;margin-bottom:22px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+  th{background:var(--head);font-weight:600;font-size:13px;color:#33414f;white-space:nowrap}
+  tbody tr:hover{background:#fafcfe}
+  td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;
+       background:#eef3f8;color:#37506b;white-space:nowrap}
+  .tag.def{background:#e6f0ff;color:#1c4fa8}
+  .tag.hard{background:#fdf0e6;color:#a2500a}
+  .tag.alt{background:#eef7f1;color:var(--good)}
+  .cost{color:var(--good);font-weight:600}
+  .best{font-weight:600}
+  .note{margin-top:22px;padding:14px 16px;background:#fafcfe;border-left:3px solid var(--accent);
+        border-radius:0 8px 8px 0;font-size:13.5px;color:#33414f}
+  .note b{color:var(--ink)}
+  .note ul{margin:6px 0 0;padding-left:18px}
+  .note li{margin:3px 0}
+  footer{margin-top:18px;color:#8a97a5;font-size:12px;text-align:right}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>QuickJudge · 单张卷子的模型耗时与成本</h1>
+  <div class="meta">实测时间 2026-10-26 ｜ 真实调用硅基流动接口 ｜ 3 份真实手写卷 × 3 个模型 ｜ 满分 25 分作文全流程批阅</div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>模型</th><th>定位</th><th>单张耗时</th><th>单张成本</th><th>40 张成本</th><th>40 张串行总耗时</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="best">Qwen3-VL-8B-Instruct</td>
+        <td><span class="tag def">默认 standard</span></td>
+        <td class="num">58–111 s<br><span style="color:#8a97a5;font-size:12.5px">中位约 80 s</span></td>
+        <td class="num cost">¥0.014–0.017</td>
+        <td class="num cost">¥0.56–0.68</td>
+        <td class="num">约 40–75 分钟</td>
+      </tr>
+      <tr>
+        <td class="best">Qwen3-VL-32B-Instruct</td>
+        <td><span class="tag hard">难卷兜底 strong</span></td>
+        <td class="num">130–200 s<br><span style="color:#8a97a5;font-size:12.5px">中位约 175 s</span></td>
+        <td class="num cost">¥0.016–0.017</td>
+        <td class="num cost">¥0.64–0.70</td>
+        <td class="num">约 1.5–2.2 小时</td>
+      </tr>
+      <tr>
+        <td>Qwen3-VL-30B-A3B-Instruct</td>
+        <td><span class="tag alt">MoE 备选</span></td>
+        <td class="num">62–175 s<br><span style="color:#8a97a5;font-size:12.5px">中位约 110 s</span></td>
+        <td class="num cost">¥0.021–0.026</td>
+        <td class="num cost">¥0.85–1.05</td>
+        <td class="num">约 45–75 分钟</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <b>怎么读这张表</b>
+    <ul>
+      <li><b>钱几乎不随模型变</b>：三个模型单张都在 2 分钱以内，40 张全部加起来不到 1 块钱，差价最多少几毛。选模型不用算钱。</li>
+      <li><b>时间差 2–3 倍</b>：32B 单张要 175 秒左右，40 张光等待就两小时；8B 一小时以内能完。瓶颈在时间，不在成本。</li>
+      <li><b>成本对半分</b>：输入 5360 token（整页图约 3850 + 表头特写约 350 + 提示词约 1150），输出 1500–2300 token。输出越短越省钱。</li>
+      <li><b>32B 并不是「关掉思考就快」</b>：本次带完整批阅提示词 + 双图实测仍需约 200 秒，与只读表头的轻请求不可类比。</li>
+    </ul>
+  </div>
+
+  <footer>价格：8B $0.18/$0.68、32B $0.20/$0.60、30B-A3B $0.29/$1.00（每百万 token，美元）｜ 按 7.1 汇率折算</footer>
+</div>
+</body>
+</html>
