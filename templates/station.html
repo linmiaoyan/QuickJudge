@@ -486,6 +486,7 @@ if ($('#maxScore')) {
     }
     try { localStorage.setItem('qj_station_max', JSON.stringify(store)); } catch (e) {}
   };
+  syncMaxScore();   // 先给个默认值，别让输入框空着；loadContext 拿到方案后会再校准
 }
 
 /* ---------------- 扫描 / 导入 ---------------- */
