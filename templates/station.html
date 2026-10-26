@@ -246,7 +246,18 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
         </div>
         <div style="margin-top:14px;">
           <div style="font-size:12.5px;color:var(--text2);margin-bottom:5px;">批阅方案（扫完自动批，无需再点）</div>
-          <select id="subjectSel" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;background:#fff;"></select>
+          <div style="display:flex;gap:8px;align-items:stretch;">
+            <select id="subjectSel" style="flex:1 1 auto;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;background:#fff;"></select>
+            <label for="maxScore" title="这一批卷子的满分；默认跟着上面的方案走，改了就按你填的算"
+                   style="flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:0 10px;border:1px solid var(--line);border-radius:9px;background:#fff;font-size:12.5px;color:var(--text2);">
+              满分
+              <input type="number" id="maxScore" min="1" max="150" step="0.5" inputmode="decimal"
+                     style="width:58px;padding:6px 4px;border:0;border-bottom:1px solid var(--line);font-family:inherit;font-size:13.5px;font-weight:600;text-align:center;color:var(--text);background:transparent;outline:none;">
+            </label>
+          </div>
+          <div style="font-size:11.5px;color:var(--text3,#999);margin-top:5px;line-height:1.45;">
+            默认按方案分值（英语作文 25 / 数学 12 / 默写 10）；这次卷子不是这个分值，直接改右边数字，本批全部按它算。
+          </div>
         </div>
 
         <div id="jobPanel" class="jobpanel">
@@ -415,7 +426,8 @@ async function loadContext() {
     const saved = localStorage.getItem('qj_station_subject') || 'english_essay';
     sel.innerHTML = gs.map(s => '<option value="' + esc(s.key) + '">' + esc(s.name) + '（满分 ' + esc(s.max_score) + '）</option>').join('');
     sel.value = gs.some(s => s.key === saved) ? saved : (gs[0] ? gs[0].key : 'english_essay');
-    sel.onchange = () => localStorage.setItem('qj_station_subject', sel.value);
+    sel.onchange = () => { localStorage.setItem('qj_station_subject', sel.value); syncMaxScore(); };
+    syncMaxScore();
   }
 
   const urls = CTX.portal_urls || [];
@@ -429,6 +441,52 @@ async function loadContext() {
 }
 function row(k, v) { return '<div class="row"><span>' + esc(k) + '</span><span>' + esc(v) + '</span></div>'; }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+/* ---------------- 满分选择 ---------------- */
+// 默认跟批阅方案走（作文 25 / 数学 12 / 默写 10），老师手工改过就按学科记住，
+// 下次扫同一学科不用再填；换方案会跟着换回该方案的默认值，避免「改过一次全学科都变」。
+function maxScoreStore() {
+  try { return JSON.parse(localStorage.getItem('qj_station_max') || '{}') || {}; }
+  catch (e) { return {}; }
+}
+function currentSubjectKey() {
+  const sel = $('#subjectSel');
+  return (sel && sel.value) || 'english_essay';
+}
+function subjectDefaultMax() {
+  const gs = (CTX.grading && CTX.grading.subjects) || [];
+  const cur = gs.find(s => s.key === currentSubjectKey());
+  const v = Number(cur && cur.max_score);
+  return v > 0 ? v : 25;
+}
+function syncMaxScore() {
+  const el = $('#maxScore');
+  if (!el) return;
+  const saved = Number(maxScoreStore()[currentSubjectKey()]);
+  el.value = saved > 0 ? saved : subjectDefaultMax();
+}
+function readMaxScore() {
+  const el = $('#maxScore');
+  const v = el ? Number(el.value) : NaN;
+  if (v > 0 && v <= 1000) return v;
+  return subjectDefaultMax();
+}
+if ($('#maxScore')) {
+  $('#maxScore').onchange = $('#maxScore').onblur = () => {
+    const el = $('#maxScore');
+    const v = Number(el.value);
+    const store = maxScoreStore();
+    const def = subjectDefaultMax();
+    if (!(v > 0 && v <= 1000) || v === def) {
+      delete store[currentSubjectKey()];
+      el.value = def;
+    } else {
+      store[currentSubjectKey()] = v;
+      el.value = v;
+    }
+    try { localStorage.setItem('qj_station_max', JSON.stringify(store)); } catch (e) {}
+  };
+}
 
 /* ---------------- 扫描 / 导入 ---------------- */
 let JOB_TIMER = null;
@@ -505,13 +563,14 @@ $('#scanBtn').onclick = async () => {
     const r = await api('/api/station/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subject: ($('#subjectSel') || {}).value || 'english_essay', auto: !manual })
+      body: JSON.stringify({ subject: currentSubjectKey(), max_score: readMaxScore(), auto: !manual })
     });
     if (r.batch && r.batch.id) {
       $('#jobPanel').classList.add('show');
       $('#jobList').innerHTML = '';
       $('#jobFoot').style.display = 'none';
-      $('#jobStage').textContent = '已扫描 ' + (r.count || 1) + ' 页，开始自动批阅…';
+      $('#jobStage').textContent = '已扫描 ' + (r.count || 1) + ' 页（满分 '
+        + (r.batch.max_score != null ? r.batch.max_score : readMaxScore()) + '），开始自动批阅…';
       $('#jobBar').style.width = '2%';
       if (JOB_TIMER) clearInterval(JOB_TIMER);
       pollJob(r.batch.id);

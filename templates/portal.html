@@ -96,6 +96,10 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 
 .classcard.on{border-color:var(--primary);box-shadow:0 0 0 2px rgba(37,99,235,.18);}
 .classcard.on .t::after{content:"当前查看";margin-left:auto;font-size:10.5px;font-weight:500;color:var(--primary);}
+/* 未认领班级栏：数量多时先显示前 8 个，可展开 */
+.claimbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:12px 0 6px;padding:10px 12px;background:#f8fafc;border:1px dashed var(--line);border-radius:var(--radius);}
+.claimbar .lab{font-size:12.5px;color:var(--text2);margin-right:2px;}
+.claimbar .btn{padding:3px 9px;font-size:12px;}
 
 /* 当前查看范围 */
 .statscope{display:flex;align-items:center;gap:10px;margin:0 0 10px;font-size:12.5px;color:var(--text2);}
@@ -294,7 +298,6 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
       <div class="tt">💡 账号和密码怎么填？</div>
       <div class="row"><span class="who">学生</span><span>账号是<b>完整学号</b>，密码同学号</span></div>
       <div class="row"><span class="who"></span><span>卷面后四位要补 <code>26</code>：<code>0101</code> → <code>260101</code></span></div>
-      <div class="row"><span class="who">教师</span><span>账号是<b>工号 / 手机号</b>，初始密码 <code>qj2026</code></span></div>
       <div class="foot">教师账号由管理员发放；忘记密码请找管理员重置。</div>
     </div>
   </div>
@@ -307,6 +310,7 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
     <div class="who" id="whoBox"></div>
     <div class="spacer"></div>
     <span class="chip gray" id="roleChip"></span>
+    <button class="btn sm" id="changePwdBtn">修改密码</button>
     <button class="btn sm" id="logoutBtn">退出</button>
   </div>
 
@@ -336,6 +340,7 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
 
       <h2 class="sec">我的班级 <span class="cnt" id="tClassHint"></span></h2>
       <div class="classgrid" id="classGrid"></div>
+      <div id="claimBar" class="claimbar hidden"></div>
 
       <div id="detailBox" class="hidden">
         <h2 class="sec" id="detailTitle"></h2>
@@ -351,6 +356,7 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
           <button class="btn sm" id="applyFilterBtn">筛选</button>
           <div class="spacer"></div>
           <button class="btn sm ok" id="gradeAllBtn">为本批全部待评生成评语</button>
+          <button class="btn sm" id="exportReportBtn">导出学生报告</button>
           <button class="btn sm" id="exportBtn">导出清单 CSV</button>
         </div>
         <div id="teacherRecords" class="records"></div>
@@ -391,6 +397,27 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
     <div class="mft">
       <button class="btn" id="genAiBtn">✨ 生成 AI 评语</button>
       <button class="btn primary" id="saveCommentBtn">保存评语</button>
+    </div>
+  </div>
+</div>
+
+<!-- 修改密码 -->
+<div class="mask" id="pwdMask">
+  <div class="modal" style="max-width:420px;">
+    <div class="mhd"><h3>修改密码</h3><div class="spacer"></div><button class="btn sm" id="pwdClose">关闭</button></div>
+    <div class="mbd">
+      <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">当前账号：<b id="pwdWho"></b></div>
+      <label style="display:block;font-size:12.5px;color:var(--text2);margin-bottom:6px;">原密码</label>
+      <input type="password" id="pwdOld" placeholder="当前使用的密码" autocomplete="current-password">
+      <label style="display:block;font-size:12.5px;color:var(--text2);margin:14px 0 6px;">新密码</label>
+      <input type="password" id="pwdNew" placeholder="至少 4 位" autocomplete="new-password">
+      <label style="display:block;font-size:12.5px;color:var(--text2);margin:14px 0 6px;">确认新密码</label>
+      <input type="password" id="pwdNew2" placeholder="再输入一次" autocomplete="new-password">
+      <div class="err" id="pwdErr"></div>
+    </div>
+    <div class="mft">
+      <button class="btn" id="pwdCancel">取消</button>
+      <button class="btn primary" id="pwdSave">保存</button>
     </div>
   </div>
 </div>
@@ -458,6 +485,42 @@ async function doLogin() {
 $('#logoutBtn').onclick = async () => {
   try { await jpost('/api/logout'); } catch (e) { }
   location.reload();
+};
+
+/* ------------ 修改密码 ------------ */
+function openPwdModal() {
+  $('#pwdWho').textContent = ME ? ((ME.name ? ME.name + ' · ' : '') + ME.id) : '';
+  ['pwdOld', 'pwdNew', 'pwdNew2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  $('#pwdErr').textContent = '';
+  $('#pwdMask').classList.add('show');
+  setTimeout(() => { const el = $('#pwdOld'); if (el) el.focus(); }, 60);
+}
+$('#changePwdBtn').onclick = openPwdModal;
+$('#pwdClose').onclick = () => $('#pwdMask').classList.remove('show');
+$('#pwdCancel').onclick = () => $('#pwdMask').classList.remove('show');
+$('#pwdSave').onclick = async () => {
+  const err = $('#pwdErr');
+  err.textContent = '';
+  const oldPwd = $('#pwdOld').value.trim();
+  const n1 = $('#pwdNew').value.trim();
+  const n2 = $('#pwdNew2').value.trim();
+  if (!oldPwd || !n1) { err.textContent = '请填写原密码和新密码'; return; }
+  if (n1.length < 4) { err.textContent = '新密码至少 4 位'; return; }
+  if (n1 !== n2) { err.textContent = '两次输入的新密码不一致'; return; }
+  const btn = $('#pwdSave');
+  btn.disabled = true; btn.textContent = '保存中…';
+  try {
+    const r = await jpost('/api/change_password', { old_password: oldPwd, new_password: n1 });
+    toast(r.msg || '密码已修改', 'ok');
+    $('#pwdMask').classList.remove('show');
+  } catch (e) {
+    err.textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = '保存';
+  }
 };
 
 /* ------------ 进入应用 ------------ */
@@ -874,7 +937,11 @@ function renderTeacher() {
   $('#tClassHint').textContent = cls.length ? cls.length + ' 个班级' : '';
   const grid = $('#classGrid');
   if (!cls.length) {
-    grid.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="big">🏫</div>还没有已扫描的试卷。请到扫描端扫描并提交。</div>';
+    const hasUn = ((CTX && CTX.unclaimed_classes) || []).length && ME.role !== 'admin';
+    grid.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="big">🏫</div>' +
+      (hasUn
+        ? '你还没有认领班级。请在下方「未认领班级」里认领自己负责的班，认领后这里只显示你的班级。'
+        : '还没有已扫描的试卷。请到扫描端扫描并提交。') + '</div>';
   } else {
     grid.innerHTML = cls.map(c => {
       const pct = c.total ? Math.round(c.graded / c.total * 100) : 0;
@@ -883,24 +950,73 @@ function renderTeacher() {
         <div class="t">${esc(c.class_name)} <span class="pill ${c.claimed_by_me ? '' : 'gray'}">${c.claimed_by_me ? '我的班级' : (c.owners && c.owners.length ? '他人班级' : '未认领')}</span></div>
         <div class="meta"><span>${c.total} 份</span><span>已批 ${c.graded}</span><span>待批 ${c.pending}</span><span>${c.student_count} 人</span></div>
         <div class="bar"><i style="width:${pct}%"></i><i class="p" style="width:${100 - pct}%"></i></div>
-        <div class="meta" style="margin-top:6px;"><span>最近提交 ${esc(fmt(c.last_at))}</span></div>
+        <div class="meta" style="margin-top:6px;"><span>最近提交 ${esc(fmt(c.last_at))}</span>${c.claimed_by_me ? '<button class="btn sm" data-release="' + esc(c.class_name) + '" style="margin-left:auto;padding:2px 8px;font-size:11.5px;" title="退出后会回到「未认领」，可重新认领">退出认领</button>' : ''}</div>
       </div>`;
     }).join('');
     $$('[data-class]', grid).forEach(el => el.onclick = () => openClass(el.dataset.class));
-  }
-
-  const un = CTX.unclaimed_classes || [];
-  if (un.length && ME.role !== 'admin') {
-    $('#tClassHint').innerHTML = (cls.length ? cls.length + ' 个班级 · ' : '') +
-      '未认领：' + un.slice(0, 6).map(c =>
-        '<button class="btn sm" style="padding:3px 9px;font-size:12px;margin-left:4px;" data-claim="' + esc(c) + '">认领 ' + esc(c) + '</button>').join('');
-    $$('[data-claim]').forEach(b => b.onclick = async (e) => {
+    // 退出认领：只在自己的班级卡片上出现；退完自动刷新，班级回到「未认领」
+    $$('[data-release]', grid).forEach(b => b.onclick = async (e) => {
       e.stopPropagation();
-      try { await jpost('/api/portal/classes/claim', { class_name: b.dataset.claim, action: 'claim' }); toast('已认领 ' + b.dataset.claim, 'ok'); enterApp(); }
-      catch (err) { toast(err.message, 'err'); }
+      const cn = b.dataset.release;
+      if (!confirm('退出认领「' + cn + '」班？\n\n退出后该班会回到「未认领」，你仍可重新认领。')) return;
+      b.disabled = true;
+      try {
+        await jpost('/api/portal/classes/claim', { class_name: cn, action: 'release' });
+        toast('已退出「' + cn + '」', 'ok');
+        if (VIEW.class_name === cn) VIEW.class_name = '';
+        enterApp();
+      } catch (err) { b.disabled = false; toast(err.message, 'err'); }
     });
   }
+
+  renderClaimBar();
   syncClassView();
+}
+
+/* ---------- 认领 / 退出认领 ---------- */
+function _claimBtnHtml(c) {
+  return '<button class="btn sm" data-claim="' + esc(c) + '">认领 ' + esc(c) + '</button>';
+}
+
+function _bindClaimBtns(scope) {
+  $$('[data-claim]', scope).forEach(b => b.onclick = async (e) => {
+    e.stopPropagation();
+    b.disabled = true;
+    try {
+      await jpost('/api/portal/classes/claim', { class_name: b.dataset.claim, action: 'claim' });
+      toast('已认领 ' + b.dataset.claim, 'ok');
+      VIEW.class_name = b.dataset.claim;
+      enterApp();
+    } catch (err) { b.disabled = false; toast(err.message, 'err'); }
+  });
+}
+
+/* 未认领班级栏：默认展示前 8 个，避免 40+ 个班把页面撑爆；可展开全部 */
+function renderClaimBar() {
+  const bar = $('#claimBar');
+  if (!bar) return;
+  const un = (CTX && CTX.unclaimed_classes) || [];
+  if (!un.length || (ME && ME.role === 'admin')) {
+    bar.classList.add('hidden');
+    bar.innerHTML = '';
+    return;
+  }
+  bar.classList.remove('hidden');
+  const expand = bar.dataset.expand === '1';
+  const shown = expand ? un : un.slice(0, 8);
+  let html = '<span class="lab">未认领班级（' + un.length + '）</span>' + shown.map(_claimBtnHtml).join('');
+  if (un.length > shown.length) {
+    html += '<button class="btn sm" data-expand="1">展开全部 ' + un.length + ' 个…</button>';
+  } else if (expand && un.length > 8) {
+    html += '<button class="btn sm" data-expand="0">收起</button>';
+  }
+  bar.innerHTML = html;
+  _bindClaimBtns(bar);
+  $$('[data-expand]', bar).forEach(b => b.onclick = (e) => {
+    e.stopPropagation();
+    bar.dataset.expand = b.dataset.expand;
+    renderClaimBar();
+  });
 }
 
 /* ---------- 班级切换：选中态 / 切换条 / 统计范围 ---------- */
@@ -1150,6 +1266,13 @@ $('#exportBtn').onclick = () => {
   if (VIEW.class_name) qs.set('class_name', VIEW.class_name);
   if (VIEW.status) qs.set('status', VIEW.status);
   window.open('/api/portal/export.csv?' + qs.toString(), '_blank');
+};
+
+/* 学生报告 v2：浏览器新标签打开打印友好版，Ctrl/Cmd+P 即可存 PDF */
+$('#exportReportBtn').onclick = () => {
+  const qs = new URLSearchParams();
+  if (VIEW.class_name) qs.set('class_name', VIEW.class_name);
+  window.open('/api/portal/export/report?' + qs.toString(), '_blank');
 };
 
 /* ------------ 大图 ------------ */

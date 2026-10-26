@@ -332,3 +332,120 @@ data/
 **该设备是馈纸式，一次命令会连续吸入多页**，`_collect_scan_pages` 收多页的逻辑是对的。
 复测脚本：`temp/probe_dpi.py <dpi>`（必须放纸）。
 
+---
+
+## 15. 2026-10-26 21:20：接口鉴权收口 + 报告 v2 导出 + 衔接过滤
+
+本轮针对「全项目扫描」发现的问题做了 5 处修复，**均已改代码并通过独立实例（5011）实测**。
+⚠️ **5001 上的正式服务仍是旧代码，必须重启才生效**（`启动服务.bat`，或结束旧进程后重跑）。
+
+### 15.1 旧版接口统一鉴权（P0，安全）
+历史遗留的 `/api/image`、`/api/file`(DELETE)、`/api/vision_grade`、`/api/grade`、`/api/ocr`、
+`/api/class_center` 等接口原本**完全没有登录校验**，项目对局域网开放后任何设备都能不登录就读图、
+删文件、白烧模型额度（已用 curl 实测确认）。
+
+修法：`app.py` 顶部新增 `@app.before_request _guard_api_auth()`：
+- 公开：`/api/login`、`/api/logout`、`/api/me`、`/api/register_teacher`、`/api/invite_code/validate`；
+- 豁免：`/api/station/*`（自带「仅本机」闸门）、`/api/portal/*`（逐条校验角色）；
+- 其余 `/api/*`：未登录 → 401；非教师/管理员 → 403（学生仅保留 `/api/my_reports`、`/api/change_password`）。
+
+实测：匿名 `/api/image/logo/1.png` 401、`/api/class_center/2601` 401；学生 403；教师 200；`/portal`、`/station`、`/api/station/context` 均 200。
+
+### 15.2 报告 v2 可导出打印（P0，功能）
+旧 `export_class_report` 只读 `TASK_RESULTS_DIR`，v2 流水线写的是 `records/` + `batches/`，两条链路不通。
+- 新增 `utils/report_v2_export.py`：消费 `essay` v2 结构（要点覆盖/语篇批改/词汇/句式/衔接/范文）+ 批次 `corpus.points`，
+  每生一页正文 + 一页语料，纯标准库、打印友好（`@media print`）。
+- 新增 `GET /api/portal/export/report?class_name=&format=html|pdf`（教师/管理员；`pdf` 尝试 weasyprint，失败提示用 HTML 打印）。
+- `templates/portal.html` 教师工具栏新增「导出学生报告」按钮（新标签打开，Ctrl/Cmd+P 存 PDF）。
+
+实测：test_client 注入一条 v2 记录 → 200、`text/html`、17KB、七个区块齐全；无记录时 400 且给中文提示。
+
+### 15.3 衔接「同义替换」过滤（P1，质量）
+`_norm_essay_result` 新增 `_COHESION_CLUSTERS`：`before`/`after` 落在同一同义簇
+（如 Moreover→Furthermore、However→Nevertheless）直接丢弃，不再当成「逻辑衔接升级」。
+纯规则、零额外调用/延迟；仍在簇外的真实升级保留。
+
+### 15.4 上传大小上限
+`app.config['MAX_CONTENT_LENGTH'] = QJ_MAX_UPLOAD_MB`（默认 64MB），防止超大文件打满内存/磁盘。
+
+### 15.5 旧文件接口路径包含校验（防御）
+`/api/file` DELETE 与 `/api/image` 增加 `_path_within()`：目标必须落在项目根、班级目录、临时目录或扫描输出目录内，
+防止将来框架行为变化时 `../` 拼出项目外路径。实测穿越尝试仍 404。
+
+### 15.6 本轮**未做**（需要决策 / 需 A/B）
+1. **model_essay 迁到文本模型并行**：实测范文只占输出约 10–15%，收益有限；改提示词有质量回归风险，建议先做单卷 A/B。
+2. **200dpi 上采样**：放大 1.5× 会让图像 token 约翻倍（+成本 +延迟），且不增加真实信息；真正的解在扫描 dpi。
+3. **跨页合卷**、**多区域不等分值**：都需要产品定义（合并策略、区域分值 UI），只改后端无意义。
+
+### 15.7 验证与遗留
+- `py_compile` 通过；`portal.html` 内联脚本 `node --check` 通过。
+- 工作区未提交：`app.py`、`templates/portal.html`、`utils/report_v2_export.py`（新增），
+  另有并发会话遗留的 `templates/index.html` 4 行改动，未由本轮触碰。
+- 测试脚本：`temp/_test_report_export.py`（渲染器）、`temp/_test_route_export.py`（路由 test_client），均 gitignore。
+
+---
+
+## 16. 2026-10-26 21:30：班级认领可以退出（教师）
+
+反馈：「认领之后要能调整，现在领了不能退」。定位到 **3 个叠加原因**，均已修：
+
+1. **前端没有退出入口**：只有「认领」按钮，没有「退出」。现在自己名下的班级卡片上多了「退出认领」按钮
+   （在卡片 meta 行右侧，点击不触发卡片跳转；带确认框）。
+2. **已认领但 0 份试卷的班级不显示**：`overview` 的 `classes` 原先只由「有记录」的班级生成，
+   刚认领还没扫描的班级连卡片都没有，自然没有退出按钮。现在教师的已认领班级即使 0 份也会出现（`total: 0`）。
+3. **后端 `owned or None` 的越权/退不掉**：`_teacher_visible_classes` 在「退掉最后一个班」后 `owned` 变空，
+   原逻辑会返回 `None`（不限范围）→ 反而能看到**所有班级**。改为：教师始终严格按认领范围，仅管理员不限。
+
+同时把未认领班级从「提示行里挤 6 个按钮」改成独立面板 `#claimBar`：默认前 8 个，可「展开全部 N 个…」，
+40+ 个班也不会撑爆页面；未认领时班级区提示改为「你还没有认领班级，请在下方认领」。
+
+接口不变（`POST /api/portal/classes/claim`，`action=claim|release`，原先就支持 release，只是没人调用）。
+
+验证（test_client + 内存伪造归属，未写真实数据）：
+`teacher01` 只见 2401/2402/2403（0 份也显示）；`teacher05` 未见任何班、未认领 38 个；认领 2601 后可见，退出后消失并回到未认领；
+退出全部后**不再**变成「看全部」。真实 `data/config/class_owners.json` 未被测试改动。
+
+
+---
+
+## 17. 2026-10-26 21:35：扫描端可以选「满分」
+
+反馈：「扫描界面，目前还是没有让我选择分值的地方」。
+
+### 17.1 根因：满分是写死的常量
+`_auto_pipeline` 里批阅调的是 `_vision_grade_essay(path, requirements_text, ESSAY_MAX_SCORE, ...)`，
+`ESSAY_MAX_SCORE = 25` 是模块级常量。所以即使老师在「批阅方案」里选了数学（12 分）或默写（10 分），
+卷子照样按 25 分制评——提示词里的 `{max_score}` 永远是 25，学生端 `5/25` 也是错的。
+方案下拉里虽然显示了「满分 X」，但没有任何代码消费它。
+
+### 17.2 改法：满分随批次走
+- 新增 `_subject_max_score(subject)`：读 `grading_config` 里该方案自己的 `max_score`（作文 25 / 语文作文 50 /
+  数学 12 / 默写 10 / 通用 100），查不到回落到 25。
+- 新增 `_coerce_max_score(value, subject='')`：校验前端传来的值（必须 0 < v ≤ 1000），非法就回落到方案默认值。
+- 新增 `_subject_display_name(subject)`：档案里的 `subject_name` 不再硬写「英语作文」。
+- `_new_batch(..., max_score=None)` / `_start_auto_batch(..., max_score=None)`：批次里存 `max_score`。
+  **重试复用同一批次**（`/api/station/jobs/<id>/retry` 直接重跑 `_auto_pipeline`），所以整批口径天然一致。
+- `_auto_pipeline` 开头算一次 `batch_max`，预热、并行、失败补跑全用它；入库的 `max_total` 也用它。
+- `_grade_essay_record`（教师端「重新生成」）同样沿用原口径：批次 `max_score` > 该记录已有 `max_total` > 方案默认。
+  否则 12 分制的卷子重批一次会变成 25 分制。
+- `station_scan` / `station_import` 接收 `max_score`，并在响应里回带 `batch.max_score`。
+
+### 17.3 前端
+`#subjectSel` 右侧新增「满分」数字输入框（`#maxScore`）：
+- 默认值 = 当前方案的 `max_score`，切换方案会跟着换；
+- 老师改过的值按**学科**记在 `localStorage['qj_station_max']`，下次扫同一学科不用重填；
+- 改回等于方案默认值时自动清掉记忆，避免「改过一次永远生效」；
+- 非法输入（空/0/负数/超大）失焦时纠正回默认值；发送前 `readMaxScore()` 再兜一层。
+- 扫描请求体新增 `max_score`；进度条首行显示「已扫描 N 页（满分 X）」，让老师当场确认口径。
+
+### 17.4 验证
+- `temp/test_max_score2.py`：六个方案默认值、非法输入回落、`'18'`/`30.5` 正常透传，全部符合预期。
+- `temp/test_scan_api.py` / `_2`：test_client 打 `/api/station/import`（`_auto_pipeline` 打桩，不烧模型额度），
+  传 `max_score=18` → 批次落盘 `18.0`；不传 → `25.0`；`subject=math_solution&max_score=12` → `12.0`。测试数据已清理。
+- `station.html` 内联脚本 `node --check` 通过；5001 实际渲染出 `id="maxScore"`（页面 `maxScore` 出现 10 次）。
+
+### 17.5 遗留（未做，需要产品定义）
+自动流水线目前**只走英语作文契约**：选了数学/默写，满分是对的，但提示词仍是作文那套（要点覆盖/语言错误/句子改写）。
+要做学科分流，得给 staging 条目加「读图 → 通用评分契约」的分支，属于独立改造，未在本次范围内。
+
+> 服务已于 21:36 用新代码重启（旧进程 15648/1864 已结束），`/station`、`/portal` 均 200。

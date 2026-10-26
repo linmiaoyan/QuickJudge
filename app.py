@@ -114,7 +114,37 @@ from urllib.parse import urlencode
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'scan-biyue-dev-secret-key-change-in-production')
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# 上传上限：扫描图/答题卡通常 1–3MB，留足余量即可；不设会被超大文件打满内存与磁盘。
+app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('QJ_MAX_UPLOAD_MB', '64') or 64) * 1024 * 1024
 CORS(app, supports_credentials=True)
+
+# ===== 统一鉴权：旧版接口兜底 =====
+# 历史遗留的 /api/image、/api/file(DELETE)、/api/vision_grade、/api/class_center 等接口
+# 当初只为本机单用户设计，完全没有登录校验。项目已经能对整个局域网开放，
+# 任何设备都能不登录就读到别的班的学生卷子、删扫描文件、白烧模型额度。
+# 这里统一兜底：除登录相关、扫描端（自带「仅本机」闸门）、用户端（逐条校验角色）之外，
+# 其余 /api/* 一律要求已登录。
+_PUBLIC_API = {'/api/login', '/api/logout', '/api/me',
+               '/api/register_teacher', '/api/invite_code/validate'}
+_PUBLIC_PREFIXES = ('/api/station/', '/api/portal/')
+# 学生登录后仍需用的少数据接口（其余旧版接口只给教师/管理员）
+_STUDENT_API = {'/api/my_reports', '/api/change_password'}
+
+
+@app.before_request
+def _guard_api_auth():
+    p = request.path
+    if not p.startswith('/api/'):
+        return None
+    if p in _PUBLIC_API or p.startswith(_PUBLIC_PREFIXES):
+        return None
+    if not session.get('user_id'):
+        return jsonify({'error': '未登录或登录已过期，请重新登录'}), 401
+    if p in _STUDENT_API:
+        return None
+    if session.get('user_role') not in ('teacher', 'admin'):
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    return None
 
 # ===== 扫描运行时配置 =====
 # 同一台扫描仪同一时刻只允许一次扫描会话：
@@ -137,6 +167,16 @@ SCAN_STALL_SECONDS = int(os.getenv('SCAN_STALL_SECONDS', '60') or 60)
 SCAN_FINISH_GRACE_SECONDS = int(os.getenv('SCAN_FINISH_GRACE_SECONDS', '10') or 10)
 
 LOGO_DIR = os.path.join(os.path.dirname(__file__), 'logo')
+
+
+def _path_within(path, base):
+    """判断 path 是否落在 base 目录内（防 ../ 穿越）。两边都先 realpath。"""
+    try:
+        rp = os.path.realpath(os.path.abspath(path))
+        rb = os.path.realpath(os.path.abspath(base))
+        return rp == rb or rp.startswith(rb + os.sep)
+    except Exception:
+        return False
 
 @app.route('/favicon.ico')
 def favicon():
@@ -3241,6 +3281,22 @@ def batch_delete_files():
 @app.route('/api/file/<path:file_path>', methods=['DELETE'])
 def delete_file(file_path):
     """删除指定的图片文件"""
+    def _allowed_bases():
+        bases = [SCAN_DIR, CLASSES_DIR, TEMP_DIR]
+        try:
+            bases.append(get_scan_output_dir())
+        except Exception:
+            pass
+        return bases
+
+    def _within(p, base):
+        try:
+            rp = os.path.realpath(os.path.abspath(p))
+            rb = os.path.realpath(os.path.abspath(base))
+            return rp == rb or rp.startswith(rb + os.sep)
+        except Exception:
+            return False
+
     try:
         parts = file_path.split('/')
         filename = parts[-1]
@@ -3261,7 +3317,11 @@ def delete_file(file_path):
             file_path_full = os.path.join(SCAN_DIR, folder_name, filename)
         else:
             return jsonify({'error': '无效的文件路径'}), 400
-        
+
+        # 路径必须落在允许目录内：防止请求里拼出 ../ 后删掉项目外的任意文件
+        if not any(_within(file_path_full, b) for b in _allowed_bases()):
+            return jsonify({'error': '无效的文件路径'}), 400
+
         # 检查文件是否存在
         if not os.path.exists(file_path_full):
             return jsonify({'error': '文件不存在'}), 404
@@ -3348,6 +3408,14 @@ def get_image(file_path):
             # 原始扫描文件夹：date_folder/filename
             folder_name = parts[0]
             folder_path = os.path.join(SCAN_DIR, folder_name)
+
+        # 目录必须落在项目内或扫描输出目录内（防 ../ 拼出项目外路径读任意文件）
+        try:
+            _scan_out = get_scan_output_dir()
+        except Exception:
+            _scan_out = SCAN_DIR
+        if not (_path_within(folder_path, SCAN_DIR) or _path_within(folder_path, _scan_out)):
+            return jsonify({'error': '文件不存在'}), 404
         
         # 检查临时文件夹中是否有processed版本
         name, ext = os.path.splitext(filename)
@@ -5798,6 +5866,8 @@ def station_scan():
     auto = req.get('auto', True) not in (False, 0, '0', 'false', 'False')
     subject = str(req.get('subject') or 'english_essay').strip() or 'english_essay'
     task_id = str(req.get('task_id') or '').strip()
+    # 满分由老师在扫描端当场指定：不传/非法就回落到该批阅方案自带的默认值
+    max_score = req.get('max_score')
     try:
         scan_output_dir = get_scan_output_dir()
         next_filename = get_next_scan_filename(scan_output_dir)
@@ -5815,8 +5885,9 @@ def station_scan():
         resp = {'ok': True, 'items': added, 'added': added, 'count': len(added),
                 'filename': os.path.basename(pages[0]) if pages else '', 'auto': auto}
         if auto and added:
-            b = _start_auto_batch([it['id'] for it in added], subject=subject, task_id=task_id)
-            resp['batch'] = {'id': b['id'], 'job': b.get('job')}
+            b = _start_auto_batch([it['id'] for it in added], subject=subject, task_id=task_id,
+                                  max_score=max_score)
+            resp['batch'] = {'id': b['id'], 'job': b.get('job'), 'max_score': b.get('max_score')}
         return jsonify(resp)
     except Exception as e:
         import traceback
@@ -5872,6 +5943,7 @@ def station_import():
     auto = str(request.form.get('auto') or request.args.get('auto') or '').lower() in ('1', 'true', 'yes')
     subject = str(request.form.get('subject') or request.args.get('subject') or 'english_essay').strip()
     task_id = str(request.form.get('task_id') or request.args.get('task_id') or '').strip()
+    max_score = request.form.get('max_score') or request.args.get('max_score')
     items = load_staging()
     added = []
     tmp_dir = os.path.join(STAGING_DIR, '_incoming')
@@ -5900,8 +5972,9 @@ def station_import():
             pass
     resp = {'ok': True, 'added': added, 'count': len(added), 'auto': auto}
     if auto and added:
-        b = _start_auto_batch([it['id'] for it in added], subject=subject, task_id=task_id)
-        resp['batch'] = {'id': b['id'], 'job': b.get('job')}
+        b = _start_auto_batch([it['id'] for it in added], subject=subject, task_id=task_id,
+                              max_score=max_score)
+        resp['batch'] = {'id': b['id'], 'job': b.get('job'), 'max_score': b.get('max_score')}
     return jsonify(resp)
 
 
@@ -6231,15 +6304,18 @@ def station_staging_clear():
 # ---------------------------- 用户端页面与接口 ----------------------------
 
 def _teacher_visible_classes():
-    """返回当前教师可见的班级集合；None 表示不限（管理员，或尚未建立归属数据）。"""
+    """返回当前教师可见的班级集合；仅管理员返回 None（不限）。
+
+    不能写成 `return owned or None`：那样「退出最后一个认领」会让 owned 变空，
+    反而退化成「不限范围、能看到所有班级」——既退不掉班，又泄漏别班学生数据。
+    未认领的教师看到的是空列表，但门户仍会给出「未认领班级」入口供其认领。
+    """
     role = session.get('user_role')
     uid = str(session.get('user_id') or '')
     if role == 'admin':
         return None
     owners = load_class_owners()
-    owned = {c for c, lst in owners.items() if uid and uid in (lst or [])}
-    owned |= {c for c, lst in owners.items() if not lst}
-    return owned or None
+    return {c for c, lst in owners.items() if uid and uid in (lst or [])}
 
 
 def _filter_records_for_session(records, class_name='', student_id='', task_id='', status=''):
@@ -6503,6 +6579,61 @@ def _vision_grade_one(image, subject_key=None, max_score=None, extra_prompt=None
 
 ESSAY_MAX_SCORE = 25
 ESSAY_HEADER_RECT = {'x': 0.035, 'y': 0.024, 'w': 0.90, 'h': 0.100}
+
+# 只读表头的轻量提示词：输出几十个 token，几乎不可能跑飞。
+# 与完整批阅分两次调用，是为了「先把学号分组定下来，再批改」——
+# 批阅那一步就算失败，学号也已经写进临时区，老师不需要手填。
+HEADER_PROMPT = '''这是一张学生英语作文的扫描件。只做一件事：读出页首「班级 / 姓名 / 学号」栏。
+
+规则：
+· 学号是 4 位数字（高一）或 6 位数字（其他年级）。手写时常常一格一个（如 1 4 3 1），必须合并成一个数。
+· 只填数字，不要带空格、横线或「号」字。
+· 认不出的字留空，不要猜；姓名按字辨认，没把握就留空。
+· 不要转写作文，不要批改，不要评价字迹。
+
+只输出 JSON，不要代码块，不要解释：
+{"class_no": "两位班级号，如 14；认不出留空", "student_id": "4 位或 6 位数字", "name": "姓名"}
+'''
+
+
+def _subject_max_score(subject):
+    """取某个批阅方案自带的默认满分（英语作文 25 / 数学 12 / 默写 10）。"""
+    try:
+        cfg = load_grading_config()
+        val = ((cfg.get('subjects') or {}).get(str(subject or '')) or {}).get('max_score')
+        f = float(val)
+        if 0 < f <= 1000:
+            return f
+    except (TypeError, ValueError):
+        pass
+    return float(ESSAY_MAX_SCORE)
+
+
+def _coerce_max_score(value, subject=''):
+    """校验前端传来的满分：没传/非法就回落到方案默认值。
+
+    老师不选也能用（默认跟着方案走），选了就以老师为准——这是「扫完即批」不被打断的前提。
+    """
+    try:
+        f = float(value)
+        if 0 < f <= 1000:
+            return f
+    except (TypeError, ValueError):
+        pass
+    return _subject_max_score(subject)
+
+
+def _subject_display_name(subject):
+    """批阅方案的中文名（档案上展示用）；查不到就按 key 兜底，不硬写「英语作文」。"""
+    key = str(subject or 'english_essay')
+    try:
+        for s in (grading_subject_options().get('subjects') or []):
+            if s.get('key') == key:
+                return s.get('name') or key
+    except Exception:
+        pass
+    return '英语作文' if key == 'english_essay' else key
+
 
 ESSAY_PROMPT_TEMPLATE = '''你正在批阅一份中国高一学生的英语作文（手写扫描件）。
 
@@ -7094,6 +7225,31 @@ def _norm_essay_result(data, max_score=ESSAY_MAX_SCORE):
                          'added': _clip(p.get('added'), 80),
                          'why': _clip(p.get('why'), 160)})
 
+    # 衔接词的「同义替换」不算升级：Moreover→Furthermore、However→Nevertheless 都是同一类关系，
+    # 学生换完句子没变、逻辑也没变。8B 最容易把这类当「逻辑衔接提升」交上来，这里按同义簇过滤掉。
+    _COHESION_CLUSTERS = (
+        {'moreover', 'furthermore', 'besides', 'in addition', 'what is more', 'additionally', 'also'},
+        {'however', 'nevertheless', 'nonetheless', 'yet', 'still', 'but'},
+        {'therefore', 'thus', 'hence', 'consequently', 'as a result', 'accordingly', 'so'},
+        {'for example', 'for instance', 'such as', 'namely'},
+        {'in conclusion', 'to sum up', 'in short', 'in a word', 'all in all', 'to conclude'},
+        {'first', 'firstly', 'first of all', 'to begin with', 'initially'},
+        {'finally', 'lastly', 'eventually', 'in the end', 'ultimately'},
+        {'because', 'since', 'as', 'for'},
+        {'although', 'though', 'even though', 'while', 'whereas'},
+        {'in fact', 'indeed', 'actually', 'as a matter of fact'},
+    )
+
+    def _cohesion_cluster(word):
+        w = re.sub(r'^[^a-zA-Z]+|[^a-zA-Z\s]+$', '', (word or '').strip().lower())
+        w = re.sub(r'\s+', ' ', w)
+        if not w:
+            return None
+        for i, cl in enumerate(_COHESION_CLUSTERS):
+            if w in cl:
+                return i
+        return None
+
     cohesion = []
     for c in (data.get('cohesion') or []):
         if not isinstance(c, dict):
@@ -7101,10 +7257,16 @@ def _norm_essay_result(data, max_score=ESSAY_MAX_SCORE):
         o, im = _clip(c.get('original'), 320), _clip(c.get('improved'), 320)
         if not o or not im or _same(o, im):
             continue
+        before = _clip(c.get('before'), 30) or '无'
+        after = _clip(c.get('after'), 40)
+        # before/after 落在同一同义簇 = 只是换了说法，不是衔接升级，丢掉
+        cb, ca = _cohesion_cluster(before), _cohesion_cluster(after)
+        if cb is not None and cb == ca:
+            continue
         cohesion.append({'original': o, 'improved': im,
                          'relation': _clip(c.get('relation'), 12),
-                         'before': _clip(c.get('before'), 30) or '无',
-                         'after': _clip(c.get('after'), 40),
+                         'before': before,
+                         'after': after,
                          'why': _clip(c.get('why'), 160)})
 
     # 读后续写专用：按情节节点提升内容（非续写应为空）
@@ -7242,6 +7404,11 @@ _LLM_SEM = threading.BoundedSemaphore(LLM_MAX_CONCURRENCY)
 IMG_MAX_DEFAULT = max(1200, int(os.getenv('LLM_IMG_MAX_DEFAULT', '2400') or 2400))
 IMG_MAX_HARD = max(1200, int(os.getenv('LLM_IMG_MAX_HARD', '3300') or 3300))
 
+# 单次输出上限。v2 提示词要的字段多（转写 + 错因 + 三类升级 + 个性化范文），
+# 实测典型 2300 token，个别卷会明显更长；6000 会撞顶导致 JSON 被截断、整张作废，
+# 所以默认给 8000，真撞顶了再按 1.6 倍续救一次。
+LLM_MAX_TOKENS = max(2000, int(os.getenv('LLM_MAX_TOKENS', '8000') or 8000))
+
 _LLM_RETRY_HINTS = ('429', 'rate limit', 'too many requests', 'timeout', 'timed out',
                     'temporarily', 'overloaded', 'busy', '502', '503', '504',
                     'connection', 'reset by peer', 'json decode', '20015')
@@ -7265,6 +7432,62 @@ def _llm_retry(fn, tries=3, base_delay=2.0):
                 break
             time.sleep(base_delay * (2 ** i))
     return None, last
+
+
+def _read_header(page, quality=None, img_max_size=None):
+    """轻量读表头：只取学号 / 姓名 / 班级，输出几十 token。返回 (dict, 错误)。
+
+    单独一次调用的意义：学号是分班的主键，不能绑定在「完整批阅成功」这个前提上。
+    批阅要转写全文、逐条改错、写范文，输出长、偶尔会卡；读表头只要几十个 token，
+    几秒钟就有结果。先读表头 → 立刻分班落库 → 再批阅，老师全程不用碰学号。
+    """
+    if not minimax_api_key:
+        return None, '未配置 LLM_API_KEY'
+    try:
+        # 读表头固定走快档：实测 8B 与 32B 认学号都是 12/12，用 32B 只会白等 3 倍时间
+        use_model = _llm_model_fast or minimax_model
+        # 表头本来就是放大的小图，2400 足够；难卷也不必为它抬到 3300
+        page_max = img_max_size or IMG_MAX_DEFAULT
+        img = _open_image(page) if isinstance(page, str) else page
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        parts = []
+        # 表头特写优先：字被放大后，手写数字认错率明显更低
+        try:
+            head = _transform_image(img, 0, ESSAY_HEADER_RECT)
+            if head.size[0] >= 60 and head.size[1] >= 14:
+                parts.append({'type': 'image_url', 'image_url': {'url': _img_to_data_url(head, page_max)}})
+        except Exception:
+            pass
+        parts.append({'type': 'image_url', 'image_url': {'url': _img_to_data_url(img, page_max)}})
+        parts.append({'type': 'text', 'text': HEADER_PROMPT})
+
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=120.0)
+
+        def _call(cap):
+            resp = _vision_chat(
+                client, model=use_model,
+                messages=[{'role': 'system', 'content': '你只负责准确抄写手写数字与姓名，不做任何评判。'},
+                          {'role': 'user', 'content': parts}],
+                temperature=0, max_tokens=cap)
+            if getattr(resp.choices[0], 'finish_reason', '') == 'length':
+                raise RuntimeError('表头输出被截断（max_tokens=%d）' % cap)
+            return resp
+
+        resp, cerr = _llm_retry(lambda: _call(400), tries=2, base_delay=1.5)
+        if resp is None:
+            return None, '读表头失败：%s' % cerr
+        data = _loads_lenient(resp.choices[0].message.content or '') or {}
+        sid = re.sub(r'\D', '', str(data.get('student_id') or ''))
+        # 只认 4 / 6 位：多一位少一位都是误读，宁可交给老师确认也不要错分班
+        if len(sid) not in (4, 6):
+            sid = ''
+        name = str(data.get('name') or '').strip()[:20]
+        cls = re.sub(r'\D', '', str(data.get('class_no') or ''))
+        return {'student_id': sid, 'name': name, 'class_no': cls[:2],
+                'model': use_model}, ''
+    except Exception as e:
+        return None, '读表头异常：%s' % e
 
 
 def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=None,
@@ -7296,9 +7519,9 @@ def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=
         prompt = prompt.replace('{requirements}', requirements or '（本批第一份，请自行提取）')
         parts.append({'type': 'text', 'text': prompt})
 
-        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=240.0)
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=600.0)
 
-        def _call():
+        def _call(cap):
             resp = _vision_chat(
                 client,
                 model=use_model,
@@ -7307,7 +7530,7 @@ def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=
                     {"role": "user", "content": parts}
                 ],
                 temperature=0.2,
-                max_tokens=6000
+                max_tokens=cap
             )
             # 用量日志：并发调参和成本核算都靠它，别删
             u = getattr(resp, 'usage', None)
@@ -7315,11 +7538,19 @@ def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=
                 print('[essay] %s in=%s out=%s' % (
                     use_model, getattr(u, 'prompt_tokens', '?'), getattr(u, 'completion_tokens', '?')),
                     flush=True)
+            # 撞上限 = JSON 一定被截断，别拿半截内容去解析（会变成"结构异常"这种误导性报错）
+            if getattr(resp.choices[0], 'finish_reason', '') == 'length':
+                raise RuntimeError('输出被截断（max_tokens=%d）' % cap)
             return resp
 
-        # 服务端偶发 20015「JSON decode error」（大请求体被网关截断）与限流/超时，退避重试
+        # 服务端偶发 20015「JSON decode error」（大请求体被网关截断）与限流/超时：退避重试；
+        # 撞输出上限：只提上限重跑一次（同一上限重试没有意义）。
         t_call = time.time()
-        resp, cerr = _llm_retry(_call, tries=3)
+        resp, cerr = None, ''
+        for cap in (LLM_MAX_TOKENS, min(int(LLM_MAX_TOKENS * 1.6), 16000)):
+            resp, cerr = _llm_retry(lambda c=cap: _call(c), tries=2)
+            if resp is not None or '截断' not in cerr:
+                break
         if resp is None:
             return None, '批阅失败：%s' % cerr
         raw = (resp.choices[0].message.content or '').strip()
@@ -7571,11 +7802,13 @@ def _pick_awards(essays, level_hint='高一'):
 _JOB_LOCK = threading.Lock()
 
 
-def _new_batch(item_ids, subject='english_essay', task_id='', note=''):
+def _new_batch(item_ids, subject='english_essay', task_id='', note='', max_score=None):
     b = {
         'id': uuid.uuid4().hex[:16],
         'created_at': _now_str(),
         'subject': subject,
+        # 满分随批次走：重试、补批都沿用同一套口径，不会中途变成默认 25
+        'max_score': _coerce_max_score(max_score, subject),
         'task_id': task_id or '',
         'note': note or '',
         'item_ids': list(item_ids or []),
@@ -7596,6 +7829,12 @@ def _auto_pipeline(batch_id):
     if not b:
         return
 
+    # 本批满分口径：老师扫描时选的 > 批阅方案默认值。整批、补跑、重试都用同一个值，
+    # 否则同一批里一半按 25 算、一半按 12 算，成绩没法比。
+    batch_max = _coerce_max_score(b.get('max_score'), b.get('subject') or 'english_essay')
+    batch_max = int(batch_max) if float(batch_max).is_integer() else batch_max
+    subject_label = _subject_display_name(b.get('subject') or 'english_essay')
+
     def bump(**kw):
         job = b.setdefault('job', {})
         job.update({k: v for k, v in kw.items() if v is not None})
@@ -7609,6 +7848,68 @@ def _auto_pipeline(batch_id):
              total=len(pages), message='正在识别表头与正文…')
         if not pages:
             raise RuntimeError('临时区里找不到这批扫描件（可能已被清空）')
+
+        # ---------------- ⓪ 读表头：先把学号读出来并分班，再谈批阅 ----------------
+        # 学号是分班的主键，不能挂在「完整批阅成功」这个前提上：
+        # 批阅要转写全文+逐条改错+写范文，输出长、偶尔会卡；读表头只要几十 token。
+        # 这一步先跑完，老师立刻能在界面上看到每张卷子的学号与班级，不需要手填。
+        total = len(pages)
+        header_hits = {}
+        bump(stage='header', done=0, total=total, message='正在识别学号 0/%d…' % total)
+
+        def _header_one(idx):
+            p = _staging_image_path(pages[idx])
+            if not p:
+                return idx, None, '图片文件缺失'
+            h, err = _read_header(p, quality=pages[idx].get('quality'))
+            return idx, h, err
+
+        def _header_print(idx):
+            """表头结果回填（主线程调用）：写进内存里的 pages，稍后统一落盘。"""
+            h = header_hits.get(idx) or {}
+            if h.get('student_id'):
+                pages[idx]['student_id'] = h['student_id']
+                pages[idx]['student_id_guess'] = h['student_id']
+                pages[idx]['class_name'] = student_id_to_class_code(h['student_id']) or ''
+                if h.get('name'):
+                    pages[idx]['student_name'] = h['name']
+
+        hdone = 0
+        if total:
+            with ThreadPoolExecutor(max_workers=max(1, min(LLM_BATCH_WORKERS, total)),
+                                    thread_name_prefix='header') as ex:
+                futs = {ex.submit(_header_one, i): i for i in range(total)}
+                for fut in as_completed(futs):
+                    idx = futs[fut]
+                    try:
+                        _, h, err = fut.result()
+                    except Exception as e:
+                        h, err = None, str(e)
+                    if h and h.get('student_id'):
+                        header_hits[idx] = h
+                        _header_print(idx)
+                    hdone += 1
+                    miss = hdone - len(header_hits)
+                    bump(done=hdone,
+                         message='已识别学号 %d/%d%s' % (
+                             len(header_hits), hdone,
+                             ('，%d 张没认出（会留在临时区待确认）' % miss) if miss else ''))
+
+        # 学号 + 班级立刻写回临时区：批阅失败也不会退回「让老师填学号」
+        if header_hits:
+            with _STAGING_LOCK:
+                cur = load_staging()
+                by_id = {x.get('id'): x for x in cur}
+                for idx, h in header_hits.items():
+                    it = by_id.get(pages[idx]['id'])
+                    if not it:
+                        continue
+                    it['student_id'] = h['student_id']
+                    it['student_id_guess'] = h['student_id']
+                    it['class_name'] = student_id_to_class_code(h['student_id']) or it.get('class_name') or ''
+                    if h.get('name'):
+                        it['student_name'] = h['name']
+                save_staging(cur)
 
         # ---------------- 批阅：预热 1 张拿题干 → 其余并行 → 失败补跑 ----------------
         # 题干是本批共享的（第一份产出、其余复用），所以不能一上来全并行：
@@ -7627,7 +7928,7 @@ def _auto_pipeline(batch_id):
                 return idx, {'item_id': it['id'], 'error': '图片文件缺失',
                              'quality': it.get('quality'), 'sec': 0}
             t0 = time.time()
-            res, err = _vision_grade_essay(path, requirements_text, ESSAY_MAX_SCORE,
+            res, err = _vision_grade_essay(path, requirements_text, batch_max,
                                            quality=it.get('quality'))
             sec = round(time.time() - t0, 1)
             if err:
@@ -7761,10 +8062,10 @@ def _auto_pipeline(batch_id):
                 'grading': {
                     'items': [essay] if essay else [],
                     'total': essay.get('score'),
-                    'max_total': essay.get('max_score') or ESSAY_MAX_SCORE,
+                    'max_total': essay.get('max_score') or batch_max,
                     'level': essay.get('level', ''),
                     'subject': b.get('subject') or 'english_essay',
-                    'subject_name': '英语作文',
+                    'subject_name': subject_label,
                     'graded_at': _now_str(),
                 },
                 'status': 'graded' if essay else 'pending',
@@ -7828,10 +8129,10 @@ def _auto_pipeline(batch_id):
         bump(status='error', stage='error', message=str(e))
 
 
-def _start_auto_batch(item_ids, subject='english_essay', task_id=''):
+def _start_auto_batch(item_ids, subject='english_essay', task_id='', max_score=None):
     """建批 + 起后台线程。返回 batch（job 已在写盘）。"""
     with _JOB_LOCK:
-        b = _new_batch(item_ids, subject=subject, task_id=task_id)
+        b = _new_batch(item_ids, subject=subject, task_id=task_id, max_score=max_score)
         t = threading.Thread(target=_auto_pipeline, args=(b['id'],), daemon=True)
         t.start()
     return b
@@ -7846,7 +8147,13 @@ def _grade_essay_record(rec, extra_prompt=None):
     b = _load_batch(rec.get('batch_id') or '')
     if b and isinstance(b.get('topic'), dict):
         reqs = '\n'.join('· ' + str(r) for r in (b['topic'].get('requirements') or []))
-    essay, err = _vision_grade_essay(path, reqs, ESSAY_MAX_SCORE)
+    # 重批要沿用原来的满分口径：批次里记的最高优先，其次是这条卷子已存的满分，
+    # 都没有才回落到方案默认值——不然 12 分制的卷子重批一次会变成 25 分制。
+    prev = rec.get('grading') if isinstance(rec.get('grading'), dict) else {}
+    subj_key = rec.get('subject') or (b or {}).get('subject') or 'english_essay'
+    max_score = _coerce_max_score(
+        (b or {}).get('max_score') or prev.get('max_total'), subj_key)
+    essay, err = _vision_grade_essay(path, reqs, max_score)
     if err:
         return None, err
     rec['essay'] = essay
@@ -7855,9 +8162,9 @@ def _grade_essay_record(rec, extra_prompt=None):
     rec['score_text'] = ('%s/%s' % (_fmt_num(essay.get('score')), _fmt_num(essay.get('max_score')))
                          if essay.get('score') is not None else '')
     rec['grading'] = {'items': [essay], 'total': essay.get('score'),
-                      'max_total': essay.get('max_score') or ESSAY_MAX_SCORE,
+                      'max_total': essay.get('max_score') or max_score,
                       'level': essay.get('level', ''),
-                      'subject': 'english_essay', 'subject_name': '英语作文',
+                      'subject': subj_key, 'subject_name': _subject_display_name(subj_key),
                       'graded_at': _now_str()}
     rec['status'] = 'graded'
     rec['graded_at'] = _now_str()
@@ -8029,6 +8336,14 @@ def portal_overview():
             g['students'].add(str(r['student_id']))
         if (r.get('submitted_at') or '') > g['last_at']:
             g['last_at'] = r.get('submitted_at') or ''
+    # 教师已认领、但还没有扫描件的班级也要出现在卡片里——
+    # 否则「我的班级」只由有记录的班级生成，老师连「退出认领」的入口都看不到。
+    owned_only = _teacher_visible_classes()
+    if owned_only:
+        for c in sorted(owned_only):
+            if c not in groups:
+                groups[c] = {'class_name': c, 'total': 0, 'graded': 0, 'pending': 0,
+                             'students': set(), 'last_at': ''}
     group_list = []
     for c, g in groups.items():
         group_list.append({
@@ -8249,6 +8564,57 @@ def portal_export_csv():
     res = Response(body, mimetype='text/csv; charset=utf-8')
     res.headers['Content-Disposition'] = 'attachment; filename="portal_records.csv"'
     return res
+
+
+@app.route('/api/portal/export/report')
+def portal_export_report():
+    """导出学生报告 v2（打印友好 HTML；带 ?format=pdf 则尝试转 PDF）。
+
+    旧版 /api/tasks/<id>/export_class_report 只认「阅卷任务」那套 results 结构，
+    报告 v2 之后自动流水线的结果落在 records/ 的 essay 对象里，那条链路读不到。
+    这里直接按 records + 批次语料渲染，老师用浏览器打印即可出 PDF。
+    """
+    if session.get('user_role') not in ('teacher', 'admin'):
+        return jsonify({'error': '仅教师或管理员可导出'}), 403
+    class_name = (request.args.get('class_name') or '').strip()
+    records = _filter_records_for_session(
+        load_records(), class_name=class_name,
+        task_id=(request.args.get('task_id') or '').strip())
+    # 只导出真正有批阅内容的（待确认/空白卷不占篇幅）
+    records = [r for r in records
+               if isinstance(r.get('essay'), dict)
+               and (r['essay'].get('text') or r['essay'].get('errors'))]
+    if not records:
+        return jsonify({'error': '该范围内没有可导出的已批阅作文，请先在门户里生成评语'}), 400
+    corpus_map = {}
+    for bid in {str(r.get('batch_id') or '') for r in records if r.get('batch_id')}:
+        b = _load_batch(bid)
+        if b and isinstance(b.get('corpus'), dict) and b['corpus']:
+            corpus_map[bid] = b['corpus']
+    try:
+        from utils.report_v2_export import build_class_report_html
+    except ImportError:
+        return jsonify({'error': '报告导出模块不可用'}), 500
+    html = build_class_report_html(records, get_student_names_map(), class_name,
+                                   corpus_map, _get_school_name())
+    fmt = (request.args.get('format') or 'html').lower()
+    date_str = datetime.now().strftime('%Y-%m-%d')
+    safe_cls = re.sub(r'[\\/:*?"<>|]', '-', class_name or '全部班级')[:30]
+    if fmt == 'pdf':
+        try:
+            from utils.answer_sheet_generator import html_to_pdf
+            pdf_path = os.path.join(EXPORTS_DIR, str(uuid.uuid4()) + '.pdf')
+            if html_to_pdf(html, pdf_path):
+                return send_file(pdf_path, as_attachment=True,
+                                 download_name='%s_学生报告_%s.pdf' % (safe_cls, date_str),
+                                 mimetype='application/pdf')
+        except Exception:
+            pass
+        return jsonify({'error': 'PDF 生成失败，请改用 format=html 下载后用浏览器打印为 PDF'}), 500
+    buf = io.BytesIO(html.encode('utf-8'))
+    return send_file(buf, as_attachment=False,
+                     download_name='%s_学生报告_%s.html' % (safe_cls, date_str),
+                     mimetype='text/html')
 
 
 if __name__ == '__main__':
