@@ -120,6 +120,13 @@ CORS(app, supports_credentials=True)
 # 同一台扫描仪同一时刻只允许一次扫描会话：
 # 并发扫描会触发 TWAIN "MaxConnections"，并把扫描仪拖入无响应状态（需拔插 USB 才能恢复）。
 _SCAN_LOCK = threading.Lock()
+
+# 档案库 / 临时区索引的「读-改-写」互斥锁。
+# 老师可以分批上传并让多个批次同时跑，两批同时归档时如果各自 load 再 save，
+# 后写的一方会把前一批的记录整体覆盖掉（表现：某个班的学生看不到自己的卷子）。
+# 批量写入方（批次归档、临时区清理）必须持有对应锁。
+_RECORDS_LOCK = threading.RLock()
+_STAGING_LOCK = threading.RLock()
 # 单次扫描最长等待秒数；超时后先温和终止、再强制结束进程树，确保扫描仪连接被释放。
 SCAN_TIMEOUT_SECONDS = int(os.getenv('SCAN_TIMEOUT_SECONDS', '90') or 90)
 # 扫描开始后多久仍"毫无输出"即判定设备无响应（健康的扫描仪会立刻打印 Beginning scan...）
@@ -202,6 +209,32 @@ def logout():
     """退出登录"""
     session.clear()
     return jsonify({'msg': '已退出'})
+
+
+@app.route('/api/change_password', methods=['POST'])
+def change_password():
+    """当前登录用户自助改密。body { old_password, new_password }。学生、教师、管理员通用。"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'error': '未登录'}), 401
+    data = request.get_json() or {}
+    old = (data.get('old_password') or '').strip()
+    new = (data.get('new_password') or '').strip()
+    if not old or not new:
+        return jsonify({'error': '请填写原密码和新密码'}), 400
+    if len(new) < 4:
+        return jsonify({'error': '新密码至少 4 位'}), 400
+    if new == old:
+        return jsonify({'error': '新密码不能与原密码相同'}), 400
+    users = load_users()
+    target = next((u for u in users if str(u.get('id', '')) == str(uid)), None)
+    if not target:
+        return jsonify({'error': '账号不存在，请联系管理员'}), 404
+    if str(target.get('password', '')) != old:
+        return jsonify({'error': '原密码不正确'}), 400
+    target['password'] = new
+    save_users(users)
+    return jsonify({'msg': '密码已修改，下次登录请使用新密码'})
 
 
 def _require_admin():
@@ -322,6 +355,34 @@ def admin_add_student():
     save_users(users)
     ensure_class_for_student(account, name or account)
     return jsonify({'msg': '添加成功', 'user': {'id': account, 'name': name or account, 'role': 'student'}})
+
+
+@app.route('/api/admin/reset_password', methods=['POST'])
+def admin_reset_student_password():
+    """管理员直接重置学生密码。body { student_id, new_password? }，不填新密码就重置为该学号。"""
+    if _require_admin():
+        return jsonify({'error': '仅管理员可操作'}), 403
+    data = request.get_json() or {}
+    sid = str(data.get('student_id') or data.get('id') or '').strip()
+    new = str(data.get('new_password') or '').strip()
+    if not sid:
+        return jsonify({'error': '请填写学号'}), 400
+    if new and len(new) < 4:
+        return jsonify({'error': '新密码至少 4 位'}), 400
+    users = load_users()
+    target = next((u for u in users if str(u.get('id', '')) == sid), None)
+    if not target:
+        return jsonify({'error': '找不到账号 %s，请确认学号是否已导入' % sid}), 404
+    if target.get('role') != 'student':
+        return jsonify({'error': '该账号不是学生，这里只能重置学生密码'}), 400
+    target['password'] = new or sid
+    save_users(users)
+    return jsonify({
+        'msg': '已重置',
+        'student_id': sid,
+        'student_name': target.get('name', ''),
+        'new_password': target['password'],
+    })
 
 
 @app.route('/api/admin/invite_codes', methods=['GET'])
@@ -5668,9 +5729,10 @@ def _commit_staging_item(item, student_id, class_name, task_id, note, crop, rota
     }
     if isinstance(extra, dict) and extra:
         rec.update({k: v for k, v in extra.items() if k not in ('id', 'image')})
-    records = load_records()
-    records.insert(0, rec)
-    save_records(records)
+    with _RECORDS_LOCK:
+        records = load_records()
+        records.insert(0, rec)
+        save_records(records)
 
     if owner:
         owners = load_class_owners()
@@ -5742,13 +5804,14 @@ def station_scan():
         ok, msg, pages = _run_scanner(scan_output_dir, next_filename)
         if not ok:
             return jsonify({'error': msg}), 500
-        items = load_staging()
-        added = []
-        for p in pages:
-            item = _new_staging_item(p, source='scan', original_name=os.path.basename(p))
-            items.insert(0, item)
-            added.append(item)
-        save_staging(items)
+        with _STAGING_LOCK:
+            items = load_staging()
+            added = []
+            for p in pages:
+                item = _new_staging_item(p, source='scan', original_name=os.path.basename(p))
+                items.insert(0, item)
+                added.append(item)
+            save_staging(items)
         resp = {'ok': True, 'items': added, 'added': added, 'count': len(added),
                 'filename': os.path.basename(pages[0]) if pages else '', 'auto': auto}
         if auto and added:
@@ -5814,18 +5877,19 @@ def station_import():
     tmp_dir = os.path.join(STAGING_DIR, '_incoming')
     os.makedirs(tmp_dir, exist_ok=True)
     try:
-        for f in files:
-            if not f or not f.filename:
-                continue
-            ext = os.path.splitext(f.filename)[1].lower()
-            if ext not in IMAGE_EXTS:
-                ext = '.png'
-            tmp_path = os.path.join(tmp_dir, uuid.uuid4().hex + ext)
-            f.save(tmp_path)
-            item = _new_staging_item(tmp_path, source='upload', original_name=f.filename)
-            items.insert(0, item)
-            added.append(item)
-        save_staging(items)
+        with _STAGING_LOCK:
+            for f in files:
+                if not f or not f.filename:
+                    continue
+                ext = os.path.splitext(f.filename)[1].lower()
+                if ext not in IMAGE_EXTS:
+                    ext = '.png'
+                tmp_path = os.path.join(tmp_dir, uuid.uuid4().hex + ext)
+                f.save(tmp_path)
+                item = _new_staging_item(tmp_path, source='upload', original_name=f.filename)
+                items.insert(0, item)
+                added.append(item)
+            save_staging(items)
     except Exception as e:
         return jsonify({'error': '导入失败：%s' % e}), 500
     finally:
@@ -7718,9 +7782,10 @@ def _auto_pipeline(batch_id):
             else:
                 failed.append({'item_id': it['id'], 'reason': str(rec)})
 
-        # 从临时区移除已入库的条目
+        # 从临时区移除已入库的条目（多批同时跑时必须持锁，否则会互相覆盖索引）
         done_ids = {r['item_id'] for r in results if r.get('item_id')}
-        save_staging([it for it in load_staging() if it.get('id') not in done_ids])
+        with _STAGING_LOCK:
+            save_staging([it for it in load_staging() if it.get('id') not in done_ids])
 
         b['record_ids'] = commit_ids
         b['results'] = []
@@ -8190,6 +8255,18 @@ if __name__ == '__main__':
     # 初始化NAPS2 PowerShell函数（可选，主要用于测试）
     print("正在初始化NAPS2 PowerShell函数...")
     initialize_naps2_powershell_function()
-    print("启动Flask应用...")
-    app.run(host='0.0.0.0', port=5001, debug=True)
+
+    # 服务固定绑 0.0.0.0，局域网内其它设备才能访问。
+    # 但调试器不能跟着开：Werkzeug 的交互式调试终端一旦暴露在网段上，
+    # 等同于给所有人一个 Python 执行入口。要热重载时临时设 QJ_DEBUG=1。
+    debug_mode = os.environ.get('QJ_DEBUG', '0').strip() == '1'
+    app.config['TEMPLATES_AUTO_RELOAD'] = True      # 改模板不用重启（页面刷新即生效）
+
+    print("启动 Flask 应用：监听 0.0.0.0:%d（局域网内可访问）" % PORTAL_PORT)
+    print("  本机访问：  http://127.0.0.1:%d/" % PORTAL_PORT)
+    for _u in _lan_portal_urls():
+        print("  局域网访问：" + _u)
+    if debug_mode:
+        print("  ⚠ 调试模式已开启（QJ_DEBUG=1），请勿在公共网络下使用。")
+    app.run(host='0.0.0.0', port=PORTAL_PORT, debug=debug_mode, use_reloader=debug_mode)
 
