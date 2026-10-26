@@ -7214,8 +7214,64 @@ AWARD_PROMPT = '''下面是一个班同一道英语写作题中，若干篇作�
  "standard":"一句话说明本次评选口径"}'''
 
 BATCHES_DIR = os.path.join(DATA_DIR, 'batches')
+# 批阅断点：每张卷子批完就单独落一个文件，进程半路没了也不用重烧一遍额度。
+# 放子目录而不是 batches/*.json，免得被 _find_running_batch 当成批次文件扫进去。
+PARTIAL_DIR = os.path.join(BATCHES_DIR, 'partial')
 CORPUS_CACHE_FILE = os.path.join(CONFIG_DIR, 'corpus_cache.json')
 os.makedirs(BATCHES_DIR, exist_ok=True)
+os.makedirs(PARTIAL_DIR, exist_ok=True)
+
+
+def _partial_dir(batch_id):
+    return os.path.join(PARTIAL_DIR, str(batch_id))
+
+
+def _save_partial(batch_id, result):
+    """把一张的批阅结果落盘（原子写）。失败只打日志，绝不影响主流程。"""
+    try:
+        item_id = str((result or {}).get('item_id') or '')
+        if not item_id:
+            return
+        d = _partial_dir(batch_id)
+        os.makedirs(d, exist_ok=True)
+        _write_json(os.path.join(d, item_id + '.json'), result)
+    except Exception as e:
+        print('写批阅断点失败（不影响批阅）: %s' % e)
+
+
+def _load_partials(batch_id):
+    """读回上次已经批完的条目：{item_id: result}。"""
+    d = _partial_dir(batch_id)
+    out = {}
+    if not os.path.isdir(d):
+        return out
+    for name in os.listdir(d):
+        if not name.endswith('.json'):
+            continue
+        try:
+            with open(os.path.join(d, name), encoding='utf-8') as f:
+                r = json.load(f)
+            if isinstance(r, dict) and r.get('item_id'):
+                out[str(r['item_id'])] = r
+        except Exception:
+            continue
+    return out
+
+
+def _clear_partials(batch_id):
+    """批次彻底跑完（入库成功）后清掉断点，别在磁盘上越积越多。"""
+    d = _partial_dir(batch_id)
+    if not os.path.isdir(d):
+        return
+    try:
+        for name in os.listdir(d):
+            try:
+                os.remove(os.path.join(d, name))
+            except OSError:
+                pass
+        os.rmdir(d)
+    except OSError:
+        pass
 
 
 def _img_to_data_url(img, max_size=2400):
@@ -8143,7 +8199,15 @@ def _heal_stale_batch(b):
     if done_n:
         msg += '，已入库的 %d 份没丢' % done_n
     if still:
-        msg += '；还有 %d 张留在临时区，点「重新批阅」可续跑（已入库的不会重复建档）' % still
+        try:
+            graded_n = len(_load_partials(b.get('id') or ''))
+        except Exception:
+            graded_n = 0
+        msg += '；还有 %d 张留在临时区，点「重新批阅」可续跑' % still
+        if graded_n:
+            msg += '（已批完的 %d 份会直接复用，不会重新烧额度）' % graded_n
+        else:
+            msg += '（已入库的不会重复建档）'
     job.update(status='error', stage='error', message=msg, updated_at=_now_str())
     b['job'] = job
     b['interrupted'] = True
@@ -8527,28 +8591,57 @@ def _auto_pipeline(batch_id):
         n = len(pages)
         results = [None] * n
         requirements_text = ''
-        state = {'done': 0}
+        # 断点续批：进程被重启/换手后，上次已经批完的这几份直接复用，不再烧一遍额度。
+        # 2026-10-26 那批是连续三次跑到一半被换进程，每次都从第 1 张重来。
+        prev = _load_partials(b['id'])
+        reused = 0
+        for _i, _it in enumerate(pages):
+            _hit = prev.get(str(_it.get('id')))
+            if _hit:
+                results[_i] = _hit
+                reused += 1
+        if reused:
+            print('批次 %s 复用已有批阅结果 %d/%d 份' % (b['id'], reused, n))
+        state = {'done': reused}
 
         def _grade_one(idx):
             """批一张，异常统一折成 error，返回 (idx, 结果)。"""
             it = pages[idx]
             path = _staging_image_path(it)
             if not path:
-                return idx, {'item_id': it['id'], 'error': '图片文件缺失',
-                             'quality': it.get('quality'), 'sec': 0}
+                r = {'item_id': it['id'], 'error': '图片文件缺失',
+                     'quality': it.get('quality'), 'sec': 0}
+                return idx, r
             t0 = time.time()
             res, err = _vision_grade_essay(path, requirements_text, batch_max,
                                            quality=it.get('quality'),
                                            rotation=int(it.get('rotation') or 0))
             sec = round(time.time() - t0, 1)
             if err:
-                return idx, {'item_id': it['id'], 'error': err,
-                             'quality': it.get('quality'), 'sec': sec}
-            return idx, {'item_id': it['id'], 'essay': res,
-                         'quality': it.get('quality'), 'sec': sec}
+                r = {'item_id': it['id'], 'error': err,
+                     'quality': it.get('quality'), 'sec': sec}
+            else:
+                r = {'item_id': it['id'], 'essay': res,
+                     'quality': it.get('quality'), 'sec': sec}
+            # 批完立刻落盘：这一步是「不重烧额度」的全部保证，别挪到循环外面去
+            _save_partial(b['id'], r)
+            return idx, r
 
         # ① 预热：最多试前 3 张，拿到题干就停（正常只等 1 张的量）
+        # 复用结果里可能已经带了题干，先用它，能省掉一次预热调用
+        if not b.get('topic'):
+            for _r in results:
+                if not (_r and _r.get('essay')):
+                    continue
+                _task = (_r['essay'].get('task') or {})
+                _reqs = _task.get('requirements') or []
+                if _reqs or _task.get('title'):
+                    b['topic'] = {'title': _task.get('title', ''), 'requirements': _reqs}
+                    b['topic']['key'] = _topic_key(b['topic'])
+                    break
         for idx in range(min(3, n)):
+            if results[idx] is not None:
+                continue        # 已经批过（断点复用），别再花钱
             bump(message='正在预热第 %d 张（先确定本批题干）…' % (idx + 1))
             _, r = _grade_one(idx)
             results[idx] = r
@@ -8761,6 +8854,8 @@ def _auto_pipeline(batch_id):
         if b.get('warning'):
             done_msg += '（' + b['warning'] + '）'
         bump(status='done', stage='done', done=len(pages), message=done_msg)
+        # 全部入库了，断点文件就没用了，别在磁盘上越积越多
+        _clear_partials(b['id'])
     except Exception as e:
         import traceback
         print('自动流水线失败: %s\n%s' % (e, traceback.format_exc()))
@@ -9377,7 +9472,8 @@ def portal_export_report():
                                    corpus_map, _get_school_name(), doc_title=doc_title)
     fmt = (request.args.get('format') or 'html').lower()
     date_str = datetime.now().strftime('%Y-%m-%d')
-    safe_cls = re.sub(r'[\\/:*?"<>|]', '-', class_name or '全部班级')[:30]
+    file_label = class_name or ('我的报告' if role == 'student' else '全部班级')
+    safe_cls = re.sub(r'[\\/:*?"<>|]', '-', file_label)[:30]
     if fmt == 'pdf':
         try:
             from utils.answer_sheet_generator import html_to_pdf
