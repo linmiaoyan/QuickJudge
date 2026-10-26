@@ -256,7 +256,7 @@ data/
 | `app.py` | 新增 `_clip` / `_locate_quote` / `_essay_words` / `_fit_model_essay` / `_norm_corpus`；`_norm_essay_result` 增清洗、去重、按原文位置排序；`CORPUS_VERSION=2`（老缓存不再命中，会重生成一次）；`_vision_grade_essay` 加 20015 重试 + `max_tokens=6000`；`corpus_ready` 兼容 v2 |
 | `templates/portal.html` | `essayHtml()` 重排为 8 段：字迹可靠度 → 要点覆盖 → **语篇批改（原文内联划改 + 编号 + 错因速查）** → 本篇佳句 → 高级词汇 → 高级句式 → 逻辑衔接/内容提升 → 个性化范文；新增 `inlineMarks()` / `annotateHtml()`；`batchHtml()` 支持 `points` 并**修掉 sentences 是对象却被 `esc()` 打印成 `{'sentence': …}` 的老 bug** |
 
-**实测（卢潇，满分 25）**：得分 18；9 处错误 **9/9 可在原文定位**；产出 3 条词汇升级 / 2 条句式 / 2 条衔接 / 一篇个性化范文。
+**实测（高一某份卷子，满分 25）**：得分 18；9 处错误 **9/9 可在原文定位**；产出 3 条词汇升级 / 2 条句式 / 2 条衔接 / 一篇个性化范文。
 耗时 **209.6s**（原链路约 45s）——输出量涨了 3 倍，这是 v2 的主要代价，见第 10 节。
 
 **兼容策略**：老记录没有新字段时自动降级——`pattern_upgrades` 缺失就走原来的 `rewrites` 列表，
