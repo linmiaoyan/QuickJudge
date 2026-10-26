@@ -5633,6 +5633,23 @@ def load_staging():
 
 
 def save_staging(items):
+    """写临时区索引。
+
+    写之前留一份上一版：临时区索引是「读-改-写」，一旦有第二个进程（测试脚本、另一个服务实例）
+    拿着过期快照写回来，几十张卷面会瞬间从列表里消失、图片却还躺在 images/ 下——
+    2026-10-26 21:38 那批 39 张就是这么丢的。留一份 .bak，至少能整批捞回来。
+    """
+    try:
+        if os.path.exists(STAGING_INDEX_FILE):
+            prev = _read_json(STAGING_INDEX_FILE, [])
+            if isinstance(prev, list) and len(prev) > len(items or []):
+                shutil.copy2(STAGING_INDEX_FILE,
+                             os.path.join(STAGING_DIR, 'index.prev.json'))
+                if len(prev) >= 5 and len(items or []) * 2 < len(prev):
+                    print('⚠ 临时区条目从 %d 骤减到 %d，上一版已存为 staging/index.prev.json'
+                          % (len(prev), len(items or [])))
+    except Exception as e:
+        print('临时区备份失败（不影响写入）: %s' % e)
     _write_json(STAGING_INDEX_FILE, items)
 
 
@@ -8399,7 +8416,12 @@ def _auto_pipeline(batch_id):
         bump(stage='awards', message='正在评选同学佳句…')
         by_class = {}
         for r in ok:
-            sid_r = str(((r.get('essay') or {}).get('student') or {}).get('student_id') or '')
+            stu_r = (r.get('essay') or {}).get('student') or {}
+            sid_r = str(stu_r.get('student_id') or '')
+            # 卷面常只写后四位，直接切前四位会切出个「14 班」这种不存在的班级；
+            # 先按名单回查完整学号，班级口径才和入库记录一致。
+            if sid_r:
+                sid_r, _note_r = resolve_student_id(sid_r, stu_r.get('class_no') or '')
             cls_r = (student_id_to_class_code(sid_r) if sid_r else '') or '未分班'
             by_class.setdefault(cls_r, []).append(r)
         b['classes'] = sorted(by_class)
@@ -8538,6 +8560,45 @@ def _start_auto_batch(item_ids, subject='english_essay', task_id='', max_score=N
         t = threading.Thread(target=_auto_pipeline, args=(b['id'],), daemon=True)
         t.start()
     return b
+
+
+def _recover_stale_batches():
+    """服务重启后收尾上次被中断的批次。
+
+    流水线跑在后台线程里，进程一退出线程就没了，批次文件却还留着
+    status='running' —— 扫描端会一直转圈等到天荒地老。这里统一标成中断，
+    并把「还有几张留在临时区」一起告诉老师，点「重新批阅」就能续跑，
+    不需要重新扫卷子。
+    """
+    if not os.path.isdir(BATCHES_DIR):
+        return
+    alive_items = {it.get('id') for it in load_staging()}
+    fixed = []
+    for name in os.listdir(BATCHES_DIR):
+        if not name.endswith('.json'):
+            continue
+        try:
+            b = _load_batch(name[:-5])
+        except Exception:
+            continue
+        job = (b or {}).get('job') or {}
+        if job.get('status') not in ('running', 'queued'):
+            continue
+        left = sum(1 for i in (b.get('item_ids') or []) if i in alive_items)
+        msg = '服务重启，批阅中断'
+        if b.get('record_ids'):
+            msg += '（已入库 %d 份，未丢）' % len(b['record_ids'])
+        if left:
+            msg += '；%d 张仍在临时区，点「重新批阅」可续跑' % left
+        job.update(status='error', stage='error', message=msg, updated_at=_now_str())
+        b['job'] = job
+        try:
+            _save_batch(b)
+            fixed.append(b['id'])
+        except Exception as e:
+            print('批次状态恢复失败 %s: %s' % (b.get('id'), e))
+    if fixed:
+        print('已将 %d 个中断批次标记为失败：%s' % (len(fixed), ', '.join(fixed)))
 
 
 def _grade_essay_record(rec, extra_prompt=None):
@@ -9037,6 +9098,9 @@ if __name__ == '__main__':
     # 等同于给所有人一个 Python 执行入口。要热重载时临时设 QJ_DEBUG=1。
     debug_mode = os.environ.get('QJ_DEBUG', '0').strip() == '1'
     app.config['TEMPLATES_AUTO_RELOAD'] = True      # 改模板不用重启（页面刷新即生效）
+
+    # 上次进程被关掉时还在跑的批次不会自己活过来，先收尾，别让扫描端一直转圈
+    _recover_stale_batches()
 
     print("启动 Flask 应用：监听 0.0.0.0:%d（局域网内可访问）" % PORTAL_PORT)
     print("  本机访问：  http://127.0.0.1:%d/" % PORTAL_PORT)

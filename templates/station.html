@@ -635,9 +635,15 @@ $('#scanBtn').onclick = async () => {
         : '已扫描 ' + (r.count || 1) + ' 页，已进入临时区', 'ok');
     }
   } catch (e) {
-    fail('扫描失败', e.message);
-    // 卡纸 / 请求卡住：把「强制解锁」摆到台面上，老师不用重启程序
-    if (e.jam) showUnlock();
+    // 卡纸 / 请求卡住：弹窗里直接给「强制解锁」，老师不用回页面找按钮，也不用重启程序
+    if (e.jam) {
+      const el = fail('扫描失败 · 需要先取出卡纸', e.message, UNLOCK_BTN_HTML);
+      const b = el && el.querySelector('#failUnlock');
+      if (b) b.onclick = () => { el.remove(); doForceUnlock(); };
+      showUnlock();
+    } else {
+      fail('扫描失败', e.message);
+    }
   } finally {
     btn.disabled = !CTX.is_local;
     btn.innerHTML = '<span class="ico">🖨️</span><span>开始扫描</span>';
@@ -648,6 +654,10 @@ $('#scanBtn').onclick = async () => {
 };
 
 /* ---------- 卡纸自救：强制解锁 ---------- */
+const UNLOCK_BTN_HTML = '<button type="button" id="failUnlock" style="padding:8px 16px;'
+  + 'border-radius:9px;border:1px solid #d9a441;background:#fff8ec;color:#8a5300;'
+  + 'cursor:pointer;font-size:13px;font-weight:600;">🔄 强制解锁扫描仪</button>';
+
 function showUnlock() {
   const b = $('#unlockBtn');
   if (b) b.style.display = 'block';
@@ -656,22 +666,24 @@ function hideUnlock() {
   const b = $('#unlockBtn');
   if (b) b.style.display = 'none';
 }
+
+async function doForceUnlock() {
+  const b = $('#unlockBtn');
+  const old = b ? b.textContent : '';
+  if (b) { b.disabled = true; b.textContent = '正在解锁…'; }
+  try {
+    const r = await api('/api/scan/force_unlock', { method: 'POST', timeout_ms: 20000 });
+    toast(r.message || '已强制解锁，请重新点击扫描。', 'ok');
+    hideUnlock();
+  } catch (e) {
+    toast('强制解锁失败：' + e.message, 'err');
+  } finally {
+    if (b) { b.disabled = false; b.textContent = old || '🔄 强制解锁扫描仪（取出卡纸后点这里）'; }
+  }
+}
+
 if ($('#unlockBtn')) {
-  $('#unlockBtn').onclick = async () => {
-    const b = $('#unlockBtn');
-    b.disabled = true;
-    b.textContent = '正在解锁…';
-    try {
-      const r = await api('/api/scan/force_unlock', { method: 'POST', timeout_ms: 20000 });
-      toast(r.message || '已强制解锁，请重新点击扫描。', 'ok');
-      hideUnlock();
-    } catch (e) {
-      toast('强制解锁失败：' + e.message, 'err');
-    } finally {
-      b.disabled = false;
-      b.textContent = '🔄 强制解锁扫描仪（取出卡纸后点这里）';
-    }
-  };
+  $('#unlockBtn').onclick = doForceUnlock;
 }
 
 // 「先只扫描」勾选后视觉上要明显，防止老师以为还是全自动
@@ -688,13 +700,64 @@ if ($('#manualScan')) {
   syncManualScanLook();
 }
 
-// 扫描类错误信息较长（含排查步骤），用弹窗完整展示，避免提示条截断
-function fail(title, msg) {
-  if (msg && msg.length > 90) {
-    window.alert(title + '\n\n' + msg);
-  } else {
+// 扫描类错误信息较长（含排查步骤）。
+// 以前用 window.alert：卡纸说明有 170 多字，alert 会**整页阻塞**，
+// 老师会觉得"页面卡死了"，而且弹窗里也放不下"强制解锁"这类操作按钮。
+// 现在改成页内非阻塞面板，可滚动、可关闭，还能带操作按钮。
+function fail(title, msg, extraHtml) {
+  // 短提示不用打断操作，直接走 toast
+  if (!msg || msg.length <= 90) {
     toast(msg || title, 'err');
+    return null;
   }
+  const old = document.getElementById('failPanel');
+  if (old) old.remove();
+
+  const mask = document.createElement('div');
+  mask.id = 'failPanel';
+  mask.style.cssText = 'position:fixed;inset:0;background:rgba(17,20,24,.38);z-index:9999;'
+    + 'display:flex;align-items:center;justify-content:center;padding:20px;';
+
+  const card = document.createElement('div');
+  card.style.cssText = 'background:#fff;border-radius:14px;max-width:560px;width:100%;'
+    + 'max-height:82vh;display:flex;flex-direction:column;overflow:hidden;'
+    + 'box-shadow:0 18px 50px rgba(0,0,0,.28);';
+
+  const head = document.createElement('div');
+  head.style.cssText = 'padding:14px 18px;border-bottom:1px solid #eee;font-weight:700;'
+    + 'font-size:15px;color:#b23b3b;flex:0 0 auto;';
+  head.textContent = '⚠ ' + title;
+
+  const body = document.createElement('div');
+  body.style.cssText = 'padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.75;'
+    + 'color:#333;white-space:pre-wrap;word-break:break-word;flex:1 1 auto;';
+  body.textContent = msg || '';
+
+  const foot = document.createElement('div');
+  foot.style.cssText = 'padding:12px 18px;border-top:1px solid #eee;display:flex;'
+    + 'justify-content:flex-end;gap:10px;flex:0 0 auto;';
+
+  if (extraHtml) {
+    const extra = document.createElement('span');
+    extra.innerHTML = extraHtml;
+    foot.appendChild(extra);
+  }
+
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.textContent = '知道了';
+  close.style.cssText = 'padding:8px 18px;border-radius:9px;border:1px solid #ddd;'
+    + 'background:#f7f8fa;cursor:pointer;font-size:13px;';
+  close.onclick = () => mask.remove();
+  foot.appendChild(close);
+
+  card.appendChild(head);
+  card.appendChild(body);
+  card.appendChild(foot);
+  mask.appendChild(card);
+  mask.addEventListener('click', (ev) => { if (ev.target === mask) mask.remove(); });
+  document.body.appendChild(mask);
+  return mask;
 }
 
 $('#importBtn').onclick = () => $('#importInput').click();
