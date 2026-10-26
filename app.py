@@ -5581,6 +5581,10 @@ RECORDS_IMAGES_DIR = os.path.join(RECORDS_DIR, 'images')
 RECORDS_INDEX_FILE = os.path.join(RECORDS_DIR, 'index.json')
 CLASS_OWNERS_FILE = os.path.join(CONFIG_DIR, 'class_owners.json')
 
+# 学号没能唯一落到名单上的卷子统一丢进这个「班」。它不是真班级，只是让老师在门户里
+# 一眼看到「这几张没认准」，并就地指定归属（见 /api/portal/records/<id>/comment）。
+PENDING_CLASS_NAME = '待确认'
+
 for _d in (STAGING_DIR, STAGING_IMAGES_DIR, RECORDS_DIR, RECORDS_IMAGES_DIR):
     os.makedirs(_d, exist_ok=True)
 
@@ -5659,6 +5663,58 @@ def load_records():
 
 def save_records(items):
     _write_json(RECORDS_INDEX_FILE, items)
+
+
+def _records_by_staging_item(staging_ids):
+    """建立「临时区条目 -> 已入库记录 id」映射。
+
+    用于入库幂等：归档被中断后重跑，同一条临时区条目不能再建一份档案，
+    否则用户端会看到同一个学生同一份卷子的多条记录（2026-10-26 那批就出现了
+    261431 有四条、261435 有两条的情况）。老记录没有 staging_item 字段，忽略即可。
+    """
+    wanted = {str(x) for x in (staging_ids or []) if x}
+    if not wanted:
+        return {}
+    found = {}
+    for r in load_records():
+        sid = str(r.get('staging_item') or '')
+        if sid and sid in wanted and sid not in found:
+            found[sid] = r.get('id') or ''
+    return found
+
+
+def _drop_staging_items(item_ids):
+    """把若干条目从临时区索引里移除（入库成功后立刻调用，作为断点。
+
+    以前是整批入库完再一次性清理，进程在归档途中被重启就会留下
+    「记录已入库、临时区还挂着」的幽灵条目，图片却早被搬走了。
+    改成每入库一条就落盘一次，中断最多丢一条。
+    """
+    ids = {str(x) for x in (item_ids or []) if x}
+    if not ids:
+        return 0
+    with _STAGING_LOCK:
+        cur = load_staging()
+        remain = [x for x in cur if str(x.get('id')) not in ids]
+        if len(remain) == len(cur):
+            return 0
+        save_staging(remain)
+        return len(cur) - len(remain)
+
+
+def _purge_ghost_staging_items():
+    """清掉「图片已经不在了」的临时区条目。
+
+    图片被 _commit_staging_item 搬进档案库后，临时区索引里的条目就只剩个壳，
+    界面上仍会列出来、点开却是一片空白。这类条目对老师没有任何价值，直接清掉。
+    """
+    with _STAGING_LOCK:
+        cur = load_staging()
+        keep = [x for x in cur if str(x.get('status')) != 'committed' and _staging_image_path(x)]
+        if len(keep) == len(cur):
+            return 0
+        save_staging(keep)
+        return len(cur) - len(keep)
 
 
 def load_class_owners():
@@ -5935,7 +5991,7 @@ def _run_scanner(scan_output_dir, next_filename):
             _SCAN_LOCK.release(tok)
 
 
-def _new_staging_item(image_path, source='scan', original_name=''):
+def _new_staging_item(image_path, source='scan', original_name='', subject='', max_score=None):
     """把一张图片登记进临时区，返回新条目（图片会被移动到临时区目录）。"""
     item_id = uuid.uuid4().hex
     ext = os.path.splitext(image_path)[1].lower()
@@ -5955,7 +6011,10 @@ def _new_staging_item(image_path, source='scan', original_name=''):
         'student_id_guess': '',
         'class_name': '',
         'task_id': '',
-        'subject': '',
+        # 老师在扫描端选的方案与满分一起记在条目上：这样中途断掉、重新建批、
+        # 或者用恢复工具把图捞回临时区之后再批，都不会悄悄退回方案默认值（25）。
+        'subject': str(subject or ''),
+        'max_score': _coerce_max_score(max_score, subject) if max_score not in (None, '') else None,
         'crop': None,
         'regions': [],
         'rotation': 0,
@@ -6145,6 +6204,7 @@ def station_context():
         'user': user,
         'portal_urls': _lan_portal_urls(),
         'staging_count': len(load_staging()),
+        'code': _code_stale_info(),
     })
 
 
@@ -6182,7 +6242,8 @@ def station_scan():
             items = load_staging()
             added = []
             for p in pages:
-                item = _new_staging_item(p, source='scan', original_name=os.path.basename(p))
+                item = _new_staging_item(p, source='scan', original_name=os.path.basename(p),
+                                         subject=subject, max_score=max_score)
                 items.insert(0, item)
                 added.append(item)
             save_staging(items)
@@ -6222,14 +6283,32 @@ def station_job(batch_id):
 
 @app.route('/api/station/jobs/<batch_id>/retry', methods=['POST'])
 def station_job_retry(batch_id):
-    """重跑某个批次（例如模型临时超时）。"""
+    """重跑某个批次（例如模型临时超时）。
+
+    必须挡住在跑的批次：以前这里无条件起线程，老师连点两下「重新批阅」就会有
+    两个线程同时归档同一个批次——两边都读到同一条临时区条目、都写了档案，
+    于是同一个学生出现 2~4 条记录（2026-10-26 那批的真实成因）。
+    """
     if not _is_local_request():
         return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
-    b = _load_batch(batch_id)
-    if not b:
-        return jsonify({'error': '批次不存在'}), 404
-    t = threading.Thread(target=_auto_pipeline, args=(batch_id,), daemon=True)
-    t.start()
+    with _JOB_LOCK:
+        b = _load_batch(batch_id)
+        if not b:
+            return jsonify({'error': '批次不存在'}), 404
+        job = b.get('job') or {}
+        runner = b.get('runner') or {}
+        if job.get('status') in ('running', 'queued') and runner.get('boot') == _BOOT_ID:
+            return jsonify({
+                'error': '这个批次正在批阅中（%s），请等它跑完再重试，'
+                         '重复启动会让同一份卷子被归档两次。'
+                         % (job.get('message') or job.get('stage') or '处理中')
+            }), 409
+        # 重试即换人接手：记下新的进程身份，避免被当成僵尸批次
+        b['runner'] = {'pid': _RUNNER_PID, 'boot': _BOOT_ID}
+        b['interrupted'] = False
+        _save_batch(b)
+        t = threading.Thread(target=_auto_pipeline, args=(batch_id,), daemon=True)
+        t.start()
     return jsonify({'ok': True, 'id': batch_id})
 
 
@@ -6264,7 +6343,8 @@ def station_import():
                     ext = '.png'
                 tmp_path = os.path.join(tmp_dir, uuid.uuid4().hex + ext)
                 f.save(tmp_path)
-                item = _new_staging_item(tmp_path, source='upload', original_name=f.filename)
+                item = _new_staging_item(tmp_path, source='upload', original_name=f.filename,
+                                         subject=subject, max_score=max_score)
                 items.insert(0, item)
                 added.append(item)
             save_staging(items)
@@ -6290,17 +6370,33 @@ def station_staging_list():
     if not _is_local_request():
         return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
     items = sorted(load_staging(), key=lambda x: x.get('created_at', ''), reverse=True)
-    # 只返回仍能读到图片的条目，避免死链
+    # 只返回仍能读到图片的条目，避免死链。
+    # 已入库的条目图片会被搬进档案库，索引里若还留着就变成"点开一片空白"的幽灵条目——
+    # 2026-10-26 那批 39 张（已批阅 29 张）就是这样一直挂在临时区的。
     alive = []
+    ghosts = []
     for it in items:
         it = dict(it)
-        it['has_image'] = bool(_staging_image_path(it))
+        if str(it.get('status')) == 'committed':
+            ghosts.append(str(it.get('id')))
+            continue
+        path = _staging_image_path(it)
+        it['has_image'] = bool(path)
+        if not path:
+            ghosts.append(str(it.get('id')))
+            continue
         # 老条目没有卷面体检数据：读列表时补算一次（本地算法，毫秒级），保证界面一致
-        if not it.get('quality') and it['has_image']:
-            q = image_quality_metrics(_staging_image_path(it))
+        if not it.get('quality'):
+            q = image_quality_metrics(path)
             if q:
                 it['quality'] = q
         alive.append(it)
+    if ghosts:
+        # 顺手把索引里这些壳清掉，别每次读列表都过滤一遍
+        try:
+            _drop_staging_items(ghosts)
+        except Exception as e:
+            print('清理临时区幽灵条目失败: %s' % e)
     return jsonify({'items': alive, 'count': len(alive)})
 
 
@@ -6632,7 +6728,11 @@ def _filter_records_for_session(records, class_name='', student_id='', task_id='
     else:
         scope = _teacher_visible_classes()
         if scope is not None:
-            records = [r for r in records if (r.get('class_name') or '') in scope]
+            # 「待确认」不属于任何班，但它恰恰是最需要老师人工认领的那几张；
+            # 严格按班级范围过滤会把它们藏起来，只有管理员能看见——这里单独放行。
+            records = [r for r in records
+                       if (r.get('class_name') or '') in scope
+                       or (r.get('class_name') or '') == PENDING_CLASS_NAME]
     if class_name:
         records = [r for r in records if (r.get('class_name') or '') == class_name]
     if student_id:
@@ -7979,7 +8079,13 @@ _BATCH_MEM = {}
 
 
 def _load_batch(batch_id):
-    """读批次文件（按 mtime 缓存，避免记录列表里重复读盘）。"""
+    """读批次文件（按 mtime 缓存，避免记录列表里重复读盘）。
+
+    读的时候顺手做一次「僵尸批次」自愈：job 还写着 running/queued，但跑它的进程
+    已经不在了（boot_id 对不上）。这类批次永远不会再往前走，扫描端会一直转圈，
+    用户端却已经能看到部分成绩——正是 2026-10-26 那批 39 张"已批阅却还在临时区"
+    的成因。
+    """
     p = _batch_path(batch_id)
     try:
         mt = os.path.getmtime(p)
@@ -7993,8 +8099,62 @@ def _load_batch(batch_id):
             data = json.load(f)
     except Exception:
         return None
+    if _heal_stale_batch(data):
+        # 自愈会写盘，mtime 变了，重新取一次，避免下次读到过期缓存
+        try:
+            mt = os.path.getmtime(p)
+        except OSError:
+            pass
     _BATCH_MEM[p] = (mt, data)
     return data
+
+
+def _heal_stale_batch(b):
+    """把「进程已死但状态还 running」的批次收尾。返回是否做了修改。
+
+    判据只用 boot_id：同一进程内提交的批次 boot 一定相同，跨进程必然不同。
+    老批次没有 runner 字段（本逻辑上线前创建的）也按僵尸处理——它们同样是
+    「线程早就没了、状态还挂着」的情况。
+    """
+    if not isinstance(b, dict):
+        return False
+    job = b.get('job') or {}
+    if job.get('status') not in ('running', 'queued'):
+        return False
+    runner = b.get('runner') or {}
+    if runner.get('boot') == _BOOT_ID:
+        return False     # 就是本进程在跑，别乱动
+
+    # 先清幽灵条目：图片已经搬进档案库的，临时区不该再留着
+    purged = 0
+    try:
+        purged = _purge_ghost_staging_items()
+    except Exception as e:
+        print('清理临时区幽灵条目失败: %s' % e)
+    still = 0
+    try:
+        alive = {str(it.get('id')) for it in load_staging()}
+        still = sum(1 for i in (b.get('item_ids') or []) if str(i) in alive)
+    except Exception:
+        pass
+
+    done_n = len(b.get('record_ids') or [])
+    msg = '上一次归档被中断（服务重启或进程退出）'
+    if done_n:
+        msg += '，已入库的 %d 份没丢' % done_n
+    if still:
+        msg += '；还有 %d 张留在临时区，点「重新批阅」可续跑（已入库的不会重复建档）' % still
+    job.update(status='error', stage='error', message=msg, updated_at=_now_str())
+    b['job'] = job
+    b['interrupted'] = True
+    try:
+        _save_batch(b)
+        bh = b.get('id') or '?'
+        print('批次 %s 状态已修正为中断（清理幽灵条目 %d 条，剩余 %d 张）'
+              % (bh, purged, still))
+    except Exception as e:
+        print('修正批次状态失败: %s' % e)
+    return True
 
 
 def _save_batch(b):
@@ -8195,6 +8355,44 @@ def _pick_awards(essays, level_hint='高一'):
 # ---------------------------- 自动流水线：扫描 → 出结果 ----------------------------
 _JOB_LOCK = threading.Lock()
 
+# 本次进程的身份证：批次的 job 状态只在本进程内有效。
+# 流水线跑在后台线程里，进程一退出线程就没了，threading 里没有任何东西能"活下来"，
+# 所以只能靠 boot_id 判断「这条 running 是不是已经死掉的进程留下的」。
+_BOOT_ID = uuid.uuid4().hex[:12]
+_RUNNER_PID = os.getpid()
+_PROC_START = time.time()
+
+
+def _code_stale_info():
+    """后端代码是不是比当前进程新（改了 app.py/utils 但没重启）。
+
+    模板是热加载的，页面会立刻看到新按钮；后端却还是老进程——2026-10-26 那次
+    「明明填了满分 15、改卷却是 25」就是这么来的：输入框 21:33 上线，服务 21:32 起的。
+    这里把这种「前后端版本不一致」直接摆到扫描端界面上，而不是靠人去猜。
+    """
+    base = os.path.dirname(os.path.abspath(__file__))
+    newest, name = 0, ''
+    try:
+        cands = [os.path.abspath(__file__)]
+        u = os.path.join(base, 'utils')
+        if os.path.isdir(u):
+            cands += [os.path.join(u, f) for f in os.listdir(u) if f.endswith('.py')]
+        for p in cands:
+            try:
+                mt = os.path.getmtime(p)
+            except OSError:
+                continue
+            if mt > newest:
+                newest, name = mt, os.path.basename(p)
+    except Exception:
+        return {'stale': False}
+    if newest and newest > _PROC_START + 1:
+        return {'stale': True,
+                'file': name,
+                'changed_at': time.strftime('%m-%d %H:%M', time.localtime(newest)),
+                'started_at': time.strftime('%m-%d %H:%M', time.localtime(_PROC_START))}
+    return {'stale': False}
+
 
 def _new_batch(item_ids, subject='english_essay', task_id='', note='', max_score=None):
     b = {
@@ -8212,6 +8410,8 @@ def _new_batch(item_ids, subject='english_essay', task_id='', note='', max_score
         'record_ids': [],
         'job': {'status': 'queued', 'stage': 'queued', 'total': len(item_ids or []),
                 'done': 0, 'message': '已排队，等待开始…'},
+        # 谁在跑这个批次：换了进程就说明原线程已经不在了
+        'runner': {'pid': _RUNNER_PID, 'boot': _BOOT_ID},
     }
     _save_batch(b)
     return b
@@ -8449,9 +8649,19 @@ def _auto_pipeline(batch_id):
         bump(stage='committing', message='正在归档到用户端…')
         commit_ids, failed = [], []
         resolved_map = {}
+        # 幂等表：上一次归档被中断后重跑时，已经入过库的条目直接复用原记录，
+        # 不再建第二份档案（否则用户端会看到同一份卷子好几条分数）。
+        already = _records_by_staging_item(b.get('item_ids') or [])
+        new_done = 0
         for r in results:
             it = live.get(r.get('item_id'))
             if not it:
+                continue
+            # 已入过库（上次归档跑到一半被中断）：复用原记录，只把临时区剩壳清掉
+            prev_id = already.get(str(it['id']))
+            if prev_id:
+                commit_ids.append(prev_id)
+                _drop_staging_items([it['id']])
                 continue
             essay = r.get('essay') or {}
             stu = essay.get('student') or {}
@@ -8461,10 +8671,12 @@ def _auto_pipeline(batch_id):
                 sid_seen, stu.get('name') or '', stu.get('class_no') or '')
             if not cls:
                 # 学号没落到名单上的卷子统一进「待确认」，不要按后四位硬推班级
-                cls = '待确认' if sid_note else str(stu.get('class_no') or '').strip()
+                cls = PENDING_CLASS_NAME if sid_note else str(stu.get('class_no') or '').strip()
             resolved_map[r.get('item_id')] = (sid, sid_note, resolved_name)
             extra = {
                 'batch_id': b['id'],
+                # 幂等键：同一条临时区条目只允许有一条档案
+                'staging_item': it['id'],
                 'essay': essay,
                 'topic': b.get('topic') or {},
                 'quality': r.get('quality') or {},
@@ -8495,6 +8707,14 @@ def _auto_pipeline(batch_id):
                 None, b.get('subject') or 'english_essay', extra)
             if okc:
                 commit_ids.append(rec['id'])
+                new_done += 1
+                # 断点：每入库一条就把临时区里这条摘掉。
+                # 以前是整批跑完再一次性清理，中途进程一重启，记录进了档案库、
+                # 临时区还挂着 39 张（图片其实已被搬走），老师看到的就是"已批阅
+                # 却还在临时区"的幽灵条目。
+                _drop_staging_items([it['id']])
+                if new_done % 5 == 0:
+                    bump(message='正在归档到用户端…（已入库 %d 份）' % new_done)
             else:
                 failed.append({'item_id': it['id'], 'reason': str(rec)})
 
@@ -8555,11 +8775,66 @@ def _start_auto_batch(item_ids, subject='english_essay', task_id='', max_score=N
     """
     if not auto_pipeline_supports(subject):
         raise ValueError(auto_pipeline_reject_message(subject))
+    if max_score in (None, ''):
+        # 调用方没带满分时（续跑、恢复后再批、脚本建批），先看这批图片上记着的值：
+        # 老师在扫描端填的满分落在临时区条目上，不能因为换了个入口就退回 25 分制。
+        max_score = _staging_max_score(item_ids, subject)
     with _JOB_LOCK:
+        # 同一批图片不要起两个批次：重复提交会让每张卷子被批阅、归档两次
+        overlap = _find_running_batch(item_ids)
+        if overlap:
+            return overlap
         b = _new_batch(item_ids, subject=subject, task_id=task_id, max_score=max_score)
         t = threading.Thread(target=_auto_pipeline, args=(b['id'],), daemon=True)
         t.start()
     return b
+
+
+def _staging_max_score(item_ids, subject='english_essay'):
+    """从这批临时区条目上回读老师选的满分；没有就返回 None（由调用方回落默认值）。
+
+    2026-10-26 那批 39 张就是丢在这里：扫描时填了 15，但那条链路用的是没带满分的
+    旧进程/恢复入口，建批时一路回落到方案默认 25，整班成绩全按 25 分制出。
+    """
+    ids = {str(x) for x in (item_ids or []) if x}
+    if not ids:
+        return None
+    try:
+        vals = {float(it['max_score']) for it in load_staging()
+                if str(it.get('id')) in ids and it.get('max_score') not in (None, '')}
+    except Exception as e:
+        print('读取临时区满分失败: %s' % e)
+        return None
+    if len(vals) == 1:
+        v = vals.pop()
+        if _coerce_max_score(v, subject) == v:
+            return v
+    return None
+
+
+def _find_running_batch(item_ids):
+    """找有没有正在跑、且和这批图片有重叠的批次。"""
+    wanted = {str(x) for x in (item_ids or []) if x}
+    if not wanted or not os.path.isdir(BATCHES_DIR):
+        return None
+    for name in os.listdir(BATCHES_DIR):
+        if not name.endswith('.json'):
+            continue
+        try:
+            b = _load_batch(name[:-5])
+        except Exception:
+            continue
+        if not b:
+            continue
+        job = b.get('job') or {}
+        runner = b.get('runner') or {}
+        if job.get('status') not in ('running', 'queued'):
+            continue
+        if runner.get('boot') != _BOOT_ID:
+            continue        # 死进程留下的，交给 _load_batch 自愈
+        if wanted & {str(i) for i in (b.get('item_ids') or [])}:
+            return b
+    return None
 
 
 def _recover_stale_batches():
@@ -8936,14 +9211,33 @@ def portal_record_comment(rec_id):
         return jsonify({'error': '记录不存在'}), 404
     if not _filter_records_for_session([rec]):
         return jsonify({'error': '无权操作该记录'}), 403
-    if 'student_id' in data:
-        sid = str(data.get('student_id') or '').strip()
-        rec['student_id'] = sid
-        rec['student_name'] = get_student_names_map().get(sid, '') if sid else ''
-        if sid and not rec.get('class_name'):
-            rec['class_name'] = student_id_to_class_code(sid) or ''
-    if 'class_name' in data:
-        rec['class_name'] = str(data.get('class_name') or '').strip()
+    if 'student_id' in data or 'class_name' in data:
+        # 手动指定归属：这是「待确认」卷子唯一的出路，所以必须认名单、并把班级一起改对。
+        # 老实现只在 class_name 为空时才补班级，于是「待确认」永远留在待确认里。
+        raw = str(data.get('student_id') or '').strip()
+        cno = str(data.get('class_name') or '').strip()
+        if raw:
+            idx = _student_index()
+            sid, note = resolve_student_id(raw, cno)
+            if sid not in idx['ids']:
+                return jsonify({'error': '学号「%s」不在名单里，请核对后重填（%s）'
+                                         % (raw, note or '未匹配')}), 400
+            rec['student_id'] = sid
+            rec['student_name'] = idx['names'].get(sid, '') or rec.get('student_name') or ''
+            rec['class_name'] = student_id_to_class_code(sid) or rec.get('class_name') or ''
+            # 归属定了就不该再挂着「待确认」
+            rec['needs_review'] = False
+            rec['sid_note'] = ''
+            rec['student_id_seen'] = ''
+        elif cno:
+            rec['class_name'] = cno
+    if 'rotation' in data:
+        # 老师肉眼看出卷子倒了，可以直接把这张转正（只改显示与后续使用的角度，不动原图）
+        try:
+            deg = int(data.get('rotation')) % 360
+        except (TypeError, ValueError):
+            deg = int(rec.get('rotation') or 0) % 360
+        rec['rotation'] = deg if deg in (0, 90, 180, 270) else int(rec.get('rotation') or 0) % 360
     if 'ai_comment' in data:
         rec['ai_comment'] = str(data.get('ai_comment') or '')
         rec['status'] = 'graded' if rec['ai_comment'].strip() else 'pending'
@@ -9044,13 +9338,22 @@ def portal_export_report():
     旧版 /api/tasks/<id>/export_class_report 只认「阅卷任务」那套 results 结构，
     报告 v2 之后自动流水线的结果落在 records/ 的 essay 对象里，那条链路读不到。
     这里直接按 records + 批次语料渲染，老师用浏览器打印即可出 PDF。
+
+    学生也能调：_filter_records_for_session 对 student 角色先按本人学号过滤，
+    所以学生最多只能导出自己的那几份，班级 / 批次参数只起收窄作用。
     """
-    if session.get('user_role') not in ('teacher', 'admin'):
-        return jsonify({'error': '仅教师或管理员可导出'}), 403
+    role = session.get('user_role')
+    if role not in ('teacher', 'admin', 'student'):
+        return jsonify({'error': '请先登录'}), 403
     class_name = (request.args.get('class_name') or '').strip()
+    if role == 'student':
+        class_name = ''          # 学生没有「班级范围」的概念，标题交给记录本身
     records = _filter_records_for_session(
         load_records(), class_name=class_name,
         task_id=(request.args.get('task_id') or '').strip())
+    bid = (request.args.get('batch_id') or '').strip()
+    if bid:
+        records = [r for r in records if str(r.get('batch_id') or '') == bid]
     # 只导出真正有批阅内容的（待确认/空白卷不占篇幅）
     records = [r for r in records
                if isinstance(r.get('essay'), dict)
@@ -9066,8 +9369,12 @@ def portal_export_report():
         from utils.report_v2_export import build_class_report_html
     except ImportError:
         return jsonify({'error': '报告导出模块不可用'}), 500
+    doc_title = None
+    if role == 'student':
+        _uid = str(session.get('user_id') or '')
+        doc_title = '我的英语作文报告 · %s' % (get_student_names_map().get(_uid) or _uid)
     html = build_class_report_html(records, get_student_names_map(), class_name,
-                                   corpus_map, _get_school_name())
+                                   corpus_map, _get_school_name(), doc_title=doc_title)
     fmt = (request.args.get('format') or 'html').lower()
     date_str = datetime.now().strftime('%Y-%m-%d')
     safe_cls = re.sub(r'[\\/:*?"<>|]', '-', class_name or '全部班级')[:30]

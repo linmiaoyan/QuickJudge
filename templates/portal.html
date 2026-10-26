@@ -278,6 +278,62 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
 .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;}
 @keyframes sp{to{transform:rotate(360deg);}}
 .hidden{display:none !important;}
+
+/* ---------- 整页详情：点进卡片后整页只放这一份内容 ---------- */
+:root{--tb:52px;}                     /* 吸顶顶栏高度，JS 会实时校准 */
+.pagebar{position:sticky;top:var(--tb);z-index:35;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  background:rgba(255,255,255,.97);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);
+  padding:10px 0;margin:-2px 0 14px;}
+.pagebar .pt{flex:1;min-width:180px;font-size:15.5px;font-weight:600;line-height:1.45;
+  display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+.pagebar .pt .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
+.pagebar .acts{display:flex;gap:7px;flex-wrap:wrap;align-items:center;}
+.pagebar select,.pagebar input[type=text]{width:auto;padding:7px 11px;font-size:13px;}
+/* 记录一律单列整宽：报告块多，两列会挤成一团 */
+.records.full{grid-template-columns:1fr;gap:18px;}
+.rec.wide{display:grid;grid-template-columns:minmax(250px,330px) 1fr;align-items:start;}
+.rec.wide>.pic{height:auto;max-height:560px;align-self:start;position:sticky;top:calc(var(--tb) + 64px);
+  border-right:1px solid var(--line-soft);border-bottom:none;}
+.rec.wide>.pic img{max-height:556px;}
+.rec.wide>.bd{padding:16px 20px 20px;min-width:0;}
+.rec.wide .essaybody{font-size:14px;line-height:2.15;}
+@media (max-width:900px){
+  .rec.wide{grid-template-columns:1fr;}
+  .rec.wide>.pic{position:static;max-height:340px;border-right:none;border-bottom:1px solid var(--line-soft);}
+  .rec.wide>.pic img{max-height:336px;}
+  .rec.wide>.bd{padding:14px 15px 18px;}
+  .pagebar{position:static;padding:10px 0 6px;}
+}
+/* 本页名单跳转条 */
+.navstrip{display:flex;gap:6px;overflow-x:auto;padding:2px 0 10px;margin-bottom:2px;}
+.navstrip .lab{flex:none;align-self:center;}
+.navstrip .nb{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:4px 10px;
+  border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--text2);cursor:pointer;
+  font-family:ui-monospace,Consolas,monospace;transition:.15s;}
+.navstrip .nb:hover{border-color:var(--primary);color:var(--primary);}
+.navstrip .nb i{font-style:normal;font-family:inherit;font-size:11px;color:var(--muted);}
+.navstrip .nb.done i{color:var(--ok);}
+/* 学生端：批次卡列表 */
+.batchlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;}
+.bcard{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:15px 17px;
+  cursor:pointer;transition:.15s;display:flex;flex-direction:column;gap:9px;}
+.bcard:hover{border-color:var(--primary);box-shadow:0 4px 16px rgba(37,99,235,.09);transform:translateY(-1px);}
+.bcard .bt{display:flex;align-items:flex-start;gap:8px;font-weight:600;font-size:14.5px;line-height:1.5;}
+.bcard .bt .rd{margin-left:auto;color:var(--primary);font-weight:500;font-size:12.5px;flex:none;}
+.bcard .bm{font-size:12.5px;color:var(--text2);display:flex;gap:12px;flex-wrap:wrap;align-items:center;}
+
+/* 整页视图直接 Ctrl+P 也能出干净版面：去掉一切外壳，单列，读得下去 */
+@media print{
+  .topbar,.pagebar,.navstrip,.classswitch,.toast,.mask,.claimbar{display:none !important;}
+  body{background:#fff;}
+  .wrap{max-width:none;padding:0;}
+  .records.full{gap:0;}
+  .rec.wide{grid-template-columns:1fr;border:0;border-radius:0;margin-bottom:10mm;}
+  .rec.wide>.pic{position:static;max-height:none;border:none;}
+  .rec.wide>.pic img{max-height:120mm;}
+  .rec.wide>.bd{padding:0;}
+  .eblk,.upg,.award,.modelbox{break-inside:avoid;}
+}
 </style>
 </head>
 <body>
@@ -317,51 +373,72 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
   <div class="wrap">
     <!-- 学生视图 -->
     <div id="studentView" class="hidden">
-      <div class="stats">
-        <div class="stat"><div class="n" id="sTotal">0</div><div class="l">已扫描试卷</div></div>
-        <div class="stat g"><div class="n" id="sDone">0</div><div class="l">已有评语</div></div>
-        <div class="stat w"><div class="n" id="sWait">0</div><div class="l">等待批阅</div></div>
+      <!-- ① 批次列表：一批试卷一张卡，点进去才是整页 -->
+      <div id="studentHome">
+        <div class="stats">
+          <div class="stat"><div class="n" id="sTotal">0</div><div class="l">已扫描试卷</div></div>
+          <div class="stat g"><div class="n" id="sDone">0</div><div class="l">已有评语</div></div>
+          <div class="stat w"><div class="n" id="sWait">0</div><div class="l">等待批阅</div></div>
+        </div>
+        <h2 class="sec">我的试卷 <span class="cnt" id="sHint"></span></h2>
+        <div id="studentBatches" class="batchlist"></div>
       </div>
-      <h2 class="sec">我的试卷 <span class="cnt" id="sHint"></span></h2>
-      <div id="studentRecords" class="records"></div>
+
+      <!-- ② 整页详情：一整个页面的完整报告，可导出 PDF -->
+      <div id="studentPage" class="hidden">
+        <div class="pagebar">
+          <button class="btn sm" id="sBackBtn">← 返回列表</button>
+          <div class="pt"><span id="sPageTitle"></span></div>
+          <div class="acts">
+            <button class="btn sm primary" id="sExportBtn" title="新标签打开打印友好版，Ctrl/Cmd+P 存为 PDF">导出 PDF</button>
+          </div>
+        </div>
+        <div id="studentPageBody" class="records full"></div>
+      </div>
     </div>
 
     <!-- 教师视图 -->
     <div id="teacherView" class="hidden">
-      <div class="statscope hidden" id="statScope">
-        <span>当前查看：<b id="statScopeName"></b></span>
-        <button class="btn sm" id="statScopeBack">返回全部班级</button>
-      </div>
-      <div class="stats">
-        <div class="stat"><div class="n" id="tTotal">0</div><div class="l">已扫描试卷</div></div>
-        <div class="stat g"><div class="n" id="tDone">0</div><div class="l">已批阅</div></div>
-        <div class="stat w"><div class="n" id="tWait">0</div><div class="l">待批阅</div></div>
-      </div>
-
-      <h2 class="sec"><span id="tClassTitle">我的班级</span> <span class="cnt" id="tClassHint"></span>
-        <button class="btn sm" id="allPapersBtn" style="display:none;margin-left:10px;">查看全部试卷</button>
-      </h2>
-      <div class="classgrid" id="classGrid"></div>
-      <div id="claimBar" class="claimbar hidden"></div>
-
-      <div id="detailBox" class="hidden">
-        <h2 class="sec" id="detailTitle"></h2>
-        <div class="classswitch hidden" id="classSwitch"></div>
-        <div class="toolbar">
-          <button class="btn sm" id="backToClassesBtn">← 返回班级</button>
-          <select id="statusFilter" style="width:auto;min-width:130px;padding:8px 12px;font-size:13.5px;">
-            <option value="">全部状态</option>
-            <option value="pending">待批阅</option>
-            <option value="graded">已批阅</option>
-          </select>
-          <input type="text" id="sidSearch" placeholder="按学号筛选" style="width:auto;min-width:150px;padding:8px 12px;font-size:13.5px;">
-          <button class="btn sm" id="applyFilterBtn">筛选</button>
-          <div class="spacer"></div>
-          <button class="btn sm ok" id="gradeAllBtn">为本批全部待评生成评语</button>
-          <button class="btn sm" id="exportReportBtn">导出学生报告</button>
-          <button class="btn sm" id="exportBtn">导出清单 CSV</button>
+      <!-- ① 班级网格：一行三张卡，点卡片进整页 -->
+      <div id="classHome">
+        <div class="statscope hidden" id="statScope">
+          <span>当前查看：<b id="statScopeName"></b></span>
+          <button class="btn sm" id="statScopeBack">返回全部班级</button>
         </div>
-        <div id="teacherRecords" class="records"></div>
+        <div class="stats">
+          <div class="stat"><div class="n" id="tTotal">0</div><div class="l">已扫描试卷</div></div>
+          <div class="stat g"><div class="n" id="tDone">0</div><div class="l">已批阅</div></div>
+          <div class="stat w"><div class="n" id="tWait">0</div><div class="l">待批阅</div></div>
+        </div>
+
+        <h2 class="sec"><span id="tClassTitle">我的班级</span> <span class="cnt" id="tClassHint"></span>
+          <button class="btn sm" id="allPapersBtn" style="display:none;margin-left:10px;">查看全部试卷</button>
+        </h2>
+        <div class="classgrid" id="classGrid"></div>
+        <div id="claimBar" class="claimbar hidden"></div>
+      </div>
+
+      <!-- ② 整页详情：这个班（或全校）的全部试卷，一份不折叠 -->
+      <div id="detailBox" class="hidden">
+        <div class="pagebar">
+          <button class="btn sm" id="backToClassesBtn">← 返回班级</button>
+          <div class="pt"><span id="detailTitle"></span></div>
+          <div class="acts">
+            <select id="statusFilter">
+              <option value="">全部状态</option>
+              <option value="pending">待批阅</option>
+              <option value="graded">已批阅</option>
+            </select>
+            <input type="text" id="sidSearch" placeholder="按学号筛选">
+            <button class="btn sm" id="applyFilterBtn">筛选</button>
+            <button class="btn sm ok" id="gradeAllBtn">为本批待评生成评语</button>
+            <button class="btn sm" id="exportReportBtn" title="新标签打开打印友好版，Ctrl/Cmd+P 存为 PDF">导出报告 PDF</button>
+            <button class="btn sm" id="exportBtn">导出清单 CSV</button>
+          </div>
+        </div>
+        <div class="classswitch hidden" id="classSwitch"></div>
+        <div class="navstrip" id="navStrip"></div>
+        <div id="teacherRecords" class="records full"></div>
       </div>
     </div>
   </div>
@@ -381,7 +458,24 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
     <div class="mhd"><h3 id="editTitle">评语</h3><div class="spacer"></div><button class="btn sm" id="editClose">关闭</button></div>
     <div class="mbd">
       <div id="editMeta" style="font-size:13px;color:var(--text2);margin-bottom:10px;"></div>
-      <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:12px;">
+      <div id="editPending" style="display:none;font-size:12.5px;color:#8a5300;background:#fff8ec;border:1px solid #f5d9a8;border-radius:10px;padding:8px 10px;margin-bottom:12px;line-height:1.5;">
+        <b>这张没认出学号</b>，暂时挂在「待确认」。填上正确学号保存，它就会自动归到对应班级。
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap;">
+        <div style="flex:0 0 150px;">
+          <div style="font-size:12.5px;color:var(--text2);margin-bottom:6px;">学号（可手改）</div>
+          <input id="editSid" placeholder="如 0101 或 260101"
+                 style="width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:13.5px;outline:none;font-family:ui-monospace,Consolas,monospace;">
+        </div>
+        <div style="flex:0 0 140px;">
+          <div style="font-size:12.5px;color:var(--text2);margin-bottom:6px;">卷面方向</div>
+          <select id="editRot" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:13.5px;outline:none;">
+            <option value="0">正常</option>
+            <option value="180">倒置 180°</option>
+            <option value="90">左转 90°</option>
+            <option value="270">右转 90°</option>
+          </select>
+        </div>
         <div style="flex:0 0 150px;">
           <div style="font-size:12.5px;color:var(--text2);margin-bottom:6px;">得分（可手改）</div>
           <input id="editScore" placeholder="如 8/10"
@@ -431,6 +525,15 @@ const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 let ME = null, CTX = null, VIEW = { class_name: '', status: '', student_id: '' };
 let RECORDS = [], EDIT_ID = null, LOAD_SEQ = 0;
+let SBATCH = null, SGROUPS = [];      // 学生端：当前打开的批次 / 全部批次
+
+/* 吸顶顶栏高度 → CSS 变量，让整页详情里的 .pagebar 正好贴在它下面 */
+function syncTopbarH() {
+  const tb = $('.topbar');
+  const h = (tb && tb.offsetHeight) || 52;
+  document.documentElement.style.setProperty('--tb', h + 'px');
+}
+window.addEventListener('resize', syncTopbarH);
 
 function toast(msg, type) {
   const el = document.createElement('div');
@@ -534,7 +637,13 @@ async function enterApp() {
   $('#roleChip').textContent = ME.role === 'admin' ? '管理员' : (ME.role === 'teacher' ? '教师' : '学生');
   $('#studentView').classList.toggle('hidden', isTeacher);
   $('#teacherView').classList.toggle('hidden', !isTeacher);
+  // 每次都从「列表」这一层进，别把上一次的整页详情留在屏幕上
+  $('#classHome').classList.remove('hidden');
   $('#detailBox').classList.add('hidden');
+  $('#studentHome').classList.remove('hidden');
+  $('#studentPage').classList.add('hidden');
+  SBATCH = null;
+  syncTopbarH();
   VIEW = { class_name: '', status: '', student_id: '' };
   try {
     CTX = await api('/api/portal/overview');
@@ -846,43 +955,135 @@ function batchHtml(r, anon) {
   return '<div class="edu">' + inner + '</div>';
 }
 
+/* ---------- 一份卷子的卡片（教师 / 学生共用） ----------
+   原来两处各写了一遍模板，加「整页详情」时再抄第三遍容易走样，统一到这里：
+   o.anon     隐藏同学姓名（学生视角看批次佳句用）
+   o.showClass 显示班级徽标（管理员跨班列表用）
+   o.actions  显示评语 / 看原图 / 删除按钮（仅教师）
+*/
+function recCardHtml(r, o) {
+  o = o || {};
+  const hasPieces = (r.pieces || []).length > 0;
+  const review = !!(r.needs_review || r.class_name === '待确认');
+  const picTitle = (r.student_id ? r.student_id + ' ' : '') + (r.student_name || '') + ' · ' + fmt(r.submitted_at);
+  const badge = '<span class="lvl ' + (r.status === 'graded' ? '' : 'warn') + '">'
+    + (r.status === 'graded' ? '已批阅' : '待批阅') + '</span>';
+  return '<div class="rec wide" id="rec-' + esc(r.id) + '">'
+    + (hasPieces ? '' :
+      '<div class="pic" data-zoom="' + esc(r.essay_image_url) + '" data-title="' + esc(picTitle) + '">'
+      + '<img src="' + esc(r.essay_image_url) + '" alt="试卷" loading="lazy">'
+      + '<div class="st ' + (r.status === 'graded' ? 'done' : '') + '">'
+      + (r.status === 'graded' ? '已批阅' : '待批阅') + '</div></div>')
+    + '<div class="bd">'
+    + '<div class="head">'
+    + '<span class="sid">' + esc(r.student_id || (o.anon ? '' : '未填学号')) + '</span>'
+    + (o.anon ? '' : '<span class="nm">' + esc(r.student_name || '') + '</span>')
+    + (o.showClass && r.class_name ? '<span class="subj">' + esc(r.class_name) + '</span>' : '')
+    + (review ? '<span class="lvl bad">待确认</span>' : '')
+    + badge
+    + '<span class="tm">' + esc(fmt(r.submitted_at)) + '</span>'
+    + '</div>'
+    + (r.task_title ? '<div class="task">📝 ' + esc(r.task_title) + '</div>' : '')
+    + scoreLine(r)
+    + (hasPieces
+      ? piecesHtml(r)
+      : '<div class="comment ' + (r.ai_comment ? '' : 'empty') + '">'
+        + (r.ai_comment ? esc(r.ai_comment) : (o.anon ? '老师还没有给出评语，请稍后再来看看。' : '尚无评语'))
+        + '</div>')
+    + essayHtml(r, !!o.anon)
+    + (o.actions
+      ? '<div class="acts">'
+        + (review ? '<button class="btn sm ok" data-edit="' + esc(r.id) + '">指定学号</button>' : '')
+        + '<button class="btn sm primary" data-edit="' + esc(r.id) + '">评语 / 批阅</button>'
+        + '<button class="btn sm" data-zoombtn="' + esc(r.image_url) + '">看原图</button>'
+        + '<button class="btn sm danger" data-del="' + esc(r.id) + '">删除</button>'
+        + '</div>'
+      : '')
+    + '</div></div>';
+}
+
+/* 进整页时回到顶部：列表可能已经滚到很下面，不重置会停在页面中段 */
+function scrollToPage() {
+  window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+/* ------------ 学生视图：批次列表 → 整页详情 ------------ */
+/* 一批试卷 = 一次任务（task_id）或一次扫描（batch_id），分组后每个学生每批一张卡 */
+function groupBatches(list) {
+  const map = new Map();
+  (list || []).forEach(r => {
+    const title = r.task_title || '（未命名任务）';
+    const key = r.batch_id || r.task_id || (title + '@' + (r.submitted_at || '').slice(0, 10));
+    let g = map.get(key);
+    if (!g) {
+      g = { key, title, task_id: r.task_id || '', batch_id: r.batch_id || '',
+            records: [], count: 0, graded: 0, pending: 0, last_at: '', score_text: '' };
+      map.set(key, g);
+    }
+    g.records.push(r);
+    g.count++;
+    if (r.status === 'graded') g.graded++; else g.pending++;
+    if ((r.submitted_at || '') >= g.last_at) {
+      g.last_at = r.submitted_at || '';
+      if (r.score_text) g.score_text = r.score_text;
+    }
+  });
+  return Array.from(map.values()).sort((a, b) => (b.last_at || '').localeCompare(a.last_at || ''));
+}
+
 function renderStudent() {
   const list = CTX.records || [];
   $('#sTotal').textContent = CTX.total || 0;
   $('#sDone').textContent = CTX.graded || 0;
   $('#sWait').textContent = (CTX.total || 0) - (CTX.graded || 0);
   RECORDS = list;
-  $('#sHint').textContent = list.length ? '' : '暂无';
-  const box = $('#studentRecords');
-  if (!list.length) {
-    box.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="big">📄</div>还没有已扫描的试卷。老师扫描并提交后会出现在这里。</div>';
+  SGROUPS = groupBatches(list);
+  $('#sHint').textContent = SGROUPS.length ? SGROUPS.length + ' 个批次' : '暂无';
+
+  // 刷新后如果正停在某个批次里，就地重画那一页，别把学生弹回列表
+  if (SBATCH) {
+    const g = SGROUPS.find(x => x.key === SBATCH);
+    if (g) { renderStudentBatchPage(g); return; }
+    SBATCH = null;
+  }
+  renderStudentHome();
+}
+
+function renderStudentHome() {
+  $('#studentHome').classList.remove('hidden');
+  $('#studentPage').classList.add('hidden');
+  const box = $('#studentBatches');
+  if (!SGROUPS.length) {
+    box.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="big">📄</div>'
+      + '还没有已扫描的试卷。老师扫描并提交后会出现在这里。</div>';
     return;
   }
-  box.innerHTML = list.map(r => {
-    const hasPieces = (r.pieces || []).length > 0;
-    return `
-    <div class="rec">
-      ${hasPieces ? '' : `
-      <div class="pic" data-zoom="${esc(r.essay_image_url)}" data-title="${esc((r.task_title || '试卷') + ' · ' + fmt(r.submitted_at))}">
-        <img src="${esc(r.essay_image_url)}" alt="试卷" loading="lazy">
-        <div class="st ${r.status === 'graded' ? 'done' : ''}">${r.status === 'graded' ? '已批阅' : '待批阅'}</div>
-      </div>`}
-      <div class="bd">
-        <div class="head">
-          <span class="sid">${esc(r.student_id || '—')}</span>
-          <span class="nm">${esc(r.student_name || '')}</span>
-          ${hasPieces ? `<span class="lvl ${r.status === 'graded' ? '' : 'warn'}">${r.status === 'graded' ? '已批阅' : '待批阅'}</span>` : ''}
-          <span class="tm">${esc(fmt(r.submitted_at))}</span>
-        </div>
-        ${r.task_title ? '<div class="task">📝 ' + esc(r.task_title) + '</div>' : ''}
-        ${scoreLine(r)}
-        ${hasPieces
-          ? piecesHtml(r)
-          : `<div class="comment ${r.ai_comment ? '' : 'empty'}">${r.ai_comment ? esc(r.ai_comment) : '老师还没有给出评语，请稍后再来看看。'}</div>`}
-        ${essayHtml(r, true)}
-      </div>
-    </div>`;
+  box.innerHTML = SGROUPS.map(g => {
+    const st = g.pending ? '<span class="lvl warn">待批阅 ' + g.pending + '</span>'
+      : '<span class="lvl">已批阅</span>';
+    return '<div class="bcard" data-batch="' + esc(g.key) + '">'
+      + '<div class="bt"><span>📝 ' + esc(g.title) + '</span><span class="rd">查看 →</span></div>'
+      + '<div class="bm">'
+      + '<span>' + esc(fmt(g.last_at)) + '</span>'
+      + '<span>' + g.count + ' 份</span>'
+      + st
+      + (g.score_text ? '<span>得分 <b style="color:#b45309">' + esc(g.score_text) + '</b></span>' : '')
+      + '</div></div>';
   }).join('');
+  $$('[data-batch]', box).forEach(el => el.onclick = () => {
+    const g = SGROUPS.find(x => x.key === el.dataset.batch);
+    if (g) { SBATCH = g.key; renderStudentBatchPage(g); scrollToPage(); }
+  });
+}
+
+function renderStudentBatchPage(g) {
+  $('#studentHome').classList.add('hidden');
+  $('#studentPage').classList.remove('hidden');
+  $('#sPageTitle').innerHTML = esc(g.title)
+    + ' <span class="cnt">' + g.count + ' 份 · 提交 ' + esc(fmt(g.last_at))
+    + (g.pending ? ' · 待批阅 ' + g.pending : ' · 已全部批阅') + '</span>';
+  const body = $('#studentPageBody');
+  body.innerHTML = g.records.map(r => recCardHtml(r, { anon: true })).join('');
   bindCommon();
 }
 
@@ -1080,13 +1281,8 @@ function resetStatsScope() {
   $('#tWait').textContent = CTX.pending || 0;
 }
 
-/* 详情区滚动：避开吸顶的顶栏，保证「班级 · 已扫描试卷」标题可见 */
-function scrollToDetail() {
-  const bar = document.querySelector('.topbar');
-  const off = (bar ? bar.offsetHeight : 0) + 14;
-  const y = $('#detailBox').getBoundingClientRect().top + window.scrollY - off;
-  window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
-}
+/* 详情页现在是「整页」：格子已隐藏，进页面直接回顶部即可 */
+function scrollToDetail() { scrollToPage(); }
 
 function showRecordsLoading(cname) {
   $('#teacherRecords').innerHTML =
@@ -1095,17 +1291,18 @@ function showRecordsLoading(cname) {
 
 async function openClass(cname) {
   const same = VIEW.class_name === cname && !$('#detailBox').classList.contains('hidden');
-  if (!same) {
-    VIEW = { class_name: cname, status: '', student_id: '' };
-    $('#statusFilter').value = '';
-    $('#sidSearch').value = '';
-    $('#detailBox').classList.remove('hidden');
-    $('#detailTitle').textContent = cname + ' · 已扫描试卷';
-    showRecordsLoading(cname);      // 先清掉上一个班的列表，避免切换瞬间看到旧内容
-    syncClassView();
-    await loadTeacherRecords();     // 内容填好再滚动，否则页面高度不够会滚不到位
-  }
-  scrollToDetail();
+  if (same) { scrollToPage(); return; }      // 已经在看这个班，点切换条只回到顶部
+  VIEW = { class_name: cname, status: '', student_id: '' };
+  $('#statusFilter').value = '';
+  $('#sidSearch').value = '';
+  $('#classHome').classList.add('hidden');   // 整页模式：班级网格整页让位给这一个班
+  $('#detailBox').classList.remove('hidden');
+  $('#detailTitle').textContent = cname + ' · 已扫描试卷';
+  $('#navStrip').innerHTML = '';
+  showRecordsLoading(cname);
+  syncClassView();
+  scrollToPage();
+  await loadTeacherRecords();               // 先占位再拉数据，点下去立刻有反应
 }
 
 /* 管理员：不选班，直接看全校所有试卷（跨班按时间倒序） */
@@ -1113,18 +1310,22 @@ async function openAllPapers() {
   VIEW = { class_name: '', status: '', student_id: '', all: true };
   $('#statusFilter').value = '';
   $('#sidSearch').value = '';
+  $('#classHome').classList.add('hidden');
   $('#detailBox').classList.remove('hidden');
   $('#detailTitle').innerHTML = '全校 · 全部试卷 <span class="cnt">加载中…</span>';
+  $('#navStrip').innerHTML = '';
   $('#teacherRecords').innerHTML = '<div class="loadingbox"><span class="spin dark"></span>正在加载全校试卷…</div>';
   syncClassView();
+  scrollToPage();
   await loadTeacherRecords();
-  scrollToDetail();
 }
 
 $('#backToClassesBtn').onclick = () => {
   $('#detailBox').classList.add('hidden');
+  $('#classHome').classList.remove('hidden');
   VIEW = { class_name: '', status: '', student_id: '' };
   syncClassView();
+  scrollToPage();
 };
 $('#statScopeBack').onclick = () => $('#backToClassesBtn').click();
 $('#applyFilterBtn').onclick = () => {
@@ -1154,8 +1355,11 @@ async function loadTeacherRecords() {
   const box = $('#teacherRecords');
   const filtered = !!(VIEW.status || VIEW.student_id);
   const titlePrefix = VIEW.all ? '全校 · 全部试卷' : (esc(VIEW.class_name || '全部班级') + ' · 已扫描试卷');
+  const graded = RECORDS.filter(r => r.status === 'graded').length;
   $('#detailTitle').innerHTML = titlePrefix
-    + ' <span class="cnt">共 ' + RECORDS.length + ' 份' + (filtered ? '（已筛选）' : '') + '</span>';
+    + ' <span class="cnt">共 ' + RECORDS.length + ' 份 · 已批 ' + graded + ' · 待批 ' + (RECORDS.length - graded)
+    + (filtered ? '（已筛选）' : '') + '</span>';
+  renderNavStrip(RECORDS);
   if (!RECORDS.length) {
     box.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="big">🗂️</div>'
       + (filtered ? '该筛选条件下没有试卷。' : (VIEW.all ? '全校还没有已扫描的试卷。' : '这个班级还没有试卷。')) + '</div>';
@@ -1163,41 +1367,31 @@ async function loadTeacherRecords() {
   }
   const statsHtml = errStats(RECORDS);
   box.innerHTML = (statsHtml ? '<div style="grid-column:1/-1;">' + statsHtml + '</div>' : '')
-    + RECORDS.map(r => {
-    const hasPieces = (r.pieces || []).length > 0;
-    return `
-    <div class="rec">
-      ${hasPieces ? '' : `
-      <div class="pic" data-zoom="${esc(r.essay_image_url)}" data-title="${esc((r.student_id || '') + ' ' + (r.student_name || '') + ' · ' + fmt(r.submitted_at))}">
-        <img src="${esc(r.essay_image_url)}" alt="试卷" loading="lazy">
-        <div class="st ${r.status === 'graded' ? 'done' : ''}">${r.status === 'graded' ? '已批阅' : '待批阅'}</div>
-      </div>`}
-      <div class="bd">
-        <div class="head">
-          <span class="sid">${esc(r.student_id || '未填学号')}</span>
-          <span class="nm">${esc(r.student_name || '')}</span>
-          ${VIEW.all && r.class_name ? `<span class="subj">${esc(r.class_name)}</span>` : ''}
-          ${hasPieces ? `<span class="lvl ${r.status === 'graded' ? '' : 'warn'}">${r.status === 'graded' ? '已批阅' : '待批阅'}</span>` : ''}
-          <span class="tm">${esc(fmt(r.submitted_at))}</span>
-        </div>
-        ${r.task_title ? '<div class="task">📝 ' + esc(r.task_title) + '</div>' : ''}
-        ${scoreLine(r)}
-        ${hasPieces
-          ? piecesHtml(r)
-          : `<div class="comment ${r.ai_comment ? '' : 'empty'}">${r.ai_comment ? esc(r.ai_comment) : '尚无评语'}</div>`}
-        ${essayHtml(r, false)}
-        <div class="acts">
-          <button class="btn sm primary" data-edit="${esc(r.id)}">评语 / 批阅</button>
-          <button class="btn sm" data-zoombtn="${esc(r.image_url)}">看原图</button>
-          <button class="btn sm danger" data-del="${esc(r.id)}">删除</button>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
+    + RECORDS.map(r => recCardHtml(r, { showClass: !!VIEW.all, actions: true })).join('');
   bindCommon();
   $$('[data-edit]').forEach(b => b.onclick = () => openEdit(b.dataset.edit));
   $$('[data-zoombtn]').forEach(b => b.onclick = () => showZoom(b.dataset.zoombtn, '原图'));
   $$('[data-del]').forEach(b => b.onclick = () => delRecord(b.dataset.del));
+}
+
+/* 整页详情里的名单跳转条：一个班几十份卷子，靠它横着扫一眼、点一下跳过去 */
+function renderNavStrip(list) {
+  const box = $('#navStrip');
+  if (!box) return;
+  if (!list.length) { box.innerHTML = ''; return; }
+  box.innerHTML = '<span class="lab">名单 ' + list.length + '</span>'
+    + list.map((r, i) => '<button class="nb ' + (r.status === 'graded' ? 'done' : '') + '"'
+      + ' data-goto="' + esc(r.id) + '" title="' + esc((r.student_name || '') + ' ' + fmt(r.submitted_at)) + '">'
+      + esc(r.student_id || ('#' + (i + 1)))
+      + '<i>' + (r.status === 'graded' ? (r.score_text ? esc(r.score_text) : '✓') : '待批') + '</i>'
+      + '</button>').join('');
+  $$('[data-goto]', box).forEach(b => b.onclick = () => {
+    const el = document.getElementById('rec-' + b.dataset.goto);
+    if (!el) return;
+    const bar = $('.pagebar');
+    const off = ((($('.topbar') || {}).offsetHeight) || 0) + ((bar && bar.offsetHeight) || 0) + 18;
+    window.scrollTo({ top: Math.max(0, el.getBoundingClientRect().top + window.scrollY - off), behavior: 'smooth' });
+  });
 }
 
 function bindCommon() {
@@ -1217,6 +1411,10 @@ function openEdit(id) {
     (r.graded_at ? ' · 评于 ' + fmt(r.graded_at) : '');
   $('#editComment').value = r.ai_comment || '';
   $('#editScore').value = r.score_text || '';
+  $('#editSid').value = r.student_id || r.student_id_seen || '';
+  $('#editRot').value = String(r.rotation || 0);
+  const pending = r.needs_review || (r.class_name === '待确认');
+  $('#editPending').style.display = pending ? '' : 'none';
   $('#editSubj').textContent = (r.subject_name ? '方案：' + r.subject_name : '')
     + ((r.pieces || []).length ? ' · 共 ' + r.pieces.length + ' 块' : '');
   $('#editEssay').textContent = r.essay_text || '（还没有识别记录）';
@@ -1231,9 +1429,11 @@ $('#saveCommentBtn').onclick = async () => {
   try {
     const r = await jpost('/api/portal/records/' + EDIT_ID + '/comment', {
       ai_comment: $('#editComment').value,
-      score_text: $('#editScore').value.trim()
+      score_text: $('#editScore').value.trim(),
+      student_id: ($('#editSid').value || '').trim(),
+      rotation: Number($('#editRot').value || 0)
     });
-    toast('评语已保存', 'ok');
+    toast('已保存', 'ok');
     $('#editMask').classList.remove('show');
     await refreshCurrent();
     return r;
@@ -1287,9 +1487,28 @@ async function delRecord(id) {
 }
 
 async function refreshCurrent() {
-  if (ME.role === 'student') { CTX = await api('/api/portal/overview'); renderStudent(); }
-  else { CTX = await api('/api/portal/overview'); renderTeacher(); if (VIEW.class_name) await loadTeacherRecords(); }
+  CTX = await api('/api/portal/overview');
+  if (ME.role === 'student') { renderStudent(); return; }
+  renderTeacher();
+  // 只要还停在整页详情里就重拉列表（全校视图没有 VIEW.class_name，不能只判它）
+  if (!$('#detailBox').classList.contains('hidden')) await loadTeacherRecords();
 }
+
+/* ------------ 学生端：批次返回 / 导出 ------------ */
+$('#sBackBtn').onclick = () => {
+  SBATCH = null;
+  renderStudentHome();
+  scrollToPage();
+};
+
+/* 一批一张报告：按 batch_id 优先、退化到 task_id，服务端再按当前登录学生兜底过滤 */
+$('#sExportBtn').onclick = () => {
+  const g = SGROUPS.find(x => x.key === SBATCH);
+  const qs = new URLSearchParams();
+  if (g && g.batch_id) qs.set('batch_id', g.batch_id);
+  else if (g && g.task_id) qs.set('task_id', g.task_id);
+  window.open('/api/portal/export/report?' + qs.toString(), '_blank');
+};
 
 /* ------------ 导出 ------------ */
 $('#exportBtn').onclick = () => {
@@ -1299,7 +1518,7 @@ $('#exportBtn').onclick = () => {
   window.open('/api/portal/export.csv?' + qs.toString(), '_blank');
 };
 
-/* 学生报告 v2：浏览器新标签打开打印友好版，Ctrl/Cmd+P 即可存 PDF */
+/* 学生报告 v2：浏览器新标签打开打印友好版，页面里有「打印 / 存为 PDF」按钮 */
 $('#exportReportBtn').onclick = () => {
   const qs = new URLSearchParams();
   if (VIEW.class_name) qs.set('class_name', VIEW.class_name);

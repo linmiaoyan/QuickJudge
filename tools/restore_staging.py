@@ -53,6 +53,7 @@ def main():
     print('时间范围 %s ~ %s' % (ts(orphan[0]), ts(orphan[-1])))
 
     items, skipped = [], []
+    n_rotate = 0
     for i, f in enumerate(orphan, 1):
         stem = os.path.splitext(os.path.basename(f))[0]
         if len(stem) != 32:                     # 正常条目 id 是 32 位 uuid4 hex
@@ -72,13 +73,48 @@ def main():
         q = A.image_quality_metrics(f)
         if q:
             items[-1]['quality'] = q
+        # 关键：扫描路径 `_new_staging_item` 会顺手转正倒置/横放的卷子，
+        # 恢复路径必须做同样的事，否则整批倒着的卷子会原样送进模型。
+        # 这里只「检测」，真正落盘放在 --apply 分支，预览模式保证一个字节都不改。
+        try:
+            from PIL import Image
+            im = Image.open(f)
+            rot, conf, blank = A._detect_page_rotation(im)
+            im.close()
+            if blank:
+                items[-1]['blank'] = True
+            if rot in (90, 180, 270) and conf >= 0.15:
+                items[-1]['_rotate_to'] = rot
+                n_rotate += 1
+        except Exception as e:
+            print('  方向检测失败（跳过）:', e)
 
-    print('可恢复 %d 条，跳过文件名异常 %d 条' % (len(items), len(skipped)))
+    print('可恢复 %d 条，跳过文件名异常 %d 条；其中 %d 张需要转正'
+          % (len(items), len(skipped), n_rotate))
     if not args.apply:
         for it in items[:3] + items[-1:]:
-            print('  %s  %s  %s' % (it['id'][:8], it['original_name'], it['created_at']))
+            print('  %s  %s  %s  转正=%s' % (it['id'][:8], it['original_name'],
+                                             it['created_at'], it.get('_rotate_to') or 0))
         print('\n（预览模式，未写入；加 --apply 生效）')
         return 0
+
+    # 真正落盘：先把该转正的图纸转过来（只动图，不动索引）
+    done_rot = 0
+    for it in items:
+        deg = it.pop('_rotate_to', 0)
+        if not deg:
+            continue
+        p = os.path.join(A.STAGING_IMAGES_DIR, os.path.basename(it['image']))
+        try:
+            from PIL import Image
+            im = Image.open(p).convert('RGB')
+            A._transform_image(im, rotation=deg, crop=None).save(p)
+            it['auto_rotation'] = deg
+            done_rot += 1
+        except Exception as e:
+            print('  转正失败 %s: %s' % (it['original_name'], e))
+    if done_rot:
+        print('已转正 %d 张（倒置/横放的卷子不会再原样送进模型）' % done_rot)
 
     if os.path.exists(A.STAGING_INDEX_FILE):
         bak = os.path.join(A.STAGING_DIR, 'index.json.bak-%s' % time.strftime('%Y%m%d_%H%M%S'))

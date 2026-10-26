@@ -91,6 +91,16 @@ ul.lst li { margin: 3px 0; }
 .point-title { font-weight: 700; margin: 10px 0 4px; color: #1f2328; }
 .foot { position: absolute; bottom: 8mm; left: 11mm; right: 11mm; color: #8c959f;
         font-size: 9.5px; border-top: 1px dashed #d0d7de; padding-top: 4px; }
+/* 屏幕上给一条工具条，打印时自动消失——export 出来的页面本身没有任何打印入口，
+   老师和学生都不知道该按什么，等于导出了个「只能看」的 HTML。 */
+.pbar { position: sticky; top: 0; z-index: 9; display: flex; align-items: center; gap: 12px;
+        flex-wrap: wrap; background: #1f2328; color: #fff; padding: 9px 16px; font-size: 12.5px; }
+.pbar .pb-t { font-weight: 700; }
+.pbar .pb-s { color: #c9d1d9; font-size: 11.5px; }
+.pbar .pb-b { margin-left: auto; background: #1f6feb; border: 0; color: #fff; cursor: pointer;
+              padding: 7px 16px; border-radius: 7px; font-size: 12.5px; font-family: inherit; }
+.pbar .pb-b:hover { background: #388bfd; }
+@media print { .pbar { display: none !important; } }
 """
 
 
@@ -307,8 +317,12 @@ def build_class_report_html(records: List[Dict[str, Any]],
                             names_map: Optional[Dict[str, str]] = None,
                             class_name: str = '',
                             corpus_map: Optional[Dict[str, Dict[str, Any]]] = None,
-                            school_name: str = '') -> str:
-    """把一个班级的 v2 记录渲染成可打印 HTML。records 为 records/index.json 的子集。"""
+                            school_name: str = '',
+                            doc_title: Optional[str] = None) -> str:
+    """把一个班级的 v2 记录渲染成可打印 HTML。records 为 records/index.json 的子集。
+
+    doc_title 为空时按「学生报告 · 班级」自动命名；学生本人导出时由调用方传更贴切的标题。
+    """
     names_map = names_map or {}
     corpus_map = corpus_map or {}
     sorted_recs = sorted(records, key=lambda r: (str(r.get('student_id') or ''), r.get('submitted_at') or ''))
@@ -318,10 +332,15 @@ def build_class_report_html(records: List[Dict[str, Any]],
         name = names_map.get(sid) or rec.get('student_name') or ''
         corpus = corpus_map.get(str(rec.get('batch_id') or '')) or {}
         pages.append(_student_pages(rec, name, corpus, class_name, school_name))
-    title = '学生报告 · %s' % (class_name or '全部班级')
+    title = doc_title or ('学生报告 · %s' % (class_name or '全部班级'))
+    bar = ('<div class="pbar"><div class="pb-t">%s</div>'
+           '<div class="pb-s">共 %d 份 · 点右侧按钮，在打印对话框里选「另存为 PDF」；'
+           '纸张 A4，勾选「背景图形」效果更好</div>'
+           '<button class="pb-b" onclick="window.print()">打印 / 存为 PDF</button></div>' % (
+               _e(title), len(sorted_recs)))
     return (
         '<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="UTF-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
-        '<title>%s</title><style>%s</style></head><body>%s</body></html>' % (
-            _e(title), _styles(), ''.join(pages) or
+        '<title>%s</title><style>%s</style></head><body>%s%s</body></html>' % (
+            _e(title), _styles(), bar, ''.join(pages) or
             '<div class="page"><p class="empty">没有可导出的已批阅记录。</p></div>'))

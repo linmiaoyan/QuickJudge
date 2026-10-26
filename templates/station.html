@@ -223,6 +223,12 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
   <a class="btn ghost tiny" href="/" target="_blank" rel="noopener">进入完整后台 →</a>
 </div>
 
+<!-- 后端代码比进程新（改了 app.py 没重启）时弹出：模板是热加载的，
+     页面看着是新的、后端还是老的，填了满分也会被按默认值批。 -->
+<div style="max-width:1680px;margin:16px auto -4px;padding:0 24px;">
+  <div id="codeWarn" class="blocked" style="display:none;margin-bottom:0;"></div>
+</div>
+
 <div class="layout">
   <!-- 左：扫描控制 -->
   <div style="display:flex;flex-direction:column;gap:20px;">
@@ -453,6 +459,22 @@ async function loadContext() {
     row('输出目录', CTX.scan_output_dir || '-') +
     row('临时区', (CTX.staging_count || 0) + ' 张待整理') +
     row('当前用户', CTX.user ? (CTX.user.name || CTX.user.id) + '（' + CTX.user.role + '）' : '未登录');
+
+  // 后端代码被改过但服务没重启：页面是新的、后端是旧的，会出现「填了满分却不生效」
+  // 这类前后端对不上的怪现象。与其让老师怀疑自己，不如直接把话说清楚。
+  const cw = $('#codeWarn');
+  if (cw) {
+    const ci = CTX.code || {};
+    if (ci.stale) {
+      cw.style.display = '';
+      cw.innerHTML = '<b>服务需要重启：</b>' + esc(ci.file || 'app.py') + ' 在 '
+        + esc(ci.changed_at) + ' 改过，但当前进程是 ' + esc(ci.started_at) + ' 启动的。'
+        + '页面会热加载、后端不会——现在看到的设置可能不生效（例如扫描端填的满分）。
+           请关掉服务窗口重新启动 QuickJudge 再扫。';
+    } else {
+      cw.style.display = 'none';
+    }
+  }
 
   // 批阅方案下拉：自动批阅目前只接了英语作文这一套评阅契约，其余方案从下拉里拿掉并说明原因，
   // 免得老师选了数学、扫完一叠纸才发现批出来是作文那套结构。
