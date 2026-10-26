@@ -165,6 +165,7 @@
         <div class="nav-container" style="max-width: none; justify-content: space-between;">
             <div style="display: flex; align-items: center; gap: 1rem;">
                 <span id="currentUserSpan" style="color: rgba(255,255,255,0.9); font-size: 0.9rem;"></span>
+                <button id="changePwdBtn" onclick="openChangePwdModal()" class="btn" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 8px 16px;">🔑 修改密码</button>
                 <button id="configBtn" onclick="openConfigModal()" class="btn" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 8px 16px;">⚙️ 配置</button>
                 <button id="logoutBtn" onclick="doLogout()" class="btn" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 8px 16px;">退出</button>
             </div>
@@ -1114,6 +1115,36 @@
                 </div>
 
                 <!-- 配置对话框 -->
+                <!-- 修改自己的密码 -->
+                <div id="changePwdModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1200; overflow-y: auto;">
+                    <div style="max-width: 420px; margin: 80px auto; background: #fff; border-radius: 12px; padding: 26px 28px; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+                        <h2 style="margin: 0 0 6px; font-size: 1.15rem; color: #333;">🔑 修改密码</h2>
+                        <p style="margin: 0 0 18px; font-size: 13px; color: var(--text-secondary);">
+                            当前账号：<strong id="pwdAccountLabel" style="color: var(--text-primary);"></strong>
+                        </p>
+                        <div style="margin-bottom: 14px;">
+                            <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 500;">原密码</label>
+                            <input type="password" id="pwdOld" placeholder="当前使用的密码" autocomplete="current-password"
+                                   style="width: 100%; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; box-sizing: border-box;">
+                        </div>
+                        <div style="margin-bottom: 14px;">
+                            <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 500;">新密码</label>
+                            <input type="password" id="pwdNew" placeholder="至少 4 位" autocomplete="new-password"
+                                   style="width: 100%; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; box-sizing: border-box;">
+                        </div>
+                        <div style="margin-bottom: 14px;">
+                            <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 500;">确认新密码</label>
+                            <input type="password" id="pwdNew2" placeholder="再输入一次" autocomplete="new-password"
+                                   style="width: 100%; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; box-sizing: border-box;">
+                        </div>
+                        <p id="pwdError" style="color: var(--danger-color); font-size: 13px; margin: 0 0 12px; display: none;"></p>
+                        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                            <button type="button" class="btn btn-warning" onclick="closeChangePwdModal()">取消</button>
+                            <button type="button" class="btn btn-primary" id="pwdSubmitBtn" onclick="submitChangePwd()">保存</button>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="configModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; overflow-y: auto;">
                     <div style="max-width: 600px; margin: 50px auto; background: white; border-radius: 12px; padding: 30px; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
                         <h2 style="margin-bottom: 20px; color: #333;">⚙️ 系统配置</h2>
@@ -1170,6 +1201,17 @@
                             <div id="inviteCodesListContainer" style="max-height: 200px; overflow-y: auto; font-size: 13px;">
                                 <p style="color: var(--text-muted);">加载中...</p>
                             </div>
+
+                            <h3 style="margin: 20px 0 12px 0; font-size: 1rem;">🔒 重置学生密码</h3>
+                            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 10px;">学生忘记密码时，在这里直接把密码重置掉，不用删除账号。</p>
+                            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                                <input type="text" id="resetPwdStudentId" placeholder="学号，如 260101"
+                                       style="padding: 8px; width: 150px; border: 1px solid var(--border-color); border-radius: 6px;">
+                                <input type="text" id="resetPwdNewValue" placeholder="新密码（留空=重置为学号）"
+                                       style="padding: 8px; width: 200px; border: 1px solid var(--border-color); border-radius: 6px;">
+                                <button type="button" class="btn btn-warning" onclick="adminResetStudentPwd()">重置</button>
+                            </div>
+                            <p id="resetPwdResult" style="font-size: 13px; margin-top: 8px; color: var(--text-secondary);"></p>
                         </div>
                         
                         <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
@@ -1310,6 +1352,7 @@
                     var span = document.getElementById('currentUserSpan');
                     if (span) span.textContent = res.data.user.name + '（' + (res.data.user.role === 'student' ? '学生' : res.data.user.role === 'admin' ? '管理员' : '老师') + '）';
                     window.currentUserRole = res.data.user.role || 'teacher';
+                    window.currentUserId = res.data.user.id || '';
                 applyRoleLayout(res.data.user.role || 'teacher');
                 } else {
                     if (errEl) { errEl.textContent = res.data.error || '登录失败'; errEl.style.display = 'block'; }
@@ -1454,6 +1497,7 @@
                 var span = document.getElementById('currentUserSpan');
                 if (span && user) span.textContent = (user.name || user.id) + '（' + (user.role === 'student' ? '学生' : user.role === 'admin' ? '管理员' : '老师') + '）';
                 window.currentUserRole = user.role || 'teacher';
+                window.currentUserId = user.id || '';
                 applyRoleLayout(user.role || 'teacher');
                 // 已登录后再加载班级和文件夹，避免未登录时多发请求
                 loadClasses();
@@ -5421,6 +5465,55 @@
         }
         
         // 配置相关函数
+        // ---------- 修改自己的密码 ----------
+        function openChangePwdModal() {
+            var err = document.getElementById('pwdError');
+            if (err) { err.style.display = 'none'; err.textContent = ''; }
+            ['pwdOld', 'pwdNew', 'pwdNew2'].forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            var lbl = document.getElementById('pwdAccountLabel');
+            if (lbl) lbl.textContent = window.currentUserId || '—';
+            document.getElementById('changePwdModal').style.display = 'block';
+            setTimeout(function () {
+                var el = document.getElementById('pwdOld');
+                if (el) el.focus();
+            }, 50);
+        }
+        function closeChangePwdModal() {
+            document.getElementById('changePwdModal').style.display = 'none';
+        }
+        async function submitChangePwd() {
+            var err = document.getElementById('pwdError');
+            function show(msg) { if (err) { err.textContent = msg; err.style.display = 'block'; } }
+            if (err) err.style.display = 'none';
+            var oldPwd = (document.getElementById('pwdOld').value || '').trim();
+            var n1 = (document.getElementById('pwdNew').value || '').trim();
+            var n2 = (document.getElementById('pwdNew2').value || '').trim();
+            if (!oldPwd || !n1) return show('请填写原密码和新密码');
+            if (n1.length < 4) return show('新密码至少 4 位');
+            if (n1 !== n2) return show('两次输入的新密码不一致');
+            var btn = document.getElementById('pwdSubmitBtn');
+            if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+            try {
+                var r = await fetch('/api/change_password', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ old_password: oldPwd, new_password: n1 })
+                });
+                var data = await r.json().catch(function () { return {}; });
+                if (!r.ok) throw new Error(data.error || ('修改失败（' + r.status + '）'));
+                closeChangePwdModal();
+                showAlert(data.msg || '密码已修改', 'success');
+            } catch (e) {
+                show(e.message);
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '保存'; }
+            }
+        }
+
         async function openConfigModal() {
             try {
                 // 加载NAPS2路径配置
@@ -5507,6 +5600,36 @@
         }
         function adminAddSingleStudent() {
             addSingleStudent();
+        }
+        // 管理员：重置某个学生的密码（留空则重置为该学号）
+        async function adminResetStudentPwd() {
+            var idEl = document.getElementById('resetPwdStudentId');
+            var valEl = document.getElementById('resetPwdNewValue');
+            var out = document.getElementById('resetPwdResult');
+            var sid = idEl ? idEl.value.trim() : '';
+            var nv = valEl ? valEl.value.trim() : '';
+            function say(msg, ok) {
+                if (!out) return;
+                out.style.color = ok ? 'var(--success-color)' : 'var(--danger-color)';
+                out.textContent = msg;
+            }
+            if (!sid) return say('请填写学号', false);
+            if (nv && nv.length < 4) return say('新密码至少 4 位', false);
+            if (!confirm('把学号 ' + sid + ' 的密码重置为「' + (nv || sid) + '」？')) return;
+            try {
+                var r = await fetch('/api/admin/reset_password', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ student_id: sid, new_password: nv })
+                });
+                var data = await r.json().catch(function () { return {}; });
+                if (!r.ok) throw new Error(data.error || ('重置失败（' + r.status + '）'));
+                say('已重置 ' + (data.student_name || '') + '（' + data.student_id + '）→ 新密码：' + data.new_password, true);
+                if (valEl) valEl.value = '';
+            } catch (e) {
+                say(e.message, false);
+            }
         }
         function adminCreateInviteCode() {
             var maxEl = document.getElementById('inviteCodeMaxUses');
