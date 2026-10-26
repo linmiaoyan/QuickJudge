@@ -233,6 +233,13 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
           当前不是本机访问，扫描功能已锁定。请在连接扫描仪的这台电脑上打开本页。
         </div>
         <button class="scan-btn" id="scanBtn"><span class="ico">🖨️</span><span>开始扫描</span></button>
+        <!-- 默认勾选状态＝全自动批阅；只有需要一页多块时才让老师主动改成「先只扫」 -->
+        <label id="manualWrap" style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;font-size:12.5px;color:var(--text2);cursor:pointer;line-height:1.45;">
+          <input type="checkbox" id="manualScan" style="margin:2px 0 0;flex:0 0 auto;cursor:pointer;">
+          <span>这次<strong>先只扫描</strong>，我要框选区域后再批<br>
+            <span style="color:var(--text3,#999);font-size:11.5px;">不勾＝扫完自动批阅并归档（默认）；勾上＝只进临时区，等你框选/改学号后手动提交</span>
+          </span>
+        </label>
         <div style="display:flex;gap:8px;margin-top:10px;">
           <button class="btn" style="flex:1;justify-content:center;" id="importBtn">📁 导入本地图片</button>
           <input type="file" id="importInput" accept="image/*" multiple style="display:none;">
@@ -255,7 +262,8 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
 
         <div class="hint">
           默认「扫完直接批」：系统自动识别学号 → 按学号分班 → 逐篇批阅 → 归档到用户端。
-          临时区用于补扫或手动修正，正常流程不需要进来。
+          临时区用于补扫或手动修正，正常流程不需要进来。<br>
+          只有一页要拆成多块评阅（如一道题一块）时，才勾选上面那个「先只扫描」。
         </div>
       </div>
     </div>
@@ -490,13 +498,14 @@ async function pollJob(bid) {
 
 $('#scanBtn').onclick = async () => {
   const btn = $('#scanBtn');
+  const manual = !!($('#manualScan') || {}).checked;
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span><span>扫描中，请把试卷放入扫描仪…</span>';
   try {
     const r = await api('/api/station/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subject: ($('#subjectSel') || {}).value || 'english_essay', auto: true })
+      body: JSON.stringify({ subject: ($('#subjectSel') || {}).value || 'english_essay', auto: !manual })
     });
     if (r.batch && r.batch.id) {
       $('#jobPanel').classList.add('show');
@@ -508,16 +517,35 @@ $('#scanBtn').onclick = async () => {
       pollJob(r.batch.id);
       JOB_TIMER = setInterval(() => pollJob(r.batch.id), 2500);
     } else {
-      toast('已扫描 ' + (r.count || 1) + ' 页，已进入临时区', 'ok');
       await loadQueue();
+      toast(manual
+        ? '已扫入临时区 ' + (r.count || 1) + ' 页，请框选区域或核对学号后提交'
+        : '已扫描 ' + (r.count || 1) + ' 页，已进入临时区', 'ok');
     }
   } catch (e) {
     fail('扫描失败', e.message);
   } finally {
     btn.disabled = !CTX.is_local;
     btn.innerHTML = '<span class="ico">🖨️</span><span>开始扫描</span>';
+    // 每次扫完都回到默认的全自动，避免老师忘了自己勾过而导致后续批次不批阅
+    const cb = $('#manualScan');
+    if (cb && cb.checked) { cb.checked = false; syncManualScanLook(); }
   }
 };
+
+// 「先只扫描」勾选后视觉上要明显，防止老师以为还是全自动
+function syncManualScanLook() {
+  const wrap = $('#manualWrap');
+  const cb = $('#manualScan');
+  if (!wrap || !cb) return;
+  wrap.style.borderColor = cb.checked ? '#f0a020' : 'var(--line)';
+  wrap.style.background = cb.checked ? '#fff8ec' : 'transparent';
+  wrap.style.color = cb.checked ? '#8a5300' : 'var(--text2)';
+}
+if ($('#manualScan')) {
+  $('#manualScan').onchange = syncManualScanLook;
+  syncManualScanLook();
+}
 
 // 扫描类错误信息较长（含排查步骤），用弹窗完整展示，避免提示条截断
 function fail(title, msg) {
