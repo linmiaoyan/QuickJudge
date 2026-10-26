@@ -9,6 +9,7 @@ import zipfile
 import uuid
 import random
 import string
+import threading
 from datetime import datetime
 
 try:
@@ -30,6 +31,36 @@ minimax_model = _llm_model if _llm_model else "MiniMax-M2.5"
 _llm_text_model = os.getenv("LLM_TEXT_MODEL", "").strip()
 llm_text_model = _llm_text_model if _llm_text_model else minimax_model
 
+# ===== 识别精度档位 =====
+# 试卷字迹差异极大（有的字只有 1.5mm 高、笔画 1 像素），单一模型档位必然有取舍。
+# 这里给「看图」任务准备三档，由系统按卷面难度自动挑，老师无需在扫描时做选择题：
+#   fast     最便宜，适合印刷体/工整手写
+#   standard 默认档（LLM_MODEL）
+#   strong   难卷兜底（LLM_MODEL_STRONG），慢 2-4 倍、贵约 2 倍，仅在必要时升档
+# LLM_QUALITY_MODE=auto（默认）表示：难卷自动升 strong，普通卷走 standard；
+# 也可以固定为 fast/standard/strong，用于对比实验。
+_llm_model_fast = os.getenv("LLM_MODEL_FAST", "").strip() or minimax_model
+_llm_model_strong = os.getenv("LLM_MODEL_STRONG", "").strip() or "Qwen/Qwen3-VL-32B-Instruct"
+LLM_QUALITY_MODE = (os.getenv("LLM_QUALITY_MODE", "auto") or "auto").strip().lower()
+if LLM_QUALITY_MODE not in ("auto", "fast", "standard", "strong"):
+    LLM_QUALITY_MODE = "auto"
+
+
+def resolve_vision_model(mode=None, hard=False):
+    """按精度档位选视觉模型。mode 为空时用 .env 的 LLM_QUALITY_MODE。
+
+    auto：卷面被判为难卷（字太小/笔画太细）才升 strong，否则 standard。
+    """
+    m = (mode or LLM_QUALITY_MODE or "auto").strip().lower()
+    if m == "fast":
+        return _llm_model_fast
+    if m == "strong":
+        return _llm_model_strong
+    if m == "standard":
+        return minimax_model
+    return _llm_model_strong if hard else minimax_model
+
+
 
 def _text_model_kwargs(model_name=None):
     """Qwen3.5 / Qwen3.6 等默认开启思考模式的模型，在文本任务中显式关闭思考，
@@ -38,6 +69,32 @@ def _text_model_kwargs(model_name=None):
     if 'qwen3.5' in name or 'qwen3-5' in name or 'qwen3.6' in name or 'qwen3-6' in name:
         return {'extra_body': {'enable_thinking': False}}
     return {}
+
+
+def _vision_model_kwargs(model_name=None):
+    """视觉模型的「关思考」参数只对部分模型有效，需按模型区分（实测结论）：
+
+    · Qwen3-VL-32B-Instruct：默认走思考链，同一张图 141.7s；显式关闭后 6.2s；
+    · Qwen3-VL-8B-Instruct / 30B-A3B-Instruct：本身就不思考，传该参数直接 400。
+    """
+    name = (model_name or minimax_model or '').lower()
+    if 'qwen3-vl-32b-instruct' in name or 'thinking' in name:
+        return {'extra_body': {'enable_thinking': False}}
+    return {}
+
+
+def _vision_chat(client, **kwargs):
+    """调用视觉接口，带上关思考参数；若服务端不认这个参数则自动退回普通调用。"""
+    kw = dict(kwargs)
+    extra = _vision_model_kwargs(kw.get('model'))
+    if extra:
+        try:
+            return client.chat.completions.create(**kw, **extra)
+        except Exception as e:
+            msg = str(e).lower()
+            if 'enable_thinking' not in msg and 'extra_body' not in msg:
+                raise
+    return client.chat.completions.create(**kw)
 # End block (15-20)
 
 from openai import OpenAI
@@ -56,6 +113,19 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'scan-biyue-dev-secret-key-change-in-production')
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 CORS(app, supports_credentials=True)
+
+# ===== 扫描运行时配置 =====
+# 同一台扫描仪同一时刻只允许一次扫描会话：
+# 并发扫描会触发 TWAIN "MaxConnections"，并把扫描仪拖入无响应状态（需拔插 USB 才能恢复）。
+_SCAN_LOCK = threading.Lock()
+# 单次扫描最长等待秒数；超时后先温和终止、再强制结束进程树，确保扫描仪连接被释放。
+SCAN_TIMEOUT_SECONDS = int(os.getenv('SCAN_TIMEOUT_SECONDS', '90') or 90)
+# 扫描开始后多久仍"毫无输出"即判定设备无响应（健康的扫描仪会立刻打印 Beginning scan...）
+SCAN_NO_OUTPUT_SECONDS = int(os.getenv('SCAN_NO_OUTPUT_SECONDS', '20') or 20)
+# 已有输出但随后静默多久，判定为卡住（需大于最慢的一次真实扫描耗时）
+SCAN_STALL_SECONDS = int(os.getenv('SCAN_STALL_SECONDS', '60') or 60)
+# 扫描逻辑结束后，等待"进程退出或输出文件落盘"的宽限时间
+SCAN_FINISH_GRACE_SECONDS = int(os.getenv('SCAN_FINISH_GRACE_SECONDS', '10') or 10)
 
 LOGO_DIR = os.path.join(os.path.dirname(__file__), 'logo')
 
@@ -469,16 +539,145 @@ def _save_paper_to_task(task_id, image_bytes, ext='.png'):
 # 提示词模板存储
 PROMPT_TEMPLATE_FILE = os.path.join(CONFIG_DIR, 'prompt_template.txt')
 SUBJECT_CONFIG_FILE = os.path.join(CONFIG_DIR, 'subject_config.json')
-DEFAULT_PROMPT_TEMPLATE = """请对以下英语作文进行详细批阅，给出：
+DEFAULT_PROMPT_TEMPLATE = """请对以下内容进行详细批阅，给出：
 1. 总体评分
 2. 优点分析
-3. 问题指出（语法、拼写、结构等）
+3. 问题指出
 4. 改进建议
 5. 具体修改意见
 
-作文内容：
+内容：
 {essay_text}
 """
+
+# ================= 批阅方案（学科 × 题型）=================
+# 把「评分依据」从代码里搬出来：每份卷在扫描端选一个方案，批阅时按方案拼提示词。
+# 方案里可用的占位符：{max_score}（该块满分）、{subject}（方案名）。
+GRADING_CONFIG_FILE = os.path.join(CONFIG_DIR, 'grading_config.json')
+
+DEFAULT_GRADING_CONFIG = {
+    'current': 'general',
+    'subjects': {
+        'general': {
+            'name': '通用片段 / 整页',
+            'max_score': 100,
+            'prompt': (
+                '这是一份学生作答的片段，可能只是某几道题，也可能是整页。\n'
+                '请先完整识别其中的手写内容，再按学科常规标准评价。\n'
+                '评分要点：\n'
+                '- 答案或结论是否正确，推导/步骤是否完整；\n'
+                '- 表述是否清楚，书写与格式是否规范；\n'
+                '- 开放题重点看思路是否成立、论证是否站得住。'
+            ),
+        },
+        'chinese_essay': {
+            'name': '语文作文',
+            'max_score': 50,
+            'prompt': (
+                '这是一篇学生手写作文。请按中考/高考作文通用标准评价：\n'
+                '评分要点：\n'
+                '- 立意：是否明确、是否切题、有无真情实感；\n'
+                '- 结构：层次是否清晰，详略是否得当，首尾是否呼应；\n'
+                '- 语言：用词是否准确生动，句式是否有变化，有无病句错别字；\n'
+                '- 书写：字迹是否工整、卷面是否整洁。'
+            ),
+        },
+        'english_essay': {
+            'name': '英语作文',
+            'max_score': 25,
+            'prompt': (
+                'This is a handwritten English composition. 请按英语写作通用标准评价：\n'
+                '评分要点：\n'
+                '- 内容：要点是否齐全，是否扣题，细节是否充分；\n'
+                '- 结构：段落划分、衔接词使用是否合理；\n'
+                '- 语言：语法、时态、拼写、用词是否准确，句式是否有变化；\n'
+                '- 书写：字迹是否清晰工整。'
+            ),
+        },
+        'math_solution': {
+            'name': '数学 / 理科解答题',
+            'max_score': 12,
+            'prompt': (
+                '这是一道（或几道）学生手写的理科解答题。请按步骤给分：\n'
+                '评分要点：\n'
+                '- 关键步骤是否写出，公式/定理使用是否正确；\n'
+                '- 计算过程与中间结果是否正确；\n'
+                '- 最终答案是否正确，单位与作答格式是否规范；\n'
+                '- 若思路正确但计算失误，应指出失误点，不整体否定。'
+            ),
+        },
+        'dictation': {
+            'name': '默写 / 字词 / 填空',
+            'max_score': 10,
+            'prompt': (
+                '这是一份默写、字词或填空类作答。请逐条核对：\n'
+                '评分要点：\n'
+                '- 逐空/逐条判断正误，指出具体错字、漏字、多字；\n'
+                '- 注意形近字、同音字错误，以及标点遗漏；\n'
+                '- 在 issues 中逐条列出错误项，写清「原写」与「应为」。'
+            ),
+        },
+    },
+}
+
+
+def load_grading_config():
+    """读取批阅方案配置；文件缺失时用内置默认值，并保证 current 指向存在的方案。"""
+    cfg = json.loads(json.dumps(DEFAULT_GRADING_CONFIG))  # 深拷贝，避免污染默认值
+    try:
+        if os.path.exists(GRADING_CONFIG_FILE):
+            with open(GRADING_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                saved = json.load(f)
+            subs = saved.get('subjects')
+            if isinstance(subs, dict):
+                for key, val in subs.items():
+                    if not isinstance(val, dict):
+                        continue
+                    base = cfg['subjects'].get(key, {})
+                    merged = dict(base)
+                    merged.update({k: v for k, v in val.items() if v not in (None, '')})
+                    merged.setdefault('name', key)
+                    merged.setdefault('max_score', 100)
+                    merged.setdefault('prompt', '')
+                    cfg['subjects'][key] = merged
+            if saved.get('current') in cfg['subjects']:
+                cfg['current'] = saved['current']
+    except Exception as e:
+        print('读取批阅方案配置失败，使用默认值: %s' % e)
+    return cfg
+
+
+def save_grading_config(cfg):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(GRADING_CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
+def _get_grading_subject(key=None):
+    """取某个批阅方案；key 为空时用配置里的 current，找不到再回退 general。"""
+    cfg = load_grading_config()
+    subjects = cfg.get('subjects') or {}
+    k = str(key or '').strip() or cfg.get('current') or 'general'
+    subj = subjects.get(k) or subjects.get('general') or {}
+    out = dict(subj)
+    out['key'] = k if k in subjects else 'general'
+    out['name'] = out.get('name') or '通用'
+    try:
+        out['max_score'] = float(out.get('max_score') or 100)
+    except (TypeError, ValueError):
+        out['max_score'] = 100.0
+    out['prompt'] = out.get('prompt') or ''
+    return out
+
+
+def grading_subject_options():
+    """给前端用的方案列表（只暴露必要字段）。"""
+    cfg = load_grading_config()
+    out = []
+    for key, val in (cfg.get('subjects') or {}).items():
+        out.append({'key': key, 'name': val.get('name') or key,
+                    'max_score': val.get('max_score') or 100})
+    return {'current': cfg.get('current') or 'general', 'subjects': out}
 
 # PNG压缩质量配置存储
 PNG_QUALITY_CONFIG_FILE = os.path.join(CONFIG_DIR, 'png_quality_config.json')
@@ -486,11 +685,13 @@ DEFAULT_PNG_QUALITY = 95  # 默认压缩质量（0-100，100为最高质量）
 
 # NAPS2扫描仪配置存储
 NAPS2_CONFIG_FILE = os.path.join(CONFIG_DIR, 'naps2_config.json')
-DEFAULT_NAPS2_PATH = r"D:\Download\NAPS2\App\NAPS2.Console.exe"
+# 本机实际安装路径（便携版，2026-10-16 部署）；可在 data/config/naps2_config.json 中覆盖
+DEFAULT_NAPS2_PATH = r"D:\Tools\NAPS2\App\NAPS2.Console.exe"
 
 # 扫描输出目录配置
 SCAN_OUTPUT_CONFIG_FILE = os.path.join(CONFIG_DIR, 'scan_output_config.json')
-DEFAULT_SCAN_OUTPUT_DIR = r"C:\Users\65789\Pictures\scan"
+# 本机扫描输出目录（2026-10-16 本地部署）；可在 data/config/scan_output_config.json 中修改
+DEFAULT_SCAN_OUTPUT_DIR = r"D:\ScanTests"
 
 # 扫描仪高级设置（图像模式、单双面等，与打印机/扫描相关保留）
 SCANNER_ADVANCED_CONFIG_FILE = os.path.join(CONFIG_DIR, 'scanner_advanced_config.json')
@@ -587,7 +788,8 @@ def llm_ocr_recognize(image_path_or_bytes, logger=None):
         data_url = 'data:image/png;base64,' + base64.b64encode(img_io.getvalue()).decode('utf-8')
 
         client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=120.0)
-        response = client.chat.completions.create(
+        response = _vision_chat(
+            client,
             model=minimax_model,
             messages=[
                 {"role": "system", "content": "你是OCR文字识别引擎。只输出图片中识别到的文字，逐字还原，保留原有段落与换行，不翻译、不点评、不添加任何解释性内容。若图中没有文字，输出空。"},
@@ -803,21 +1005,39 @@ def get_naps2_path():
     return DEFAULT_NAPS2_PATH
 
 def get_scan_output_dir():
-    """获取扫描输出目录配置"""
+    """获取扫描输出目录（带回退，避免因目录不存在或无权限导致扫描直接失败）。
+
+    依次尝试：配置文件指定目录 -> 默认目录 -> 项目内 data/scan_output，
+    每个候选目录都做“创建 + 实际写入探测”，第一个可用的即返回。
+    """
+    candidates = []
     try:
         if os.path.exists(SCAN_OUTPUT_CONFIG_FILE):
             with open(SCAN_OUTPUT_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-                scan_output_dir = config.get('scan_output_dir', DEFAULT_SCAN_OUTPUT_DIR)
-                scan_output_dir = scan_output_dir.strip()
-                # 确保目录存在
-                os.makedirs(scan_output_dir, exist_ok=True)
-                return scan_output_dir
+            cfg_dir = (config.get('scan_output_dir') or '').strip()
+            if cfg_dir:
+                candidates.append(cfg_dir)
     except Exception:
         pass
-    # 默认路径，确保目录存在
-    os.makedirs(DEFAULT_SCAN_OUTPUT_DIR, exist_ok=True)
-    return DEFAULT_SCAN_OUTPUT_DIR
+    candidates.append(DEFAULT_SCAN_OUTPUT_DIR)
+    candidates.append(os.path.join(DATA_DIR, 'scan_output'))
+
+    for d in candidates:
+        try:
+            os.makedirs(d, exist_ok=True)
+            probe = os.path.join(d, '.writable_probe')
+            with open(probe, 'w', encoding='utf-8') as fp:
+                fp.write('ok')
+            os.remove(probe)
+            return d
+        except Exception:
+            continue
+
+    fallback = os.path.join(DATA_DIR, 'scan_output')
+    os.makedirs(fallback, exist_ok=True)
+    return fallback
+
 
 def initialize_naps2_powershell_function():
     """初始化NAPS2 PowerShell函数"""
@@ -851,6 +1071,8 @@ function naps2.console {{
             ['powershell', '-ExecutionPolicy', 'Bypass', '-File', ps_init_file],
             capture_output=True,
             text=True,
+            encoding='gbk',
+            errors='replace',
             timeout=10
         )
         
@@ -937,14 +1159,21 @@ def create_class():
 
 def student_id_to_class_code(student_id):
     """
-    根据学号推导班级编码。规则：前2位=年份，第3-4位=班号，第5-6位=学号。
-    例如 230205 -> 23年2班5号 -> 班级编码 2302。
-    仅当学号为6位数字时返回前4位，否则返回 None。
+    根据学号推导班级编码。两种学号格式并存：
+
+    · 旧版 6 位：前2位年份 + 第3-4位班号 + 第5-6位座号（230205 -> 23年2班5号 -> 班级 2302）；
+    · 新版 4 位（2026 级起，不再带年级前缀）：前2位班号 + 后2位班内座号（1426 -> 14班26号 -> 班级 14）。
+
+    非纯数字或长度不符时返回 None。
     """
     s = str(student_id or '').strip()
-    if len(s) != 6 or not s.isdigit():
+    if not s.isdigit():
         return None
-    return s[:4]
+    if len(s) == 6:
+        return s[:4]
+    if len(s) == 4:
+        return s[:2]
+    return None
 
 
 def ensure_class_for_student(student_id, student_name=None):
@@ -981,6 +1210,52 @@ def ensure_class_for_student(student_id, student_name=None):
         students.sort()
         with open(students_file, 'w', encoding='utf-8') as f:
             json.dump(students, f, ensure_ascii=False, indent=2)
+
+
+def _clean_person_name(name):
+    """校验收 OCR 出来的人名：只保留 2-4 个汉字，其余一律视为不可用（返回空串）。
+
+    手写姓名识别噪声很大，宁可留空让老师补，也不要把乱码写进名单。
+    """
+    s = re.sub(r'[\s.。·,，、]+', '', str(name or ''))
+    s = re.sub(r'[^\u4e00-\u9fa5]', '', s)
+    return s[:4] if 2 <= len(s) <= 4 else ''
+
+
+def _ensure_student_registry(student_id, name=''):
+    """认出学号后自动完成「建班 + 进名单 + 建学生账号」，老师不需要再做任何归档动作。
+
+    返回 (class_code, display_name)。学号不合法时返回 ('', '')。
+    """
+    sid = str(student_id or '').strip()
+    class_code = student_id_to_class_code(sid)
+    if not class_code:
+        return '', ''
+    name = _clean_person_name(name)
+
+    # 1) 班级目录 + 名单
+    try:
+        ensure_class_for_student(sid, name or None)
+    except Exception as e:
+        print('自动建班失败: %s' % e)
+
+    # 2) 学生账号（密码=学号），让学生端能直接登录看自己的卷子
+    try:
+        users = load_users()
+        hit = next((u for u in users if str(u.get('id', '')) == sid), None)
+        if hit is None:
+            users.append({'id': sid, 'name': name or sid, 'role': 'student', 'password': sid})
+            save_users(users)
+        elif name and not str(hit.get('name') or '').strip():
+            # 名单里已有该学号但没名字，用识别到的姓名补上
+            hit['name'] = name
+            save_users(users)
+        else:
+            name = str(hit.get('name') or '').strip() or name
+    except Exception as e:
+        print('自动建学生账号失败: %s' % e)
+
+    return class_code, name
 
 
 def _task_papers_count(task_id):
@@ -2003,118 +2278,587 @@ def get_next_scan_filename(scan_output_dir):
     
     return f'scan{next_number}.png'
 
+# ==================== 扫描报错管理（面向教师使用） ====================
+
+def _decode_scan_output(raw):
+    """解码 NAPS2.Console 的输出。
+
+    NAPS2 在中文 Windows 下按 GBK 输出中文，若按 UTF-8 解码会变成乱码
+    （例如“选定的扫描仪处于脱机状态”会显示为乱码），因此这里按 GBK 优先解码。
+    """
+    if raw is None:
+        return ''
+    if isinstance(raw, str):
+        raw = raw.encode('utf-8', errors='replace')
+    for enc in ('gbk', 'cp936', 'utf-8'):
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode('gbk', errors='replace')
+
+
+def _humanize_scan_error(text, returncode=None):
+    """把 NAPS2/驱动的原始报错翻译成教师能看懂的中文提示。
+
+    返回 {'title': str, 'hints': [str, ...]}
+    """
+    t = (text or '').lower()
+
+    def has(*keys):
+        return any(k in t for k in keys)
+
+    if has('maxconnections', 'twain error', 'max connections'):
+        return {
+            'title': '扫描仪连接已被占满（被其他程序或未结束的扫描任务占用）',
+            'hints': [
+                '系统已尝试自动释放被占用的连接',
+                '若仍失败：拔掉扫描仪 USB 线，等 5 秒后重新插上，再点击扫描',
+                '关闭其他正在使用扫描仪的程序（其它扫描软件、传真和扫描窗口）',
+                '等待 10 秒后重试（上一次扫描超时后，扫描仪可能需要一点时间复位）',
+            ],
+        }
+    if '#scan_stall#' in t:
+        return {
+            'title': '扫描仪无响应（扫描开始后卡住不动）',
+            'hints': [
+                '按一下扫描仪机身上的电源键唤醒，确认指示灯回到就绪状态后重试',
+                '也可运行项目 tools 目录下的 reset_scanner.bat 一键软复位（无需拔线）',
+                '关闭其他可能占用扫描仪的程序（其它扫描软件、Windows传真和扫描等）',
+                '仍不行：拔掉 USB 线，等 10 秒后插回（建议插主机后置 USB 接口）',
+            ],
+        }
+    if has('脱机', '离线', 'offline', 'is not available'):
+        return {
+            'title': '扫描仪未响应（显示为脱机/离线）',
+            'hints': [
+                '扫描仪可能处于休眠：按一下扫描仪机身上的电源键唤醒，等指示灯回到就绪状态',
+                '重新插拔 USB 线，优先插在主机后置接口（前置接口供电不足容易导致脱机）',
+                '关闭其他可能占用扫描仪的程序（其它扫描软件、Windows传真和扫描等）',
+                '若扫描仪机身有模式按键（如“计数”），请退出该模式回到就绪状态',
+                '也可运行项目 tools 目录下的 reset_scanner.bat 一键软复位（无需拔线）',
+                '以上都不行时，重启电脑后再试',
+            ],
+        }
+    if has('工作进程崩溃', '工作进程', 'crash', '崩溃'):
+        return {
+            'title': '扫描仪驱动工作进程崩溃（本次未扫描到内容）',
+            'hints': [
+                '多数情况是玻璃板上没有原稿：请把试卷正面朝下平放、对齐左上角，并盖好盖板后再试',
+                '若已放好原稿仍报此错：按一下扫描仪机身上的电源键唤醒设备后重试',
+                '仍不行：运行项目 tools 目录下的 reset_scanner.bat 一键软复位（无需拔线）',
+                '最后手段：拔掉 USB 线，等 10 秒后插回（建议插主机后置 USB 接口）',
+            ],
+        }
+    if has('no pages', '0 page', 'no scanned pages', '没有扫描到', '未检测到'):
+        return {
+            'title': '没有扫描到内容（未检测到原稿）',
+            'hints': [
+                '请把试卷/答题卡正面朝下平放在玻璃板上，并对齐左上角',
+                '盖好扫描仪盖板（盖板未压合也可能导致扫描失败）',
+                '确认纸张没有超出玻璃板的扫描区域',
+                '放好后重新点击扫描',
+            ],
+        }
+    if has('no device', 'no scanners', 'not found', '找不到', '未找到', '无法找到', '未选择'):
+        return {
+            'title': '未找到扫描仪设备',
+            'hints': [
+                '检查扫描仪电源是否打开、USB 线是否插紧',
+                '打开“设备管理器”，确认“图像设备”下能看到扫描仪',
+                '重新插拔 USB 线后重试，必要时重启电脑',
+            ],
+        }
+    if has('jam', '卡纸'):
+        return {
+            'title': '扫描仪卡纸',
+            'hints': [
+                '打开盖板或进纸口，轻轻取出卡住的纸张',
+                '把纸张整理平整（避免褶皱、卷边）后重新扫描',
+            ],
+        }
+    if has('busy', 'in use', 'locked', '占用'):
+        return {
+            'title': '扫描仪正被其他程序占用',
+            'hints': [
+                '关闭其他正在使用扫描仪的程序（包括后台打开过的扫描窗口）',
+                '等待几秒后重新点击扫描',
+            ],
+        }
+    if has('driver', '驱动'):
+        return {
+            'title': '扫描仪驱动异常',
+            'hints': [
+                '在「扫描仪设置」中切换驱动后重试（本机实测推荐 TWAIN 驱动）',
+                '确认扫描仪驱动已正确安装',
+            ],
+        }
+    if has('timeout', '超时'):
+        return {
+            'title': '扫描超时（长时间未完成）',
+            'hints': [
+                '检查扫描仪电源与 USB 连接是否稳定',
+                '降低扫描分辨率（如 300dpi 改为 200dpi）后重试',
+                '重启扫描仪（断电 10 秒后重新上电）再试',
+            ],
+        }
+    return {
+        'title': '扫描失败',
+        'hints': [
+            '确认扫描仪电源已打开、USB 线插紧',
+            '按一下扫描仪电源键唤醒设备后重试',
+            '把原稿平放在玻璃板上并盖好盖板',
+        ],
+    }
+
+
+def _cleanup_stale_scanner_processes():
+    """清理残留的 NAPS2 控制台进程。
+
+    扫描如果被中断（超时、服务重启等），NAPS2.Console 可能变成孤儿进程并一直
+    占用扫描仪连接，导致之后每次扫描都报 "TWAIN error: MaxConnections"。
+    这里在每次扫描前做一次清理，保证连接可用；不影响 NAPS2 图形界面（NAPS2.exe）。
+    """
+    import subprocess as _sp
+    for name in ('NAPS2.Console.exe', 'NAPS2.Worker.exe'):
+        try:
+            _sp.run(['taskkill', '/F', '/T', '/IM', name],
+                    capture_output=True, timeout=10)
+        except Exception:
+            continue
+
+
+def _list_scan_devices(naps2_path, driver=None):
+    """列出 NAPS2 当前可识别的扫描设备，用于扫描失败时的诊断提示。"""
+    import subprocess as _sp
+    for drv in ([driver] if driver else ['twain', 'wia']):
+        try:
+            r = _sp.run([naps2_path, '--listdevices', '--driver', drv],
+                        capture_output=True, timeout=6)
+            out = _decode_scan_output(r.stdout).strip()
+            if out:
+                return drv, [ln.strip() for ln in out.splitlines() if ln.strip()]
+        except Exception:
+            continue
+    return None, []
+
+
+def _collect_scan_pages(scan_output_dir, expected_filename):
+    """收集一次扫描实际生成的全部页面文件。
+
+    NAPS2 多页扫描会输出 scan1.1.png / scan1.2.png ...（单页为 scan1.png），
+    这里按本次的基准编号收集所有页面并按页码排序，避免多页只取到一页。
+    """
+    base = os.path.splitext(expected_filename)[0]
+    pages = []
+    if not os.path.isdir(scan_output_dir):
+        return pages
+    for filename in os.listdir(scan_output_dir):
+        if not filename.lower().endswith('.png'):
+            continue
+        stem = os.path.splitext(filename)[0]
+        if stem == base or stem.startswith(base + '.'):
+            pages.append(os.path.join(scan_output_dir, filename))
+
+    def _sort_key(p):
+        m = re.search(r'\.(\d+)\.png$', p.lower())
+        return (1, int(m.group(1))) if m else (0, 0)
+
+    pages.sort(key=_sort_key)
+    return pages
+
+
+def get_naps2_scan_options():
+    """读取扫描参数（分辨率/纸张/色彩/来源）。
+
+    重要：NAPS2 自带的默认档位是 100dpi + Letter，扫试卷时二维码与文字都会糊，
+    因此这里给出适合试卷的推荐默认值，并允许在 naps2_config.json 中覆盖：
+        {"source": "glass", "pagesize": "a4", "dpi": 300, "bitdepth": "color"}
+    """
+    opts = {'source': 'glass', 'pagesize': 'a4', 'dpi': 300, 'bitdepth': 'color'}
+    try:
+        if os.path.exists(NAPS2_CONFIG_FILE):
+            with open(NAPS2_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            for key in list(opts.keys()):
+                val = cfg.get(key)
+                if val not in (None, ''):
+                    opts[key] = val
+    except Exception:
+        pass
+    return opts
+
+
+def get_naps2_scan_target():
+    """读取扫描驱动与设备名配置（可选）。
+
+    返回 (driver, device)；未配置的项为 None，此时沿用 NAPS2 默认/图形界面选定的设备。
+    """
+    try:
+        if os.path.exists(NAPS2_CONFIG_FILE):
+            with open(NAPS2_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            driver = (cfg.get('driver') or '').strip() or None
+            device = (cfg.get('device') or '').strip() or None
+            return driver, device
+    except Exception:
+        pass
+    return None, None
+
+
+def _terminate_then_kill(proc):
+    """结束扫描子进程，并清理可能残留的扫描工作进程。
+
+    顺序：先请求结束 -> 等待 8 秒 -> 仍在则强制结束整棵进程树 -> 清理残留进程。
+    这是保证"扫描仪连接被释放"的关键：残留进程会一直占着设备，
+    导致之后每次扫描都报 TWAIN MaxConnections 或直接无响应。
+    """
+    if proc is None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=3)
+    except Exception:
+        pass
+    if proc.poll() is None:
+        try:
+            proc.kill()
+            proc.wait(timeout=3)
+        except Exception:
+            pass
+    _cleanup_stale_scanner_processes()
+
+
+def _is_transient_scan_failure(returncode, text):
+    """判断扫描失败是否属于"重试一次往往就好"的瞬时故障。
+
+    瞬时故障：驱动/设备被占用、扫描仪休眠导致脱机、TWAIN 连接计数占满。
+    而"没放纸"（返回码 0 + 0 页）属于操作问题，不做重试，直接提示更快。
+    """
+    if returncode not in (0, None):
+        return True
+    t = (text or '').lower()
+    for kw in ('maxconnections', 'max connections', 'offline', '脱机', 'busy',
+               'in use', 'occupied', '占用', 'unavailable', 'not available'):
+        if kw in t:
+            return True
+    return False
+
+
+def _run_scanner_reset(timeout=60):
+    """调用 tools/reset_scanner.ps1 做一次扫描仪软复位（脚本内部自行提权）。
+
+    返回 (ok: bool, detail: str)。
+    """
+    import subprocess as _sp
+    import tempfile
+    import time as _t
+
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          'tools', 'reset_scanner.ps1')
+    if not os.path.exists(script):
+        return False, '未找到复位脚本：%s' % script
+
+    log_path = os.path.join(tempfile.gettempdir(), 'qj_scanner_reset.log')
+    try:
+        if os.path.exists(log_path):
+            os.remove(log_path)
+    except Exception:
+        pass
+
+    try:
+        _sp.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                 '-File', script, '-LogPath', log_path],
+                capture_output=True, timeout=timeout)
+    except Exception as e:
+        return False, '调用复位脚本失败：%s' % e
+
+    # 提权后的副本是异步执行的，轮询日志判断最终结果
+    for _ in range(40):
+        _t.sleep(1)
+        try:
+            if os.path.exists(log_path):
+                detail = io.open(log_path, encoding='utf-8', errors='replace').read()
+                if 'RESULT=OK' in detail:
+                    return True, detail.strip()
+                if 'RESULT=FAIL' in detail:
+                    return False, detail.strip()
+        except Exception:
+            continue
+    return False, '复位脚本未在预期时间内返回结果（可能被系统策略拦截）'
+
+
 @app.route('/api/scan', methods=['POST'])
 def start_scan():
-    """开始扫描"""
+    """开始扫描（同一时刻只允许一次扫描，避免并发把扫描仪占死）"""
+    import subprocess
+    import time as _time
+
+    # 并发保护：同一台扫描仪同一时刻只能有一个扫描会话。
+    # 连续快速点击、或多人同时点击，会让 TWAIN 报 MaxConnections，
+    # 并把设备拖入"无响应"状态（届时只能拔插 USB 才能恢复）。
+    if not _SCAN_LOCK.acquire(blocking=False):
+        return jsonify({
+            'error': '已有一次扫描正在进行中，请等本次扫描结束后再点击。\n\n'
+                     '（同一台扫描仪同一时刻只能扫描一次，'
+                     '连续快速点击会让扫描仪被占用而卡住。）'
+        }), 429
+
     try:
-        import subprocess
-        
-        # 获取扫描输出路径（使用配置的路径）
+        # 扫描输出目录与目标文件名
         scan_output_dir = get_scan_output_dir()
-        
-        # 获取下一个可用的文件名（格式：scan1.png, scan2.png, ...）
         next_filename = get_next_scan_filename(scan_output_dir)
         scan_output_path = os.path.join(scan_output_dir, next_filename)
-        
-        # 获取NAPS2路径配置
+
         naps2_path = get_naps2_path()
-        
-        # 检查NAPS2程序是否存在
         if not os.path.exists(naps2_path):
             return jsonify({
-                'error': f'NAPS2程序不存在，请检查路径是否正确。\n当前路径：{naps2_path}\n请在设置中配置正确的路径。'
+                'error': '未找到 NAPS2 扫描程序，无法扫描。\n当前配置路径：%s\n'
+                         '请在「扫描仪设置」中配置正确的 NAPS2.Console.exe 路径。' % naps2_path
             }), 400
-        
-        # 构建PowerShell命令
-        # 使用单引号包裹路径，避免反斜杠转义问题
-        # 将路径中的单引号转义为两个单引号（PowerShell的转义方式）
-        naps2_path_escaped = naps2_path.replace("'", "''")
-        scan_output_path_escaped = scan_output_path.replace("'", "''")
-        
-        ps_command = f'''
-$naps2ConsolePath = '{naps2_path_escaped}'
-if (-not (Test-Path -Path $naps2ConsolePath -PathType Leaf)) {{
-    Write-Error "错误：未找到NAPS2控制台程序"
-    exit 1
-}}
-& $naps2ConsolePath -o '{scan_output_path_escaped}'
-'''
-        
-        # 执行PowerShell命令
-        print(f"执行扫描命令，输出路径: {scan_output_path}")
-        result = subprocess.run(
-            ['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_command],
-            capture_output=True,
-            text=True,
-            timeout=120  # 120秒超时
-        )
-        
-        # 打印调试信息
-        print(f"扫描命令返回码: {result.returncode}")
-        if result.stdout:
-            print(f"扫描命令输出: {result.stdout}")
-        if result.stderr:
-            print(f"扫描命令错误: {result.stderr}")
-        
-        if result.returncode != 0:
-            error_msg = result.stderr or result.stdout or '扫描失败，未知错误'
-            return jsonify({
-                'error': f'扫描失败：{error_msg}',
-                'returncode': result.returncode
-            }), 500
-        
-        # 检查输出文件是否生成（使用绝对路径）
-        scan_output_path_normalized = os.path.normpath(scan_output_path)
-        print(f"检查文件是否存在: {scan_output_path_normalized}")
-        print(f"文件是否存在: {os.path.exists(scan_output_path_normalized)}")
-        
-        # 如果期望的文件不存在，查找NAPS2实际生成的文件（可能是scan1.1.png, scan1.2.png等格式）
-        if not os.path.exists(scan_output_path_normalized):
-            import time
-            scan_start_time = time.time() - 10  # 扫描开始前10秒（给一些余量）
-            
-            if os.path.exists(scan_output_dir):
-                files_in_dir = os.listdir(scan_output_dir)
-                print(f"扫描输出目录中的文件: {files_in_dir}")
-                
-                # 查找最近修改的scan*.png文件（可能是NAPS2自动生成的格式，如scan1.1.png）
-                latest_file = None
-                latest_time = 0
-                for filename in files_in_dir:
-                    if filename.lower().startswith('scan') and filename.lower().endswith('.png'):
-                        file_path = os.path.join(scan_output_dir, filename)
-                        file_time = os.path.getmtime(file_path)
-                        if file_time > latest_time and file_time > scan_start_time:
-                            latest_time = file_time
-                            latest_file = filename
-                
-                # 如果找到了新生成的文件，直接使用它（不重命名）
-                if latest_file:
-                    scan_output_path_normalized = os.path.join(scan_output_dir, latest_file)
-                    next_filename = latest_file
-                    print(f"找到NAPS2生成的文件: {latest_file}")
+
+        # 读取驱动/设备配置（可选）；未配置时沿用 NAPS2 默认设备
+        naps2_driver, naps2_device = get_naps2_scan_target()
+        # 读取扫描参数（分辨率/纸张/色彩/来源）；未配置时用适合试卷的推荐值
+        scan_opts = get_naps2_scan_options()
+
+        # 直接调用 NAPS2.Console.exe（不经 PowerShell 中转，避免中文报错被二次转码成乱码）。
+        # --noprofile：不沿用图形界面最近使用的配置档案，
+        #   避免档案里带有「自动保存/等待输入」等设置时，命令行扫描卡住不返回。
+        scan_cmd = [naps2_path, '-o', scan_output_path, '-f', '-v', '--noprofile']
+        if naps2_driver:
+            scan_cmd += ['--driver', naps2_driver]
+        if naps2_device:
+            scan_cmd += ['--device', naps2_device]
+        # 显式指定扫描参数：NAPS2 默认档位（100dpi/Letter）扫不清试卷二维码，
+        # 必须明确指定，不能依赖默认档位或图形界面的历史设置。
+        for _key, _flag in (('source', '--source'), ('pagesize', '--pagesize'),
+                            ('dpi', '--dpi'), ('bitdepth', '--bitdepth')):
+            _val = scan_opts.get(_key)
+            if _val not in (None, ''):
+                scan_cmd += [_flag, str(_val)]
+
+        def _run_once():
+            """执行一次扫描，返回 (returncode, 输出文本, 诊断码)。
+
+            诊断码：ok / no_output（设备毫无回应）/ stall（启动后卡住）/ timeout。
+
+            实测结论：NAPS2 的输出不缓冲，且故障时会在打印完
+            "N page(s) scanned." 之后迟迟不退出。因此这里盯着输出流：
+              · 出现 "N page(s) scanned." -> 扫描逻辑已结束：
+                  N=0 -> 立即收尾；N>0 -> 等进程退出或输出文件落盘（宽限 10 秒），
+                  只要文件生成即算成功（进程"假死"不影响结果）
+              · EOF -> 正常结束
+              · 20 秒内毫无输出 -> 设备无响应
+              · 有输出后静默超过 45 秒 -> 判定卡住
+              · 总时长超过 90 秒 -> 判定超时
+            """
+            import threading as _th
+            import time as _tw
+
+            _cleanup_stale_scanner_processes()
+            print('执行扫描命令: %s' % ' '.join(scan_cmd), flush=True)
+            proc = subprocess.Popen(scan_cmd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT)
+            buf = []
+            done = _th.Event()
+            marks = {'last': _tw.time(), 'n': 0, 'pages': None}
+
+            def _read():
+                try:
+                    for line in iter(proc.stdout.readline, b''):
+                        buf.append(line)
+                        marks['last'] = _tw.time()
+                        marks['n'] += 1
+                        m = re.search(rb'(\d+)\s+page\(s\)\s+scanned', line.lower())
+                        if m:
+                            marks['pages'] = int(m.group(1))
+                            done.set()
+                except Exception:
+                    pass
+                finally:
+                    done.set()
+
+            _th.Thread(target=_read, daemon=True).start()
+
+            started = _tw.time()
+            diag = 'ok'
+            while True:
+                if done.wait(0.5):
+                    diag = 'ok'
+                    break
+                now = _tw.time()
+                if marks['n'] == 0 and now - started > SCAN_NO_OUTPUT_SECONDS:
+                    diag = 'no_output'
+                    break
+                if marks['n'] > 0 and now - marks['last'] > SCAN_STALL_SECONDS:
+                    diag = 'stall'
+                    break
+                if now - started > SCAN_TIMEOUT_SECONDS:
+                    diag = 'timeout'
+                    break
+
+            if diag == 'ok':
+                pages = marks.get('pages')
+                if pages == 0:
+                    # 没有内容需要保存，直接收尾
+                    _terminate_then_kill(proc)
                 else:
-                    # 如果没有找到新文件，返回警告
-                    return jsonify({
-                        'warning': f'扫描命令执行完成，但未找到输出文件。\n期望文件: {scan_output_path_normalized}\n目录中的文件: {", ".join(files_in_dir[:10])}\n请检查扫描仪是否正常工作。',
-                        'expected_path': scan_output_path_normalized,
-                        'files_in_dir': files_in_dir[:10]
-                    }), 200
-        
+                    # 扫到了内容：等进程退出，或等输出文件落盘后收尾
+                    deadline = _tw.time() + SCAN_FINISH_GRACE_SECONDS
+                    while _tw.time() < deadline:
+                        if proc.poll() is not None:
+                            break
+                        if _collect_scan_pages(scan_output_dir, next_filename):
+                            break
+                        _tw.sleep(0.4)
+                    if proc.poll() is None:
+                        _terminate_then_kill(proc)
+            else:
+                _terminate_then_kill(proc)
+
+            try:
+                proc.stdout.close()
+            except Exception:
+                pass
+            return proc.returncode, _decode_scan_output(b''.join(buf)).strip(), diag
+
+        returncode = None
+        combined_output = ''
+        generated_pages = []
+        timed_out = False
+        unresponsive = False
+
+        for attempt in (1, 2):
+            if attempt == 2:
+                # 首次失败：清掉可能残留的扫描进程，稍等后再试一次（扫描仪休眠唤醒常需第二次）
+                _cleanup_stale_scanner_processes()
+                _time.sleep(1.5)
+                print('首次扫描未成功，自动重试一次...', flush=True)
+            returncode, combined_output, diag = _run_once()
+            timed_out = (diag == 'timeout')
+            unresponsive = diag in ('no_output', 'stall')
+            if timed_out:
+                break
+            generated_pages = _collect_scan_pages(scan_output_dir, next_filename)
+            if generated_pages:
+                break
+            # 以下情况不重试，直接给出结论（重试只会白等一轮）：
+            #  · 设备毫无回应（unresponsive）：重试也打不开设备
+            #  · 已经明确扫到 0 页（no_content）：这是确定性结果，不是瞬时故障
+            #  · 不属于"被占用/脱机"等瞬时故障：例如没放纸等操作问题
+            _out_low = (combined_output or '').lower()
+            _no_content = ('0 page(s) scanned' in _out_low
+                           or 'no scanned pages' in _out_low)
+            if attempt == 1 and (unresponsive or _no_content
+                                 or not _is_transient_scan_failure(returncode, combined_output)):
+                break
+
+        print('扫描命令返回码: %s' % returncode, flush=True)
+        if combined_output:
+            print('扫描命令输出: %s' % combined_output, flush=True)
+
+        if timed_out or unresponsive or not generated_pages:
+            if timed_out:
+                err_source = 'timeout'
+            elif diag == 'stall':
+                err_source = '#scan_stall#'
+            elif diag == 'no_output':
+                err_source = '脱机'
+            else:
+                err_source = combined_output
+            info = _humanize_scan_error(err_source, returncode)
+            hint_lines = '\n'.join('%d. %s' % (i + 1, h) for i, h in enumerate(info['hints']))
+            # 设备已经无响应时不再去枚举设备（枚举也会卡住，白等十几秒）
+            if unresponsive:
+                driver_used, devices = None, []
+            else:
+                driver_used, devices = _list_scan_devices(naps2_path, naps2_driver)
+            if devices:
+                device_text = ('\n\n系统可识别的扫描设备（%s 驱动）：\n' % driver_used
+                               + '\n'.join('· %s' % d for d in devices))
+            elif unresponsive:
+                device_text = ''
+            else:
+                device_text = '\n\n未能列出任何扫描设备，请检查扫描仪电源与 USB 连接。'
+            if diag == 'stall':
+                detail = ('扫描已经开始，但之后 %d 秒内没有任何进展（驱动工作进程很可能已出错）。'
+                          % SCAN_STALL_SECONDS)
+            elif diag == 'no_output':
+                detail = ('扫描仪在 %d 秒内没有任何回应（连"开始扫描"都没有打印出来），'
+                          '说明当前无法与设备通讯。' % SCAN_NO_OUTPUT_SECONDS)
+            else:
+                detail = combined_output or '（扫描仪无任何输出，可能未响应或已休眠）'
+            # 排查步骤里若已提到一键软复位，就不再重复追加
+            extra = ('' if any('reset_scanner' in h for h in info['hints']) else
+                     '\n\n也可运行项目 tools 目录下的 reset_scanner.bat 一键软复位'
+                     '（无需拔线），仍无效再拔插 USB。')
+            return jsonify({
+                'error': ('%s\n\n请按以下步骤排查：\n%s%s%s\n\n技术详情：%s'
+                          % (info['title'], hint_lines, extra, device_text, detail)),
+                'returncode': returncode,
+                'raw_output': combined_output,
+                'output_dir': scan_output_dir,
+            }), 500
+
         return jsonify({
             'success': True,
-            'message': '扫描成功',
-            'output_path': scan_output_path_normalized,
-            'filename': os.path.basename(scan_output_path_normalized)
+            'message': '扫描成功，共 %d 页' % len(generated_pages),
+            'output_path': generated_pages[0],
+            'output_paths': generated_pages,
+            'filename': os.path.basename(generated_pages[0]),
+            'page_count': len(generated_pages),
         })
-        
+
     except subprocess.TimeoutExpired:
-        return jsonify({'error': '扫描超时，请检查扫描仪连接或重试'}), 500
+        info = _humanize_scan_error('timeout')
+        hint_lines = '\n'.join('%d. %s' % (i + 1, h) for i, h in enumerate(info['hints']))
+        return jsonify({'error': '%s\n\n请按以下步骤排查：\n%s' % (info['title'], hint_lines)}), 500
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"扫描失败: {e}\n{error_trace}")
-        return jsonify({'error': f'扫描失败: {str(e)}'}), 500
+        print('扫描失败: %s\n%s' % (e, error_trace), flush=True)
+        msg = str(e)
+        if 'WinError 5' in msg or '拒绝访问' in msg or 'PermissionError' in msg:
+            friendly = ('扫描失败：保存扫描文件的目录没有写入权限。\n\n'
+                        '请检查「扫描仪设置」中的扫描输出目录，'
+                        '确认该目录存在且当前账户有读写权限，或改选一个可写的目录后重试。')
+        elif 'FileNotFoundError' in msg or 'No such file' in msg:
+            friendly = ('扫描失败：找不到指定的文件或目录。\n\n'
+                        '请检查「扫描仪设置」中的 NAPS2 路径与扫描输出目录是否正确。')
+        else:
+            friendly = ('扫描失败，请检查扫描仪电源、USB 连接与纸张摆放后重试。\n\n'
+                        '技术详情：%s' % msg)
+        return jsonify({'error': friendly, 'raw_error': msg}), 500
+    finally:
+        # 无论成功失败，都清掉可能残留的扫描进程，避免其继续占用扫描仪
+        try:
+            _cleanup_stale_scanner_processes()
+        finally:
+            _SCAN_LOCK.release()
+
+
+@app.route('/api/scan/reset', methods=['POST'])
+def reset_scanner_device():
+    """扫描仪软复位：重启图像采集服务，释放被占用的扫描仪连接。
+
+    适用：反复提示「脱机 / 被占用 / 扫描仪未响应」时，
+    在拔插 USB 之前先点这个（本机实测约 2~10 秒完成，无需拔线）。
+    """
+    if _SCAN_LOCK.locked():
+        return jsonify({'error': '正在扫描中，无法复位。请等本次扫描结束后再试。'}), 409
+    ok, detail = _run_scanner_reset()
+    if ok:
+        return jsonify({'success': True,
+                        'message': '扫描仪已复位，请重新点击扫描。',
+                        'detail': detail})
+    return jsonify({
+        'error': ('扫描仪软复位未成功。\n\n'
+                  '请拔掉扫描仪 USB 线，等 10 秒后插回'
+                  '（建议插主机后置 USB 接口），再点击扫描。'),
+        'detail': detail,
+    }), 500
+
 
 @app.route('/api/import_local_images', methods=['POST'])
 def import_local_images():
@@ -2581,46 +3325,50 @@ def find_class_by_student_id(student_id, logger=None):
             logger.error(f"查找班级时出错: {e}")
         return None
 
+_FULLWIDTH_DIGITS = str.maketrans('０１２３４５６７８９', '0123456789')
+
+
+def _squash_digit_gaps(s):
+    """把分格书写、被空格/点线切开的数字合并：'1 4 3 1' / '1.4.3.1' / '1|4|3|1' -> '1431'。
+
+    手写学号常常一格一个数字，OCR 会原样带出分隔符，不合并就永远匹配不到 4 位学号。
+    """
+    s = str(s or '').translate(_FULLWIDTH_DIGITS)
+    prev = None
+    while prev != s:
+        prev = s
+        s = re.sub(r'(?<=\d)[\s.·|:：\-_/\\]+(?=\d)', '', s)
+    return s
+
+
 def extract_student_id(text):
-    """从OCR文本中提取学号（6位数字），无需前缀"""
+    """从 OCR 文本中提取学号，兼容 4 位（新版）与 6 位（旧版）。
+
+    优先看「学号」标签后面的内容（最可靠）；没有再退化为扫描前几行里的独立数字。
+    """
     if not text:
         return None
-    
-    # 学号格式：6位数字，无需前缀
-    # 优先匹配文本开头的6位数字（最可能的位置）
-    # 也支持带标识的格式（兼容性）
-    patterns = [
-        r'^[^\d]*(\d{6})',  # 文本开头附近的6位数字（忽略前面的非数字字符）
-        r'学号[：:]\s*(\d{6})',  # 学号：123456（兼容格式）
-        r'Student\s*ID[：:]\s*(\d{6})',  # Student ID: 123456（兼容格式）
-        r'ID[：:]\s*(\d{6})',  # ID: 123456（兼容格式）
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
-        if match:
-            student_id = match.group(1).strip()
-            # 验证是否为6位数字
-            if len(student_id) == 6 and student_id.isdigit():
-                return student_id
-    
-    # 如果没找到，尝试提取文本前几行的6位数字（独立数字，不依赖前缀）
-    lines = text.split('\n')[:5]  # 只看前5行
-    for line in lines:
-        # 查找独立的6位数字（前后是空格、换行或标点）
-        # 优先匹配行首的6位数字
-        line_stripped = line.strip()
-        if line_stripped:
-            # 检查是否是行首的6位数字
-            if re.match(r'^\d{6}(?:\s|$|[^\d])', line_stripped):
-                match = re.search(r'^(\d{6})', line_stripped)
-                if match:
-                    return match.group(1)
-            # 查找行中独立的6位数字
-            numbers = re.findall(r'(?<!\d)\d{6}(?!\d)', line)  # 前后都不是数字的6位数字
-            if numbers:
-                return numbers[0]
-    
+    raw = str(text).translate(_FULLWIDTH_DIGITS)
+
+    # 1) 带标签：学号 / 學號 / 考号 / Student ID / ID
+    label = re.search(r'(?:学\s*号|學\s*號|考\s*号|Student\s*ID|SID|ID)\s*[：:]?\s*([0-9\s.·|_\-]{3,24})',
+                      raw, re.IGNORECASE)
+    if label:
+        cand = _squash_digit_gaps(label.group(1))
+        m = re.search(r'(?<!\d)(\d{6}|\d{4})(?!\d)', cand)
+        if m:
+            return m.group(1)
+
+    # 2) 前 6 行里的独立数字（先合并分格书写，再匹配）
+    for line in raw.split('\n')[:6]:
+        cand = _squash_digit_gaps(line)
+        for m in re.finditer(r'(?<!\d)(\d{6}|\d{4})(?!\d)', cand):
+            v = m.group(1)
+            # 4 位数字容易被年份、日期、分值误命中，跳过明显像年份/日期的
+            if len(v) == 4 and (v[:2] in ('19', '20') or v in ('0000',)):
+                continue
+            return v
+
     return None
 
 def translate_essay_to_chinese(text, logger=None):
@@ -3901,13 +4649,14 @@ def _llm_parse_paper_structure(full_text: str) -> dict:
 
 若某部分无法从正文推断，可省略或给空数组/空对象。只输出一个合法 JSON，不要 markdown 代码块包裹。"""
     try:
-        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=30.0)
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=60.0)
         response = client.chat.completions.create(
-            model=minimax_model,
+            model=llm_text_model,
             messages=[
                 {"role": "user", "content": prompt + "\n\n" + full_text[:2500]}
             ],
-            max_tokens=4000
+            max_tokens=4000,
+            **_text_model_kwargs()
         )
         content = (response.choices[0].message.content or "").strip()
         # 去掉可能的 markdown 代码块
@@ -4315,6 +5064,2601 @@ def process_image():
         error_trace = traceback.format_exc()
         print(f"处理图片失败: {error_msg}\n{error_trace}")
         return jsonify({'error': f'处理图片失败: {error_msg}'}), 500
+
+# ============================================================================
+# 三端分离：扫描端（Station）+ 用户端（Portal）
+# ----------------------------------------------------------------------------
+# 扫描端 /station ：仅本机设备可操作。负责扫描仪控制；扫描结果先进「临时区」，
+#                  在临时区内完成 学号矫正 / 区域分割 / 旋转 / 归属 等整理后再提交入库。
+# 用户端 /portal  ：任意设备浏览器访问。教师查看本班已扫描内容与批阅状态并生成评语，
+#                  学生查看自己的卷子图片与 AI 评语。
+# 原有 /         ：教师完整后台（组卷、阅卷、班级中心）保持不变。
+# ============================================================================
+
+import shutil
+import socket
+
+STAGING_DIR = os.path.join(DATA_DIR, 'staging')
+STAGING_IMAGES_DIR = os.path.join(STAGING_DIR, 'images')
+STAGING_INDEX_FILE = os.path.join(STAGING_DIR, 'index.json')
+RECORDS_DIR = os.path.join(DATA_DIR, 'records')
+RECORDS_IMAGES_DIR = os.path.join(RECORDS_DIR, 'images')
+RECORDS_INDEX_FILE = os.path.join(RECORDS_DIR, 'index.json')
+CLASS_OWNERS_FILE = os.path.join(CONFIG_DIR, 'class_owners.json')
+
+for _d in (STAGING_DIR, STAGING_IMAGES_DIR, RECORDS_DIR, RECORDS_IMAGES_DIR):
+    os.makedirs(_d, exist_ok=True)
+
+# 调试开关：设为 1 时允许非本机设备操作扫描端（默认关闭，扫描端仅本机可用）
+STATION_ALLOW_REMOTE = (os.getenv('STATION_ALLOW_REMOTE', '') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+_LOCAL_ADDRS = {'127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1'}
+PORTAL_PORT = int(os.getenv('PORTAL_PORT', '5001') or '5001')
+IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp')
+
+
+# ---------------------------- 通用小工具 ----------------------------
+
+def _is_local_request():
+    """扫描端写操作闸门：判断请求是否来自本机。"""
+    if STATION_ALLOW_REMOTE:
+        return True
+    addr = (request.remote_addr or '').strip()
+    return addr in _LOCAL_ADDRS
+
+
+def _now_str():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _read_json(path, default):
+    if not os.path.isfile(path):
+        return default
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception:
+        return default
+    if isinstance(default, list):
+        return data if isinstance(data, list) else default
+    if isinstance(default, dict):
+        return data if isinstance(data, dict) else default
+    return data
+
+
+def _write_json(path, data):
+    """原子写入 JSON，避免写入中途被打断导致索引损坏。"""
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def load_staging():
+    return _read_json(STAGING_INDEX_FILE, [])
+
+
+def save_staging(items):
+    _write_json(STAGING_INDEX_FILE, items)
+
+
+def load_records():
+    return _read_json(RECORDS_INDEX_FILE, [])
+
+
+def save_records(items):
+    _write_json(RECORDS_INDEX_FILE, items)
+
+
+def load_class_owners():
+    return _read_json(CLASS_OWNERS_FILE, {})
+
+
+def save_class_owners(data):
+    _write_json(CLASS_OWNERS_FILE, data)
+
+
+def _lan_portal_urls():
+    """列出本机可供其它设备访问的用户端地址，供扫描端展示。"""
+    ips = set()
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(('8.8.8.8', 80))
+            ips.add(s.getsockname()[0])
+        finally:
+            s.close()
+    except Exception:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None):
+            if info[0] == socket.AF_INET:
+                ips.add(info[4][0])
+    except Exception:
+        pass
+    urls = []
+    for ip in sorted(ips):
+        if ip.startswith('127.') or ip.startswith('169.254.'):
+            continue
+        urls.append('http://%s:%d/portal' % (ip, PORTAL_PORT))
+    return urls
+
+
+def _load_classes_roster():
+    """返回 [{name, students:[学号], student_names:{学号:姓名}}]，供扫描端选择归属。"""
+    classes = []
+    try:
+        if os.path.isdir(CLASSES_DIR):
+            names_map = get_student_names_map()
+            for item in sorted(os.listdir(CLASSES_DIR)):
+                p = os.path.join(CLASSES_DIR, item)
+                if not os.path.isdir(p) or item.startswith('.'):
+                    continue
+                raw = _read_json(os.path.join(STUDENTS_DIR, item + '.json'), [])
+                ids = [str(s) for s in raw] if isinstance(raw, list) else (
+                    [str(k) for k in raw.keys()] if isinstance(raw, dict) else [])
+                classes.append({
+                    'name': item,
+                    'students': ids,
+                    'student_names': {i: names_map.get(i, '') for i in ids},
+                })
+    except Exception:
+        pass
+    return classes
+
+
+def _open_image(path):
+    """打开图片并统一转为 RGB，兼容透明通道与调色板模式。"""
+    img = Image.open(path)
+    if img.mode == 'P':
+        img = img.convert('RGBA')
+    if img.mode in ('RGBA', 'LA'):
+        bg = Image.new('RGB', img.size, (255, 255, 255))
+        bg.paste(img, mask=img.split()[-1])
+        img = bg
+    elif img.mode != 'RGB':
+        img = img.convert('RGB')
+    return img
+
+
+def _transform_image(img, rotation=0, crop=None):
+    """按旋转角度与归一化裁剪框处理图片。crop 为 {x,y,w,h}（0~1 相对坐标）。"""
+    try:
+        rot = int(rotation or 0) % 360
+    except Exception:
+        rot = 0
+    if rot in (90, 180, 270):
+        img = img.rotate(-rot, expand=True)
+    if isinstance(crop, dict):
+        try:
+            w, h = img.size
+            x = max(0.0, min(1.0, float(crop.get('x', 0))))
+            y = max(0.0, min(1.0, float(crop.get('y', 0))))
+            cw = max(0.01, min(1.0 - x, float(crop.get('w', 1))))
+            ch = max(0.01, min(1.0 - y, float(crop.get('h', 1))))
+            box = (int(x * w), int(y * h), int((x + cw) * w), int((y + ch) * h))
+            if box[2] - box[0] > 8 and box[3] - box[1] > 8:
+                img = img.crop(box)
+        except Exception:
+            pass
+    return img
+
+
+def _norm_region(region, index=None):
+    """校验并归一化一个区域框，返回 {id,label,x,y,w,h} 或 None。
+
+    区域框用 0~1 的相对坐标，与图片分辨率无关，换 dpi 后依然有效。
+    """
+    if not isinstance(region, dict):
+        return None
+    try:
+        x = max(0.0, min(1.0, float(region.get('x', 0))))
+        y = max(0.0, min(1.0, float(region.get('y', 0))))
+        w = max(0.0, min(1.0, float(region.get('w', 0))))
+        h = max(0.0, min(1.0, float(region.get('h', 0))))
+    except (TypeError, ValueError):
+        return None
+    w = min(w, 1.0 - x)
+    h = min(h, 1.0 - y)
+    if w <= 0.005 or h <= 0.005:
+        return None
+    rid = str(region.get('id') or '').strip()
+    if not rid:
+        rid = 'r%d' % ((index + 1) if index is not None else 1)
+    label = str(region.get('label') or '').strip()
+    if not label:
+        label = '区域%s' % ((index + 1) if index is not None else 1)
+    return {'id': rid, 'label': label[:40],
+            'x': round(x, 4), 'y': round(y, 4), 'w': round(w, 4), 'h': round(h, 4)}
+
+
+def _clean_regions(regions):
+    """批量清洗区域数组：丢弃无效框，按有效顺序补齐 id/label，保持用户顺序。
+
+    幂等：已带 id/label 的区域再次清洗时保持原值，保证档案里存的与批阅时读的一致。
+    """
+    out = []
+    if not isinstance(regions, list):
+        return out
+    for r in regions:
+        nr = _norm_region(r, len(out))
+        if nr:
+            out.append(nr)
+    return out[:24]
+
+
+def _item_regions(item):
+    """取条目的有效区域：优先 regions，其次兼容旧的单个 crop；都没有则返回 []（整页）。"""
+    if not isinstance(item, dict):
+        return []
+    regions = _clean_regions(item.get('regions'))
+    if regions:
+        return regions
+    crop = _norm_region(item.get('crop'), 0)
+    if crop:
+        return [dict(crop, id='r1', label='选区')]
+    return []
+
+
+def _find_region(regions, region_id):
+    for r in regions or []:
+        if str(r.get('id')) == str(region_id):
+            return r
+    return None
+
+
+def _staging_image_path(item):
+    """解析临时区条目对应的真实图片路径，并做目录逃逸校验。"""
+    rel = (item or {}).get('image') or ''
+    p = os.path.join(STAGING_DIR, rel)
+    try:
+        if os.path.isfile(p) and os.path.realpath(p).startswith(os.path.realpath(STAGING_IMAGES_DIR)):
+            return p
+    except Exception:
+        pass
+    return None
+
+
+def _records_image_path(rec):
+    """解析档案记录对应的真实图片路径，并做目录逃逸校验。"""
+    rel = (rec or {}).get('image') or ''
+    p = os.path.join(RECORDS_DIR, rel)
+    try:
+        if os.path.isfile(p) and os.path.realpath(p).startswith(os.path.realpath(RECORDS_IMAGES_DIR)):
+            return p
+    except Exception:
+        pass
+    return None
+
+
+def _find_by_id(items, item_id):
+    for it in items:
+        if it.get('id') == item_id:
+            return it
+    return None
+
+
+def _run_scanner(scan_output_dir, next_filename):
+    """调用 NAPS2 扫描，返回 (ok, message, [页面路径...])。
+
+    与后台 /api/scan 完全对齐的三件事（2026-10-19 修正）：
+      1) 显式传 --source/--pagesize/--dpi/--bitdepth：NAPS2 默认档位是 100dpi+Letter，
+         扫试卷时手写字会糊，直接影响后续视觉模型识别与评分准确率；
+      2) 加 --noprofile：避免图形界面里残留的「等待输入/自动保存」档案让命令行扫描卡住；
+      3) 复用模块级 _SCAN_LOCK：同一台扫描仪同时只能有一次扫描会话，否则 TWAIN 会报
+         MaxConnections 并把设备拖入「无响应」状态（只能拔插 USB 恢复）。
+    """
+    import subprocess
+    naps2_path = get_naps2_path()
+    if not os.path.exists(naps2_path):
+        return False, ('未找到 NAPS2 扫描程序，无法扫描。当前配置路径：' + str(naps2_path) +
+                       '。请在后台「文件管理」的扫描设置中配置正确路径。'), []
+    if not _SCAN_LOCK.acquire(blocking=False):
+        return False, ('已有一次扫描正在进行中，请等本次扫描结束后再点击。\n\n'
+                       '（同一台扫描仪同时只能扫描一次，连续快速点击会让设备被占用而卡住。）'), []
+    try:
+        os.makedirs(scan_output_dir, exist_ok=True)
+        scan_output_path = os.path.join(scan_output_dir, next_filename)
+        driver, device = get_naps2_scan_target()
+        scan_opts = get_naps2_scan_options()
+        cmd = [naps2_path, '-o', scan_output_path, '-f', '-v', '--noprofile']
+        if driver:
+            cmd += ['--driver', driver]
+        if device:
+            cmd += ['--device', device]
+        for key, flag in (('source', '--source'), ('pagesize', '--pagesize'),
+                          ('dpi', '--dpi'), ('bitdepth', '--bitdepth')):
+            val = scan_opts.get(key)
+            if val not in (None, ''):
+                cmd += [flag, str(val)]
+        print('执行扫描命令: %s' % ' '.join(cmd), flush=True)
+
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            raw_out, raw_err = proc.communicate(timeout=180)
+        except subprocess.TimeoutExpired:
+            # 超时必须结束子进程，否则 NAPS2 会一直占用扫描仪，导致后续扫描持续失败
+            try:
+                proc.kill()
+                proc.communicate(timeout=10)
+            except Exception:
+                pass
+            return False, '扫描超时，请检查扫描仪连接或重试。', []
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            raise
+        return _finish_scan(proc, scan_output_dir, next_filename, raw_out, raw_err)
+    finally:
+        try:
+            _SCAN_LOCK.release()
+        except RuntimeError:
+            pass
+
+
+def _finish_scan(proc, scan_output_dir, next_filename, raw_out, raw_err):
+    """扫描进程结束后统一收尾：解码输出、收集页面、生成中文排查提示。"""
+
+    combined = (_decode_scan_output(raw_out) + '\n' + _decode_scan_output(raw_err)).strip()
+    print('扫描命令返回码: %s' % proc.returncode)
+    if combined:
+        print('扫描命令输出: %s' % combined)
+
+    pages = _collect_scan_pages(scan_output_dir, next_filename)
+    if proc.returncode != 0 or not pages:
+        info = _humanize_scan_error(combined, proc.returncode)
+        hints = '\n'.join('%d. %s' % (i + 1, h) for i, h in enumerate(info['hints']))
+        driver, _device = get_naps2_scan_target()
+        drv_used, devices = _list_scan_devices(get_naps2_path(), driver)
+        if devices:
+            dev_text = ('\n\n系统可识别的扫描设备（%s 驱动）：\n' % drv_used) + '\n'.join('· ' + d for d in devices)
+        else:
+            dev_text = '\n\n未能列出任何扫描设备，请检查扫描仪电源与 USB 连接。'
+        detail = combined or '（扫描仪无任何输出，可能未响应或已休眠）'
+        return False, '%s\n\n请按以下步骤排查：\n%s%s\n\n技术详情：%s' % (info['title'], hints, dev_text, detail), []
+    return True, '', pages
+
+
+def _new_staging_item(image_path, source='scan', original_name=''):
+    """把一张图片登记进临时区，返回新条目（图片会被移动到临时区目录）。"""
+    item_id = uuid.uuid4().hex
+    ext = os.path.splitext(image_path)[1].lower()
+    if ext not in IMAGE_EXTS:
+        ext = '.png'
+    dest_name = item_id + ext
+    dest_path = os.path.join(STAGING_IMAGES_DIR, dest_name)
+    if os.path.abspath(image_path) != os.path.abspath(dest_path):
+        shutil.move(image_path, dest_path)
+    item = {
+        'id': item_id,
+        'image': 'images/' + dest_name,
+        'original_name': original_name or os.path.basename(image_path),
+        'source': source,
+        'created_at': _now_str(),
+        'student_id': '',
+        'student_id_guess': '',
+        'class_name': '',
+        'task_id': '',
+        'subject': '',
+        'crop': None,
+        'regions': [],
+        'rotation': 0,
+        'ocr_text': '',
+        'note': '',
+        'status': 'staged',
+    }
+    # 入临时区就做一次本地卷面体检（毫秒级、不花钱），
+    # 老师扫完立刻能看到「这张字太小 / 这张偏糊」，不必等批阅结果。
+    q = image_quality_metrics(dest_path)
+    if q:
+        item['quality'] = q
+    return item
+
+
+def _student_id_candidates(guess, class_name=''):
+    """依据 OCR 猜测给出学号候选：精确命中优先，其次同班同前缀的近似学号。
+
+    4 位与 6 位学号都支持；同班判定按「学号前缀长度」（4 位取前 2 位、6 位取前 4 位）。
+    """
+    if not guess:
+        return []
+    g = str(guess).strip()
+    prefix_len = 4 if len(g) == 6 else (2 if len(g) == 4 else 0)
+    cands = []
+    for c in _load_classes_roster():
+        if class_name and c['name'] != class_name:
+            continue
+        for sid in c['students']:
+            name = (c.get('student_names') or {}).get(sid, '')
+            if sid == g:
+                cands.append({'student_id': sid, 'class_name': c['name'], 'name': name, 'score': 100})
+            elif prefix_len and len(sid) == len(g) and sid[:prefix_len] == g[:prefix_len]:
+                diff = sum(1 for a, b in zip(sid, g) if a != b)
+                cands.append({'student_id': sid, 'class_name': c['name'], 'name': name,
+                              'score': 90 - diff, 'diff_positions': diff})
+    cands.sort(key=lambda x: (-x['score'], x['student_id']))
+    return cands[:8]
+
+
+def _commit_staging_item(item, student_id, class_name, task_id, note, crop, rotation,
+                         regions=None, subject='', extra=None):
+    """把临时区条目正式入库到档案库。返回 (ok, record_or_error)。
+
+    regions 为区域数组（一页多块，如小练习里的某几道题）；为空表示整页当作一份。
+    只要 regions 非空，crop 就不再参与入库（区域优先）。
+    extra 为附加字段（batch_id / essay / topic / auto 等），合并进记录，供门户与流水线使用。
+    """
+    src = _staging_image_path(item)
+    if not src:
+        return False, '图片文件缺失，无法提交'
+    student_id = (student_id or '').strip()
+    class_name = (class_name or '').strip()
+    if not class_name and student_id:
+        class_name = student_id_to_class_code(student_id) or ''
+    if not class_name:
+        return False, '请先指定班级（或填写学号，系统会按学号自动归档：4 位学号前 2 位是班级，6 位学号前 4 位是班级）'
+
+    clean_regions = _clean_regions(regions if regions is not None else item.get('regions'))
+    # 区域优先：有区域时整页原样保存，裁切在各区域取图时按需进行，便于日后调整
+    effective_crop = None if clean_regions else crop
+
+    rec_id = uuid.uuid4().hex
+    ext = os.path.splitext(src)[1].lower() or '.png'
+    dest_name = rec_id + ext
+    dest_path = os.path.join(RECORDS_IMAGES_DIR, dest_name)
+    try:
+        img = _open_image(src)
+        _transform_image(img, rotation=rotation, crop=effective_crop).save(dest_path)
+    except Exception as e:
+        return False, '图片保存失败：%s' % e
+    try:
+        os.remove(src)
+    except OSError:
+        pass
+
+    tasks = load_tasks()
+    task = next((t for t in tasks if t.get('id') == task_id), None)
+    names = get_student_names_map()
+    # 后台线程里没有请求上下文，session 不可用，必须容错
+    try:
+        role, uid = session.get('user_role'), session.get('user_id')
+    except Exception:
+        role, uid = None, None
+    owner = ''
+    if role in ('teacher', 'admin'):
+        owner = str(uid or '')
+    subj_key = str(subject or '').strip()
+    subj = _get_grading_subject(subj_key)
+    rec = {
+        'id': rec_id,
+        'image': 'images/' + dest_name,
+        'class_name': class_name,
+        'student_id': student_id,
+        'student_name': names.get(student_id, '') if student_id else '',
+        'task_id': task_id or '',
+        'task_title': (task or {}).get('title', ''),
+        'subject': subj_key,
+        'subject_name': subj.get('name', ''),
+        'max_score': subj.get('max_score'),
+        'crop': effective_crop,
+        'regions': clean_regions,
+        'rotation': int(rotation or 0) % 360,
+        'note': note or '',
+        'source': item.get('source', 'scan'),
+        'created_at': item.get('created_at') or _now_str(),
+        'submitted_at': _now_str(),
+        'owner': owner,
+        'status': 'pending',
+        'ai_comment': '',
+        'score_text': '',
+        'essay_text': '',
+        'grading': None,
+        'graded_at': '',
+    }
+    if isinstance(extra, dict) and extra:
+        rec.update({k: v for k, v in extra.items() if k not in ('id', 'image')})
+    records = load_records()
+    records.insert(0, rec)
+    save_records(records)
+
+    if owner:
+        owners = load_class_owners()
+        lst = owners.get(class_name) or []
+        if owner not in lst:
+            lst.append(owner)
+        owners[class_name] = lst
+        save_class_owners(owners)
+
+    # 若归属到某个阅卷任务，同步一份到该任务的试卷目录，兼容原有阅卷流程
+    if task_id:
+        try:
+            task_dir = os.path.join(TASK_PAPERS_DIR, task_id)
+            os.makedirs(task_dir, exist_ok=True)
+            shutil.copyfile(dest_path, os.path.join(task_dir, dest_name))
+        except Exception:
+            pass
+    return True, rec
+
+
+# ---------------------------- 扫描端页面与接口 ----------------------------
+
+@app.route('/station')
+def station_page():
+    """扫描端工作台页面（设计上仅本机使用）。"""
+    return render_template('station.html')
+
+
+@app.route('/api/station/context')
+def station_context():
+    """扫描端初始化信息：是否本机、扫描配置、班级名单、任务列表、局域网门户地址。"""
+    is_local = _is_local_request()
+    user = None
+    if session.get('user_id'):
+        user = {'id': session.get('user_id'), 'name': session.get('user_name', ''),
+                'role': session.get('user_role', '')}
+    tasks = [{'id': t.get('id'), 'title': t.get('title'), 'class_names': t.get('class_names') or []}
+             for t in load_tasks() if t.get('id')]
+    return jsonify({
+        'is_local': is_local,
+        'remote_addr': request.remote_addr,
+        'scan_output_dir': get_scan_output_dir(),
+        'naps2_path': get_naps2_path(),
+        'classes': _load_classes_roster(),
+        'tasks': tasks,
+        'grading': grading_subject_options(),
+        'user': user,
+        'portal_urls': _lan_portal_urls(),
+        'staging_count': len(load_staging()),
+    })
+
+
+@app.route('/api/station/scan', methods=['POST'])
+def station_scan():
+    """点击扫描：驱动扫描仪出图（支持一次多页），随后立即自动起批。
+
+    默认 auto=1：扫完直接进入「识别表头 → 自动分班 → 批阅 → 入库」，老师不需要再做任何操作；
+    传 auto=0 则退化为旧流程（只进临时区，由老师手动整理后提交）。
+    """
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    req = request.get_json(silent=True) or {}
+    auto = req.get('auto', True) not in (False, 0, '0', 'false', 'False')
+    subject = str(req.get('subject') or 'english_essay').strip() or 'english_essay'
+    task_id = str(req.get('task_id') or '').strip()
+    try:
+        scan_output_dir = get_scan_output_dir()
+        next_filename = get_next_scan_filename(scan_output_dir)
+        ok, msg, pages = _run_scanner(scan_output_dir, next_filename)
+        if not ok:
+            return jsonify({'error': msg}), 500
+        items = load_staging()
+        added = []
+        for p in pages:
+            item = _new_staging_item(p, source='scan', original_name=os.path.basename(p))
+            items.insert(0, item)
+            added.append(item)
+        save_staging(items)
+        resp = {'ok': True, 'items': added, 'added': added, 'count': len(added),
+                'filename': os.path.basename(pages[0]) if pages else '', 'auto': auto}
+        if auto and added:
+            b = _start_auto_batch([it['id'] for it in added], subject=subject, task_id=task_id)
+            resp['batch'] = {'id': b['id'], 'job': b.get('job')}
+        return jsonify(resp)
+    except Exception as e:
+        import traceback
+        print('扫描失败: %s\n%s' % (e, traceback.format_exc()))
+        return jsonify({'error': '扫描失败：%s' % e}), 500
+
+
+@app.route('/api/station/jobs/<batch_id>')
+def station_job(batch_id):
+    """查询自动批阅进度（扫描端轮询）。"""
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    b = _load_batch(batch_id)
+    if not b:
+        return jsonify({'error': '批次不存在'}), 404
+    return jsonify({
+        'id': b['id'],
+        'job': b.get('job') or {},
+        'topic': b.get('topic') or {},
+        'results': b.get('results') or [],
+        'record_ids': b.get('record_ids') or [],
+        'failed': b.get('failed') or [],
+        'corpus_ready': bool((b.get('corpus') or {}).get('phrases')),
+        'awards': (b.get('awards') or {}).get('awards') or [],
+    })
+
+
+@app.route('/api/station/jobs/<batch_id>/retry', methods=['POST'])
+def station_job_retry(batch_id):
+    """重跑某个批次（例如模型临时超时）。"""
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    b = _load_batch(batch_id)
+    if not b:
+        return jsonify({'error': '批次不存在'}), 404
+    t = threading.Thread(target=_auto_pipeline, args=(batch_id,), daemon=True)
+    t.start()
+    return jsonify({'ok': True, 'id': batch_id})
+
+
+@app.route('/api/station/import', methods=['POST'])
+def station_import():
+    """本机导入图片进临时区（无扫描仪或补扫时使用）。
+
+    传 auto=1（表单字段或 ?auto=1）时，导入后直接起自动批阅，与扫描同一条流水线。
+    """
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    files = request.files.getlist('files') or ([request.files['file']] if 'file' in request.files else [])
+    if not files:
+        return jsonify({'error': '请选择要导入的图片'}), 400
+    auto = str(request.form.get('auto') or request.args.get('auto') or '').lower() in ('1', 'true', 'yes')
+    subject = str(request.form.get('subject') or request.args.get('subject') or 'english_essay').strip()
+    task_id = str(request.form.get('task_id') or request.args.get('task_id') or '').strip()
+    items = load_staging()
+    added = []
+    tmp_dir = os.path.join(STAGING_DIR, '_incoming')
+    os.makedirs(tmp_dir, exist_ok=True)
+    try:
+        for f in files:
+            if not f or not f.filename:
+                continue
+            ext = os.path.splitext(f.filename)[1].lower()
+            if ext not in IMAGE_EXTS:
+                ext = '.png'
+            tmp_path = os.path.join(tmp_dir, uuid.uuid4().hex + ext)
+            f.save(tmp_path)
+            item = _new_staging_item(tmp_path, source='upload', original_name=f.filename)
+            items.insert(0, item)
+            added.append(item)
+        save_staging(items)
+    except Exception as e:
+        return jsonify({'error': '导入失败：%s' % e}), 500
+    finally:
+        try:
+            if os.path.isdir(tmp_dir) and not os.listdir(tmp_dir):
+                os.rmdir(tmp_dir)
+        except OSError:
+            pass
+    resp = {'ok': True, 'added': added, 'count': len(added), 'auto': auto}
+    if auto and added:
+        b = _start_auto_batch([it['id'] for it in added], subject=subject, task_id=task_id)
+        resp['batch'] = {'id': b['id'], 'job': b.get('job')}
+    return jsonify(resp)
+
+
+@app.route('/api/station/staging', methods=['GET'])
+def station_staging_list():
+    """临时区列表（仅本机可读，避免学生/远程端看到未整理的原图）。"""
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    items = sorted(load_staging(), key=lambda x: x.get('created_at', ''), reverse=True)
+    # 只返回仍能读到图片的条目，避免死链
+    alive = []
+    for it in items:
+        it = dict(it)
+        it['has_image'] = bool(_staging_image_path(it))
+        # 老条目没有卷面体检数据：读列表时补算一次（本地算法，毫秒级），保证界面一致
+        if not it.get('quality') and it['has_image']:
+            q = image_quality_metrics(_staging_image_path(it))
+            if q:
+                it['quality'] = q
+        alive.append(it)
+    return jsonify({'items': alive, 'count': len(alive)})
+
+
+@app.route('/api/station/staging/<item_id>/image')
+def station_staging_image(item_id):
+    """临时区图片。
+
+    默认原图；?rotated=1 仅旋转；?processed=1 旋转+（单 crop 时）裁剪；
+    ?region=<区域id> 输出该区域的裁剪图（一页多区域时使用）。
+    """
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    item = _find_by_id(load_staging(), item_id)
+    if not item:
+        return jsonify({'error': '临时区条目不存在'}), 404
+    path = _staging_image_path(item)
+    if not path:
+        return jsonify({'error': '图片文件缺失'}), 404
+    region_id = (request.args.get('region') or '').strip()
+    if region_id:
+        region = _find_region(_clean_regions(item.get('regions')), region_id)
+        if not region:
+            return jsonify({'error': '区域不存在'}), 404
+        try:
+            img = _transform_image(_open_image(path), item.get('rotation', 0), region)
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            return Response(buf.getvalue(), mimetype='image/png')
+        except Exception as e:
+            return jsonify({'error': '区域取图失败：%s' % e}), 500
+    if request.args.get('processed'):
+        try:
+            # 有区域时整页不再裁切（裁切交给 ?region=），但仍应用旋转
+            crop = None if _clean_regions(item.get('regions')) else item.get('crop')
+            img = _transform_image(_open_image(path), item.get('rotation', 0), crop)
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            return Response(buf.getvalue(), mimetype='image/png')
+        except Exception:
+            pass
+    if request.args.get('rotated'):
+        try:
+            img = _transform_image(_open_image(path), item.get('rotation', 0), None)
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            return Response(buf.getvalue(), mimetype='image/png')
+        except Exception:
+            pass
+    return send_from_directory(STAGING_IMAGES_DIR, os.path.basename(path))
+
+
+@app.route('/api/station/staging/<item_id>', methods=['POST'])
+def station_staging_update(item_id):
+    """更新临时区条目：学号、班级、任务、裁剪区域、旋转、备注。"""
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    data = request.get_json(silent=True) or {}
+    items = load_staging()
+    item = _find_by_id(items, item_id)
+    if not item:
+        return jsonify({'error': '临时区条目不存在'}), 404
+    if 'student_id' in data:
+        sid = str(data.get('student_id') or '').strip()
+        item['student_id'] = sid
+        if sid and not (data.get('class_name') or item.get('class_name')):
+            item['class_name'] = student_id_to_class_code(sid) or item.get('class_name', '')
+    if 'class_name' in data:
+        item['class_name'] = str(data.get('class_name') or '').strip()
+    if 'task_id' in data:
+        item['task_id'] = str(data.get('task_id') or '').strip()
+    if 'note' in data:
+        item['note'] = str(data.get('note') or '')
+    if 'rotation' in data:
+        try:
+            item['rotation'] = int(data.get('rotation') or 0) % 360
+        except Exception:
+            pass
+    if 'crop' in data:
+        crop = data.get('crop')
+        if isinstance(crop, dict) and all(k in crop for k in ('x', 'y', 'w', 'h')):
+            try:
+                item['crop'] = {k: max(0.0, min(1.0, float(crop[k]))) for k in ('x', 'y', 'w', 'h')}
+            except Exception:
+                item['crop'] = None
+        else:
+            item['crop'] = None
+    if 'regions' in data:
+        item['regions'] = _clean_regions(data.get('regions'))
+        # 一旦有了多区域，旧的单 crop 自动让位，避免两套坐标互相干扰
+        if item['regions']:
+            item['crop'] = None
+    if 'subject' in data:
+        item['subject'] = str(data.get('subject') or '').strip()
+    save_staging(items)
+    return jsonify({'ok': True, 'item': item})
+
+
+@app.route('/api/station/staging/<item_id>/rotate', methods=['POST'])
+def station_staging_rotate(item_id):
+    """顺时针旋转 90 度（在临时区内累积）。"""
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    data = request.get_json(silent=True) or {}
+    step = int(data.get('step', 90))
+    items = load_staging()
+    item = _find_by_id(items, item_id)
+    if not item:
+        return jsonify({'error': '临时区条目不存在'}), 404
+    item['rotation'] = (int(item.get('rotation', 0)) + step) % 360
+    save_staging(items)
+    return jsonify({'ok': True, 'item': item})
+
+
+@app.route('/api/station/staging/<item_id>/detect_id', methods=['POST'])
+def station_detect_id(item_id):
+    """识别学号：调用视觉模型读图，抽取 6 位学号并给出候选（含名单校正）。"""
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    data = request.get_json(silent=True) or {}
+    items = load_staging()
+    item = _find_by_id(items, item_id)
+    if not item:
+        return jsonify({'error': '临时区条目不存在'}), 404
+    path = _staging_image_path(item)
+    if not path:
+        return jsonify({'error': '图片文件缺失'}), 404
+    try:
+        img = _open_image(path)
+        img = _transform_image(img, item.get('rotation', 0), None)
+        text = llm_ocr_recognize(img) or ''
+    except Exception as e:
+        return jsonify({'error': '识别失败：%s' % e}), 500
+    guess = extract_student_id(text) or ''
+    item['ocr_text'] = text[:4000]
+    item['student_id_guess'] = guess
+    if guess:
+        item['student_id'] = guess
+        if not item.get('class_name'):
+            item['class_name'] = student_id_to_class_code(guess) or ''
+    save_staging(items)
+    if not text:
+        return jsonify({'ok': False, 'error': '未能识别出文字，请检查图片或手动填写学号', 'item': item,
+                        'candidates': []})
+    return jsonify({'ok': True, 'student_id': guess, 'ocr_text': item['ocr_text'],
+                    'item': item, 'candidates': _student_id_candidates(guess, item.get('class_name', ''))})
+
+
+@app.route('/api/station/handwriting', methods=['POST'])
+def station_handwriting():
+    """字迹体检（与改卷无关）：评估一份手写卷「机器读起来顺不顺」。
+
+    入参任选：{"item_id": 临时区条目} / {"record_id": 已归档记录}。
+    返回：本地量化指标 + 模型逐行转写（读不准的词标出）+ 可读性等级 A~D。
+    """
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    data = request.get_json(silent=True) or {}
+    path, ref = None, None
+
+    iid = str(data.get('item_id') or '').strip()
+    rid = str(data.get('record_id') or '').strip()
+    if iid:
+        item = _find_by_id(load_staging(), iid)
+        if not item:
+            return jsonify({'error': '临时区条目不存在'}), 404
+        path = _staging_image_path(item)
+        ref = item
+    elif rid:
+        rec = next((r for r in load_records() if r.get('id') == rid), None)
+        if not rec:
+            return jsonify({'error': '记录不存在'}), 404
+        path = _records_image_path(rec)
+        ref = rec
+    if not path:
+        return jsonify({'error': '图片文件缺失'}), 404
+
+    out, err = assess_handwriting(path, model=data.get('model') or None)
+    if err and not out.get('local'):
+        return jsonify({'ok': False, 'error': err}), 500
+    # 顺便把结果记进条目/记录，避免重复开销
+    if isinstance(ref, dict):
+        try:
+            if iid:
+                items = load_staging()
+                for it in items:
+                    if it.get('id') == iid:
+                        it['handwriting'] = {k: out.get(k) for k in
+                                             ('score', 'grade', 'grade_label', 'unsure_ratio', 'tips', 'local')}
+                save_staging(items)
+            else:
+                brief = {k: out.get(k) for k in
+                         ('score', 'grade', 'grade_label', 'unsure_ratio', 'tips', 'local')}
+                recs = load_records()
+                hit = False
+                for r in recs:
+                    if r.get('id') == rid:
+                        r['handwriting'] = brief
+                        hit = True
+                if hit:
+                    save_records(recs)
+        except Exception:
+            pass
+    return jsonify(dict(out, ok=True, error=err or ''))
+
+
+@app.route('/api/station/staging/<item_id>', methods=['DELETE'])
+def station_staging_delete(item_id):
+    """丢弃临时区条目（连同图片一并删除）。"""
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    items = load_staging()
+    item = _find_by_id(items, item_id)
+    if not item:
+        return jsonify({'error': '临时区条目不存在'}), 404
+    path = _staging_image_path(item)
+    if path:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    save_staging([it for it in items if it.get('id') != item_id])
+    return jsonify({'ok': True, 'id': item_id})
+
+
+@app.route('/api/station/staging/<item_id>/submit', methods=['POST'])
+def station_submit(item_id):
+    """把一张整理好的试卷从临时区提交入库（此后用户端可见）。"""
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    data = request.get_json(silent=True) or {}
+    items = load_staging()
+    item = _find_by_id(items, item_id)
+    if not item:
+        return jsonify({'error': '临时区条目不存在'}), 404
+    ok, payload = _commit_staging_item(
+        item,
+        data.get('student_id', item.get('student_id', '')),
+        data.get('class_name', item.get('class_name', '')),
+        data.get('task_id', item.get('task_id', '')),
+        data.get('note', item.get('note', '')),
+        data.get('crop', item.get('crop')),
+        data.get('rotation', item.get('rotation', 0)),
+        data.get('regions', item.get('regions')),
+        data.get('subject', item.get('subject', '')),
+    )
+    if not ok:
+        return jsonify({'error': payload}), 400
+    save_staging([it for it in items if it.get('id') != item_id])
+    return jsonify({'ok': True, 'record': payload})
+
+
+@app.route('/api/station/staging/submit_all', methods=['POST'])
+def station_submit_all():
+    """批量提交：仅提交已填学号（或已选班级）的条目，其余留在临时区。"""
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    data = request.get_json(silent=True) or {}
+    default_task = str(data.get('task_id') or '').strip()
+    default_class = str(data.get('class_name') or '').strip()
+    items = load_staging()
+    submitted, skipped, remain = [], [], []
+    for item in items:
+        sid = str(item.get('student_id') or '').strip()
+        cls = str(item.get('class_name') or '').strip() or default_class or (student_id_to_class_code(sid) or '')
+        if not cls and not sid:
+            skipped.append({'id': item.get('id'), 'reason': '未填写学号或班级'})
+            remain.append(item)
+            continue
+        ok, payload = _commit_staging_item(
+            item, sid, cls, str(item.get('task_id') or '').strip() or default_task,
+            item.get('note', ''), item.get('crop'), item.get('rotation', 0),
+            item.get('regions'), item.get('subject', ''))
+        if ok:
+            submitted.append(payload)
+        else:
+            skipped.append({'id': item.get('id'), 'reason': payload})
+            remain.append(item)
+    save_staging(remain)
+    return jsonify({'ok': True, 'submitted': submitted, 'skipped': skipped,
+                    'submitted_count': len(submitted), 'remaining': len(remain)})
+
+
+@app.route('/api/station/staging/clear', methods=['POST'])
+def station_staging_clear():
+    """清空临时区（全部丢弃，不可恢复）。"""
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    items = load_staging()
+    for item in items:
+        path = _staging_image_path(item)
+        if path:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    save_staging([])
+    return jsonify({'ok': True, 'cleared': len(items)})
+
+
+# ---------------------------- 用户端页面与接口 ----------------------------
+
+def _teacher_visible_classes():
+    """返回当前教师可见的班级集合；None 表示不限（管理员，或尚未建立归属数据）。"""
+    role = session.get('user_role')
+    uid = str(session.get('user_id') or '')
+    if role == 'admin':
+        return None
+    owners = load_class_owners()
+    owned = {c for c, lst in owners.items() if uid and uid in (lst or [])}
+    owned |= {c for c, lst in owners.items() if not lst}
+    return owned or None
+
+
+def _filter_records_for_session(records, class_name='', student_id='', task_id='', status=''):
+    role = session.get('user_role')
+    uid = str(session.get('user_id') or '')
+    if role == 'student':
+        records = [r for r in records if str(r.get('student_id') or '') == uid]
+    else:
+        scope = _teacher_visible_classes()
+        if scope is not None:
+            records = [r for r in records if (r.get('class_name') or '') in scope]
+    if class_name:
+        records = [r for r in records if (r.get('class_name') or '') == class_name]
+    if student_id:
+        records = [r for r in records if (r.get('student_id') or '') == student_id]
+    if task_id:
+        records = [r for r in records if (r.get('task_id') or '') == task_id]
+    if status:
+        records = [r for r in records if (r.get('status') or 'pending') == status]
+    return records
+
+
+def _public_record(rec):
+    out = dict(rec)
+    # 姓名以当前名单为准，若记录里没有则实时补全（名单更新后可自愈）
+    sid = str(out.get('student_id') or '')
+    if sid and not out.get('student_name'):
+        out['student_name'] = get_student_names_map().get(sid, '')
+    out['image_url'] = '/api/portal/records/%s/image' % rec.get('id')
+    out['essay_image_url'] = '/api/portal/records/%s/image?processed=1' % rec.get('id')
+
+    grading = out.get('grading') if isinstance(out.get('grading'), dict) else None
+    items = (grading or {}).get('items') or []
+    regions = _clean_regions(out.get('regions'))
+    if regions:
+        # 一页多区域：前端只消费 pieces，避免在模板里反复对齐坐标与评分
+        by_id = {str(i.get('id')): i for i in items}
+        pieces = []
+        for r in regions:
+            it = by_id.get(str(r['id']), {})
+            pieces.append({
+                'id': r['id'],
+                'label': r['label'],
+                'score': it.get('score'),
+                'max_score': it.get('max_score'),
+                'level': it.get('level', ''),
+                'comment': it.get('comment', ''),
+                'text': it.get('text', ''),
+                'strengths': it.get('strengths') or [],
+                'issues': it.get('issues') or [],
+                'image_url': '/api/portal/records/%s/image?region=%s' % (rec.get('id'), r['id']),
+            })
+        out['pieces'] = pieces
+    else:
+        out['pieces'] = []
+    out['score'] = (grading or {}).get('total')
+    out['max_total'] = (grading or {}).get('max_total')
+    out['level'] = (grading or {}).get('level', '')
+    if 'score_text' not in out:
+        out['score_text'] = ''
+    # 英语作文：结构化学情 + 批次级材料（话题语料、同学佳句）
+    essay = out.get('essay') if isinstance(out.get('essay'), dict) else None
+    out['essay'] = essay
+    bid = str(out.get('batch_id') or '')
+    if bid:
+        b = _load_batch(bid)
+        if b:
+            out['batch'] = {
+                'id': bid,
+                'topic': b.get('topic') or {},
+                'corpus': b.get('corpus') or {},
+                'awards': (b.get('awards') or {}).get('awards') or [],
+                'award_standard': (b.get('awards') or {}).get('standard', ''),
+            }
+    return out
+
+
+GRADE_JSON_RULES = (
+    '严格只输出一个 JSON 对象（不要 Markdown 代码块，不要任何解释文字）：\n'
+    '{\n'
+    '  "text": "图片中识别出的全部文字/算式，保留换行；没有文字则为空字符串",\n'
+    '  "score": 数字或 null,\n'
+    '  "max_score": 数字,\n'
+    '  "level": "优秀|良好|合格|待改进",\n'
+    '  "strengths": ["具体亮点1", "具体亮点2"],\n'
+    '  "issues": ["具体问题1", "具体问题2"],\n'
+    '  "comment": "给学生本人的一段话"\n'
+    '}\n'
+    '评分按满分 {max_score} 分计。若图中内容无法判断（空白、严重模糊、与题目无关），'
+    'score 置为 null，并在 issues 中写清原因。\n'
+    'comment 写法：先用一句话肯定亮点，再指出 1-2 处具体可改进之处，最后给 1-3 条可执行建议；'
+    '语气温和、具体、有建设性，200 字以内；不要出现「系统」「AI」「学号」「分数」「模型」等字样。'
+)
+
+
+def _fmt_num(v):
+    """把 8.0 显示成 8，把 8.5 保留一位小数。"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    return str(int(f)) if f == int(f) else ('%.1f' % f)
+
+
+def _level_from_ratio(ratio):
+    if ratio is None:
+        return ''
+    if ratio >= 0.85:
+        return '优秀'
+    if ratio >= 0.70:
+        return '良好'
+    if ratio >= 0.60:
+        return '合格'
+    return '待改进'
+
+
+def _parse_grade_json(raw, default_max_score):
+    """解析模型返回的评分 JSON。容错：代码块包裹、前后废话、尾逗号、纯文本回退。"""
+    s = (raw or '').strip()
+    if not s:
+        return None
+    if s.startswith('```'):
+        s = re.sub(r'^```[a-zA-Z]*\s*', '', s)
+        s = re.sub(r'\s*```\s*$', '', s).strip()
+    data = None
+    start, end = s.find('{'), s.rfind('}')
+    if start >= 0 and end > start:
+        blob = s[start:end + 1]
+        try:
+            data = json.loads(blob)
+        except Exception:
+            try:
+                data = json.loads(re.sub(r',\s*([}\]])', r'\1', blob))
+            except Exception:
+                data = None
+    if not isinstance(data, dict):
+        # 模型没按契约返回：把原文当识别文本与评语，分数留空，仍然可用
+        return {'text': s, 'score': None, 'max_score': default_max_score, 'level': '',
+                'strengths': [], 'issues': [], 'comment': s[:800], 'parsed': False}
+
+    def _num(v):
+        if isinstance(v, bool) or v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            m = re.search(r'-?\d+(?:\.\d+)?', v)
+            if m:
+                try:
+                    return float(m.group())
+                except ValueError:
+                    return None
+        return None
+
+    def _strlist(v):
+        if isinstance(v, str):
+            v = [x for x in re.split(r'[\n；;]', v) if x.strip()]
+        if not isinstance(v, list):
+            return []
+        out = []
+        for x in v:
+            t = str(x).strip().lstrip('-•· ').strip()
+            if t:
+                out.append(t[:300])
+        return out[:8]
+
+    try:
+        mx = float(default_max_score or 100)
+    except (TypeError, ValueError):
+        mx = 100.0
+    mx_model = _num(data.get('max_score'))
+    if mx_model and 0 < mx_model <= 1000:
+        mx = mx_model
+    score = _num(data.get('score'))
+    if score is not None:
+        score = max(0.0, min(mx, score))
+
+    level = str(data.get('level') or '').strip()
+    if level not in ('优秀', '良好', '合格', '待改进'):
+        level = _level_from_ratio((score / mx) if (score is not None and mx) else None)
+
+    strengths = _strlist(data.get('strengths'))
+    issues = _strlist(data.get('issues'))
+    comment = str(data.get('comment') or '').strip()
+    if not comment:
+        bits = []
+        if strengths:
+            bits.append('亮点：' + '；'.join(strengths[:2]))
+        if issues:
+            bits.append('可改进：' + '；'.join(issues[:2]))
+        comment = ' '.join(bits)[:800]
+
+    return {
+        'text': str(data.get('text') or '').strip(),
+        'score': score,
+        'max_score': mx,
+        'level': level,
+        'strengths': strengths,
+        'issues': issues,
+        'comment': comment,
+        'parsed': True,
+    }
+
+
+def _vision_grade_one(image, subject_key=None, max_score=None, extra_prompt=None):
+    """对「一块作答」调用视觉模型，返回 (结果 dict, 错误信息)。
+
+    image 可以是 PIL.Image 或图片路径；结果含 text/score/max_score/level/strengths/issues/comment。
+    subject_key 决定用哪个批阅方案（学科×题型），extra_prompt 可临时覆盖方案提示词。
+    """
+    if not minimax_api_key:
+        return None, '未配置 LLM_API_KEY / MINIMAX_API_KEY，请在 .env 中设置后重试'
+    try:
+        img = _open_image(image) if isinstance(image, str) else image
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        max_size = 2000
+        if max(img.size) > max_size:
+            ratio = max_size / max(img.size)
+            img = img.resize((int(img.size[0] * ratio), int(img.size[1] * ratio)), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        data_url = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode('utf-8')
+
+        subj = _get_grading_subject(subject_key)
+        try:
+            full = float(max_score or subj.get('max_score') or 100)
+        except (TypeError, ValueError):
+            full = 100.0
+        base_prompt = (extra_prompt or '').strip() or subj.get('prompt') or ''
+        base_prompt = base_prompt.replace('{max_score}', _fmt_num(full)).replace('{subject}', subj.get('name', ''))
+        user_prompt = base_prompt + '\n\n' + GRADE_JSON_RULES.replace('{max_score}', _fmt_num(full))
+
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=150.0)
+        response = _vision_chat(
+            client,
+            model=minimax_model,
+            messages=[
+                {"role": "system", "content": "你是一位经验丰富的教师，擅长识别手写作答，并按评分标准给出准确、具体、对学生有帮助的评价。"},
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                    {"type": "text", "text": user_prompt}
+                ]}
+            ],
+            temperature=0.2,
+            max_tokens=3000
+        )
+        raw = (response.choices[0].message.content or '').strip()
+        parsed = _parse_grade_json(raw, full)
+        if not parsed:
+            return None, '模型未返回有效结果，请重试'
+        return parsed, ''
+    except Exception as e:
+        return None, '评阅失败：%s' % e
+
+
+# ==================== 英语作文专项批阅（结构化学情）====================
+# 与通用契约 GRADE_JSON_RULES 的差别：作文要输出可执行的「要点覆盖 / 语言错误 / 句子改写 / 佳句候选」，
+# 学生端才能看到「哪里错了、应该怎么写」，而不是一句笼统评语。
+# 一次视觉调用同时读「表头」与「全文」：表头用于自动分班，全文用于批阅，不额外增加调用次数。
+
+ESSAY_MAX_SCORE = 25
+ESSAY_HEADER_RECT = {'x': 0.035, 'y': 0.024, 'w': 0.90, 'h': 0.100}
+
+ESSAY_PROMPT_TEMPLATE = '''你正在批阅一份中国高一学生的英语作文（手写扫描件）。
+
+图片说明：第 1 张是整页试卷；若还有第 2 张，那是同一页顶部「班级 / 姓名 / 学号」栏的放大特写，读学号以特写为准。
+
+请完成以下五件事，然后严格按 JSON 输出。
+
+一、读表头
+识别班级号、姓名、学号。学号为 4 位数字：前 2 位是班级号，后 2 位是班内座号。
+手写数字常常一格一个（如 1 4 3 1），必须合并成一个 4 位数。姓氏姓名按字辨认，认不出就留空，不要猜。
+
+二、识别正文
+忠实转写学生手写的英文作文：保留换行；原样保留拼写与语法错误（不要顺手改对），因为后面要据此定位错误。
+题干、注意事项、印刷体说明不要写进 text，只写学生手写的作文部分。
+
+二·补、把「你自己没把握的地方」交出来（不要给书写打分）
+手写卷子一定有看不清的字。凡是你只能靠上下文猜的词，转写时可照猜的写进 text，
+但必须同时列进 illegible，让老师知道哪几处不可靠：
+  as_read 你最终写成了什么 / guess 你猜它本来想写什么 / where 位置（第几段第几行）/
+  why 为什么难读（连笔、笔画粘连、涂改覆盖、字太小、压线等）。
+只报真正犹豫的；看得清就别报。全部看得清就返回空数组。
+严禁在 why 里写「字迹清晰」却仍然列出来——自相矛盾的条目会被系统直接丢弃。
+不要评价字迹美丑（"字丑"不是错误），只报影响识别的地方。
+
+三、要点核对（防「要点偏离」）
+按题目要求逐条判断：covered（写到了且清楚）/ partial（提到但不完整或不准确）/ missing（没写或写偏）。
+evidence 摘录学生原文片段作为依据。若学生写了大量与题目无关的内容，相关要点判 missing，
+并在 issues 里明确指出「偏离题意」。
+注意：requirements 只写「内容要点」（该写什么），词数要求、书写要求、格式要求都不是要点，不要列进去。
+
+四、语言与表达
+· errors：逐条列出真实存在的语言错误，type 取 grammar / tense / agreement / article / preposition /
+  collocation / word_choice / spelling / chinese_english / punctuation / structure 之一。
+  quote 必须是原文片段（可直接在 text 里搜到），fix 给出改后写法，why 一句话说明原因。不要为凑数编造。
+· rewrites：挑 2-3 句「没有语法错误、但可以写得更好」的句子，improved 给改写，focus 说明改写着力点。
+· sentence_award：本篇最出彩的一句（只在确实存在时填写，否则 quote 留空）。
+
+五、评分
+满分 {max_score} 分。权重：内容要点 40%、语言准确性 35%、结构衔接 15%、书写与卷面 10%。
+要点缺失或偏题必须显著扣分，不要给「安慰分」。
+必须独立判断每篇的质量：不同学生能力差异明显，得分应当拉开；除非两篇确实水平相当，否则不要给相同分数。
+
+输出（只输出 JSON，不要 Markdown 代码块，不要任何解释）：
+{
+  "student": {"class_no": "", "name": "", "student_id": ""},
+  "task": {"title": "一句话概括本题写作任务", "requirements": ["要点1", "要点2", "要点3"]},
+  "text": "学生作文全文",
+  "illegible": [{"as_read": "你写成的样子", "guess": "猜的原词", "where": "第2段第1行", "why": "连笔"}],
+  "requirements_check": [{"point": "要点", "status": "covered", "evidence": "原文片段"}],
+  "errors": [{"type": "grammar", "quote": "原文片段", "fix": "修改后", "why": "一句话说明"}],
+  "rewrites": [{"original": "原句", "improved": "改写后的句子", "focus": "句式/用词/连贯"}],
+  "sentence_award": {"quote": "本篇最出彩的一句", "why": "好在哪里"},
+  "score": "本次得分（填数字）", "max_score": {max_score}, "level": "优秀|良好|合格|待改进",
+  "strengths": ["具体亮点"],
+  "issues": ["具体问题"],
+  "comment": "给学生本人的一段话"
+}
+
+注意：上面 JSON 里的 "本次得分（填数字）" 与 "优秀|良好|合格|待改进" 都只是占位说明，
+必须替换成你实际判定的数值与等级，不能原样输出。
+
+comment 要求：先肯定亮点，再指出 1-2 处最值得改的地方（对应上面的 errors / rewrites），
+最后给 1-3 条可执行建议；180 字以内，语气温和具体；不要出现「AI」「系统」「模型」「学号」等字样。
+
+题目要求（若此处为空，说明这是本批第一份，请从图片中的题干自行提取并写入 task.requirements）：
+{requirements}
+'''
+
+CORPUS_PROMPT = '''你是高中英语写作教研员。下面是一道高一英语写作任务的题干与要点。
+
+请为学生准备一份「话题语料包」，全批同学共用，要求：
+1. phrases：8 条该话题高频、地道、高一学生能直接用的短语或搭配，格式为「英文（中文释义）」。不要生僻词。
+2. sentences：6 个可直接套用的句子，覆盖开头段、主体展开、结尾段，句型要有变化
+   （倒装、非谓语、定语从句、强调句等至少各出现一次），每句不超过 25 词，并附中文大意。
+3. patterns：3 个可迁移的句式模板，用 [方括号] 标出可替换部分，并注明适用场景。
+4. pitfalls：3 条中国学生在该话题下最容易犯的错误，每条给出「错误写法 → 正确写法」。
+
+只输出 JSON：
+{"phrases":["..."],"sentences":["..."],"patterns":[{"pattern":"...","scene":"..."}],
+ "pitfalls":[{"wrong":"...","right":"..."}]}'''
+
+AWARD_PROMPT = '''下面是一个班同一道英语写作题中，若干篇作文里各自被判定为「本篇最出彩」的句子。
+
+请以高一英语教师的口吻，挑出最值得全班学习的 3-5 句。评判标准：
+（1）语法正确、表意清晰，没有硬伤；
+（2）略微超出高一平均水平——不是靠生僻词，而是句式或表达有意识
+     （倒装、非谓语、定语从句、平行结构、比喻、精准的动词选择等）；
+（3）确实是学生自己写的，不是模板套话。
+
+对每句给出：why（具体点出用了什么句式或手法）、takeaway（其他同学可以怎么借鉴）。
+不足 3 句时有多少给多少；完全没有达标句子就返回空数组。
+
+只输出 JSON：
+{"awards":[{"student_id":"原文中的学号","quote":"原句","why":"...","takeaway":"..."}],
+ "standard":"一句话说明本次评选口径"}'''
+
+BATCHES_DIR = os.path.join(DATA_DIR, 'batches')
+CORPUS_CACHE_FILE = os.path.join(CONFIG_DIR, 'corpus_cache.json')
+os.makedirs(BATCHES_DIR, exist_ok=True)
+
+
+def _img_to_data_url(img, max_size=2400):
+    """PIL 图片 -> data URL，长边压到 max_size，控制 token。
+
+    max_size 的取值经过实测：A4/200dpi 扫描件是 1657×2322，旧值 2000 会把它压到
+    1427×2000（等效 172dpi），手写小字（笔画仅 1 像素）先被自己压糊一次。
+    2400 能保住 200dpi 原尺寸，300dpi 扫描件压到 2400 也有约 204dpi；
+    代价是单页视觉 token 约 +30%，换来的是不主动丢信息。
+    """
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
+    if max(img.size) > max_size:
+        r = max_size / max(img.size)
+        img = img.resize((int(img.size[0] * r), int(img.size[1] * r)), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode('utf-8')
+
+
+# ---------------------------- 卷面质量体检（本地、零成本） ----------------------------
+
+_QUALITY_TIP = {
+    'small': '字号偏小',
+    'thin': '笔画过细',
+    'blur': '图像偏糊',
+    'tilt': '页面倾斜',
+    'light': '墨色偏淡',
+}
+
+
+def image_quality_metrics(path):
+    """用本地算法量化「这张卷子机器好不好读」，不调模型、不花钱、几毫秒出结果。
+
+    核心指标：
+      · char_mm   等效字高（毫米）—— 手写英文字母高度低于 1.8mm 时，200dpi 下只剩
+                  1 个像素的笔画，视觉模型必须靠猜，是所有识别错误的源头；
+      · stroke_px 笔画宽度（像素）—— 1 像素意味着已经贴着采样极限；
+      · sharp     拉普拉斯方差，判断扫描/拍摄是否失焦；
+      · slant     文字行倾斜角度。
+
+    返回 dict；任何环节失败都返回 None（调用方按「无数据」处理，不影响批阅）。
+    """
+    try:
+        import numpy as np
+        import cv2
+    except ImportError:
+        return None
+    try:
+        im = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+        if im is None:
+            return None
+        h, w = im.shape[:2]
+        if min(h, w) < 200:
+            return None
+
+        sharp = float(cv2.Laplacian(im, cv2.CV_64F).var())
+        bw = cv2.adaptiveThreshold(im, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY_INV, 31, 12)
+        ink = float((bw > 0).mean())
+
+        dist = cv2.distanceTransform(bw, cv2.DIST_L2, 5)
+        vals = dist[bw > 0]
+        stroke = float(np.percentile(vals, 50)) if vals.size else 0.0
+
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(bw, 8)
+        hs, area = stats[1:, cv2.CC_STAT_HEIGHT], stats[1:, cv2.CC_STAT_AREA]
+        keep = (area >= 6) & (area <= 20000)
+        char_h = float(np.median(hs[keep])) if keep.any() else 0.0
+        specks = int((area < 12).sum())          # 噪点 / 细小笔画断裂
+        blobs = int((area > 40000).sum())        # 大面积涂黑 / 阴影
+
+        edges = cv2.Canny(im, 50, 150)
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 120,
+                                minLineLength=w // 3, maxLineGap=8)
+        slant = 0.0
+        if lines is not None:
+            seg = lines.reshape(-1, 4) if getattr(lines, 'ndim', 2) == 3 else lines
+            angs = [np.degrees(np.arctan2(y2 - y1, x2 - x1)) for x1, y1, x2, y2 in seg]
+            angs = [a for a in angs if abs(a) < 12]
+            if angs:
+                slant = float(np.median(angs))
+
+        # 有效 dpi：按 A4 宽 210mm 反推（扫描件几乎都是 A4）
+        dpi = w / 8.27
+        char_mm = char_h / dpi * 25.4 if dpi else 0.0
+
+        flags = []
+        # 阈值来自本批 5 张真实难卷的实测：
+        #   200dpi 下手写笔画普遍就是 1 像素（stroke_px=1.0），字高 1.5~2.2mm，
+        #   所以「笔画细」不能当异常信号，否则整批都会被判成难卷、全部升档，白花钱。
+        # 这里只把「真的小到接近看不清 / 明显失焦 / 墨色过淡」当成难卷。
+        if 0 < char_mm < 1.7:
+            flags.append('small')
+        if stroke and stroke < 0.9:
+            flags.append('thin')
+        if sharp < 1000:
+            flags.append('blur')
+        if abs(slant) > 3:
+            flags.append('tilt')
+        if ink < 0.012:
+            flags.append('light')
+
+        # 难卷判定（决定要不要升到精读档）：只在信息可能真的不够时触发，
+        # 正常 200dpi 试卷不升档——实测 32B 对这类卷子的提升远不如预期。
+        hard = bool(char_mm and char_mm < 1.4) or 'blur' in flags or 'light' in flags
+        return {
+            'dpi': int(round(dpi)),
+            'char_mm': round(char_mm, 2),
+            'char_px': int(round(char_h)),
+            'stroke_px': round(stroke, 2),
+            'sharp': int(round(sharp)),
+            'ink_pct': round(ink * 100, 2),
+            'slant': round(slant, 1),
+            'specks': specks,
+            'blobs': blobs,
+            'flags': flags,
+            'labels': [_QUALITY_TIP[f] for f in flags],
+            'hard': hard,
+            'level': 'hard' if hard else ('warn' if flags else 'ok'),
+        }
+    except Exception:
+        return None
+
+
+def quality_badge(q):
+    """把质量指标压成一句话，给老师看。"""
+    if not q:
+        return ''
+    if q.get('labels'):
+        return '、'.join(q['labels'])
+    return '卷面清晰'
+
+
+HANDWRITING_PROMPT = '''这是学生手写英语答卷的扫描件。请只做一件事：判断「这份字迹对机器识别有多友好」。
+
+不要评分、不要改错、不要评价美丑（字丑不是问题，读不准才是问题）。
+
+要求：
+1. 逐行转写学生手写部分的前 8 行英文，原样保留拼写错误，不要顺手改对。
+2. 凡是你读不准、只能靠上下文猜的词，在转写里写成 [你猜的词?]，并且必须同时列进 unsure。
+3. 真的看得清就不许列，不要为凑数编造。全部清楚时 unsure 返回空数组。
+
+只输出 JSON（不要代码块）：
+{"lines": ["第1行", "..."],
+ "total_words": 你转写的总词数,
+ "unsure": [{"word": "读不准的词", "why": "连笔/字太小/笔画粘连/涂改覆盖/压线", "conf": "低或中"}],
+ "size": "偏大/正常/偏小/极小",
+ "note": "一句话说明这份字迹卡在哪"}
+'''
+
+
+def assess_handwriting(path, model=None):
+    """评估一份手写卷的「机器可读性」。返回 (dict, 错误信息)。
+
+    设计上刻意不让模型给「字迹美丑」打 1-5 分——实测同图反复打分会在 3/4 之间漂移，
+    而且风险点全是「1和7形似」这类套话。这里改用一个可核对的信号：
+    让它逐行转写，把读不准的词标 `[词?]` 并列入 unsure，
+    再用「不确定词占比」算出稳定的可读性等级，并叠加本地量化指标。
+    """
+    q = image_quality_metrics(path)
+    if not minimax_api_key:
+        return {'local': q}, '未配置 LLM_API_KEY'
+    try:
+        img = _open_image(path)
+        use_model = model or resolve_vision_model(hard=bool((q or {}).get('hard')))
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=180.0)
+        resp = _vision_chat(
+            client, model=use_model,
+            messages=[
+                {"role": "system", "content": "你是手写体识别专家，只报告「读不准」的地方，绝不编造不确定项。"},
+                {"role": "user", "content": [
+                    {'type': 'image_url', 'image_url': {'url': _img_to_data_url(img)}},
+                    {'type': 'text', 'text': HANDWRITING_PROMPT},
+                ]},
+            ],
+            temperature=0.1, max_tokens=1500)
+        data = _loads_lenient((resp.choices[0].message.content or '').strip())
+        if not isinstance(data, dict):
+            return {'local': q}, '模型未返回有效 JSON'
+
+        unsure = []
+        for u in (data.get('unsure') or []):
+            if not isinstance(u, dict):
+                continue
+            w = str(u.get('word') or '').strip()
+            # 只收「词/短语」级：模型偶尔会把整句丢进来（"We are sure to have a great time"），
+            # 那不是识别不确定，而是它在做阅读判断，收进来会把比例算高。
+            if not w or len(w.split()) > 3:
+                continue
+            unsure.append({'word': w[:60], 'why': str(u.get('why') or '').strip()[:40],
+                           'conf': str(u.get('conf') or '').strip()[:8]})
+        lines = [str(x).strip()[:400] for x in (data.get('lines') or []) if str(x).strip()]
+        total = data.get('total_words')
+        try:
+            total = int(total)
+        except (TypeError, ValueError):
+            total = sum(len(re.findall(r"[A-Za-z']+", l)) for l in lines)
+        total = max(total, 1)
+        ratio = len(unsure) / total
+
+        # 等级阈值按实测校准：本批两张难卷不确定率都是 6.9%，
+        # 若按「>5% 即很难」会被判 D，但实际上模型转写基本正确、只是个别地名没把握，
+        # 所以 8% 以内归「偏难」，超过 12% 才算「很难」。
+        score = 100.0
+        if ratio > 0.12:
+            score -= 50
+        elif ratio > 0.08:
+            score -= 35
+        elif ratio > 0.03:
+            score -= 20
+        elif ratio > 0.01:
+            score -= 8
+        flags = set((q or {}).get('flags') or [])
+        # 本地指标的权重刻意给足：不确定率是模型自报的，同一张图两次跑会差 1 个百分点；
+        # 「字高只有 1.5mm」这类事实是稳定的，应该让它把等级拉开。
+        for f, cut in (('small', 20), ('thin', 6), ('blur', 18), ('light', 6), ('tilt', 4)):
+            if f in flags:
+                score -= cut
+        score = max(0, min(100, score))
+        grade, label = ('A', '清晰') if score >= 85 else \
+                       ('B', '较清晰') if score >= 65 else \
+                       ('C', '偏难') if score >= 40 else ('D', '很难')
+
+        return {
+            'local': q,
+            'ai': {'lines': lines, 'size': str(data.get('size') or '').strip()[:8],
+                   'note': str(data.get('note') or '').strip()[:200]},
+            'unsure': unsure[:15],
+            'total_words': total,
+            'unsure_ratio': round(ratio * 100, 1),
+            'score': round(score),
+            'grade': grade,
+            'grade_label': label,
+            'model': use_model,
+            'tips': (['不确定词占 %.1f%%（%d/%d）' % (ratio * 100, len(unsure), total)]
+                     if unsure else ['模型逐行转写未遇到读不准的词'])
+                    + [_QUALITY_TIP[f] for f in (q or {}).get('flags') or []],
+        }, ''
+    except Exception as e:
+        return {'local': q}, '评估失败：%s' % e
+
+
+
+def _loads_lenient(raw):
+    """从模型输出里抠出 JSON：容忍代码块围栏、前后废话、尾逗号。"""
+    s = (raw or '').strip()
+    if not s:
+        return None
+    if s.startswith('```'):
+        s = re.sub(r'^```[a-zA-Z]*\s*', '', s)
+        s = re.sub(r'\s*```\s*$', '', s).strip()
+    start, end = s.find('{'), s.rfind('}')
+    if start < 0 or end <= start:
+        return None
+    blob = s[start:end + 1]
+    for cand in (blob, re.sub(r',\s*([}\]])', r'\1', blob)):
+        try:
+            data = json.loads(cand)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            continue
+    return None
+
+
+def _llm_json(prompt, system, max_tokens=1600, temperature=0.2):
+    """纯文本任务：调文本模型并解析 JSON。返回 (dict, 错误信息)。"""
+    if not minimax_api_key:
+        return None, '未配置 LLM_API_KEY'
+    try:
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=90.0)
+        resp = client.chat.completions.create(
+            model=llm_text_model,
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **_text_model_kwargs()
+        )
+        raw = (resp.choices[0].message.content or '').strip()
+        data = _loads_lenient(raw)
+        if data is None:
+            return None, '模型返回的不是有效 JSON：' + raw[:160]
+        return data, ''
+    except Exception as e:
+        return None, '调用失败：%s' % e
+
+
+def _as_text_list(v, limit=12):
+    if isinstance(v, str):
+        v = [x for x in re.split(r'[\n；;]', v) if x.strip()]
+    if not isinstance(v, list):
+        return []
+    out = []
+    for x in v:
+        t = str(x).strip().lstrip('-•· ').strip()
+        if t:
+            out.append(t[:400])
+    return out[:limit]
+
+
+def _norm_essay_result(data, max_score=ESSAY_MAX_SCORE):
+    """把模型返回的原始 JSON 归一化成前端可直接消费的结构。"""
+    if not isinstance(data, dict):
+        return None
+    try:
+        mx = float(data.get('max_score') or max_score or ESSAY_MAX_SCORE)
+        if not (0 < mx <= 1000):
+            mx = float(max_score or ESSAY_MAX_SCORE)
+    except (TypeError, ValueError):
+        mx = float(max_score or ESSAY_MAX_SCORE)
+
+    def _num(v):
+        if isinstance(v, bool) or v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        m = re.search(r'-?\d+(?:\.\d+)?', str(v))
+        return float(m.group()) if m else None
+
+    score = _num(data.get('score'))
+    if score is not None:
+        score = max(0.0, min(mx, score))
+    level = str(data.get('level') or '').strip()
+    if level not in ('优秀', '良好', '合格', '待改进'):
+        level = _level_from_ratio((score / mx) if (score is not None and mx) else None)
+
+    stu = data.get('student') if isinstance(data.get('student'), dict) else {}
+    sid = re.sub(r'[^\d]', '', str(stu.get('student_id') or ''))
+    cls = re.sub(r'[^\d]', '', str(stu.get('class_no') or ''))
+    name = _clean_person_name(stu.get('name'))
+
+    status_map = {'covered': 'covered', 'partial': 'partial', 'missing': 'missing',
+                  '已覆盖': 'covered', '部分': 'partial', '缺失': 'missing', '未写': 'missing'}
+    reqs = []
+    for r in (data.get('requirements_check') or []):
+        if not isinstance(r, dict):
+            continue
+        st = status_map.get(str(r.get('status') or '').strip().lower(),
+                            status_map.get(str(r.get('status') or '').strip(), 'partial'))
+        reqs.append({'point': str(r.get('point') or '').strip()[:200],
+                     'status': st,
+                     'evidence': str(r.get('evidence') or '').strip()[:300]})
+
+    errors = []
+    for e in (data.get('errors') or []):
+        if not isinstance(e, dict):
+            continue
+        q = str(e.get('quote') or '').strip()
+        f = str(e.get('fix') or '').strip()
+        if not q and not f:
+            continue
+        # 「改了等于没改」的条目是模型凑数，丢掉
+        if q and f and re.sub(r'\s+', '', q).lower() == re.sub(r'\s+', '', f).lower():
+            continue
+        errors.append({'type': str(e.get('type') or 'grammar').strip().lower()[:24],
+                       'quote': q[:200], 'fix': f[:200],
+                       'why': str(e.get('why') or '').strip()[:200]})
+
+    rewrites = []
+    for w in (data.get('rewrites') or []):
+        if not isinstance(w, dict):
+            continue
+        o, i = str(w.get('original') or '').strip(), str(w.get('improved') or '').strip()
+        if not o or not i:
+            continue
+        rewrites.append({'original': o[:240], 'improved': i[:240],
+                         'focus': str(w.get('focus') or '').strip()[:40]})
+
+    aw = data.get('sentence_award') if isinstance(data.get('sentence_award'), dict) else {}
+    award = {'quote': str(aw.get('quote') or '').strip()[:300],
+             'why': str(aw.get('why') or '').strip()[:200]}
+    if len(award['quote']) < 10:
+        award = {'quote': '', 'why': ''}
+
+    task = data.get('task') if isinstance(data.get('task'), dict) else {}
+    comment = str(data.get('comment') or '').strip()
+
+    # 模型自报的「读不准」清单：比让它给书写打 1-5 分可靠得多。
+    # 实测同一张卷子反复打分会在 3/4 之间漂移，但「哪几个词没把握」是稳定且可核对的。
+    illegible = []
+    for u in (data.get('illegible') or []):
+        if not isinstance(u, dict):
+            continue
+        ar = str(u.get('as_read') or '').strip()
+        gs = str(u.get('guess') or '').strip()
+        why = str(u.get('why') or '').strip()
+        if not ar and not gs:
+            continue
+        # 自相矛盾的条目：原因写「字迹清晰」却列进「读不准」，是模型凑数
+        if '清晰' in why and ar.lower() == gs.lower():
+            continue
+        illegible.append({'as_read': ar[:80], 'guess': gs[:80],
+                          'where': str(u.get('where') or '').strip()[:40],
+                          'why': why[:60]})
+
+    return {
+        'student': {'class_no': cls[:2], 'student_id': sid if len(sid) in (4, 6) else '', 'name': name},
+        'task': {'title': str(task.get('title') or '').strip()[:200],
+                 'requirements': _as_text_list(task.get('requirements'), 10)},
+        'text': str(data.get('text') or '').strip(),
+        'illegible': illegible[:12],
+        'requirements_check': reqs[:10],
+        'errors': errors[:12],
+        'rewrites': rewrites[:5],
+        'sentence_award': award,
+        'score': score, 'max_score': mx, 'level': level,
+        'strengths': _as_text_list(data.get('strengths'), 6),
+        'issues': _as_text_list(data.get('issues'), 8),
+        'comment': comment[:1200] or ' '.join(
+            ['亮点：' + '；'.join(_as_text_list(data.get('strengths'), 2))] if data.get('strengths') else []),
+    }
+
+
+def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=None, quality=None):
+    """批阅一页英语作文：一次调用同时读表头（学号/班级/姓名）与全文。返回 (dict, 错误信息)。
+
+    model   显式指定视觉模型；为空时按 `.env` 的精度档位决定，
+            并把 quality（本地卷面体检结果）传进去用于「难卷自动升档」。
+    quality image_quality_metrics() 的返回，可为 None。
+    """
+    if not minimax_api_key:
+        return None, '未配置 LLM_API_KEY，请在 .env 中设置'
+    try:
+        use_model = model or resolve_vision_model(hard=bool((quality or {}).get('hard')))
+        img = _open_image(page) if isinstance(page, str) else page
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        parts = [{'type': 'image_url', 'image_url': {'url': _img_to_data_url(img)}}]
+        try:
+            head = _transform_image(img, 0, ESSAY_HEADER_RECT)
+            if head.size[0] >= 60 and head.size[1] >= 14:
+                parts.append({'type': 'image_url', 'image_url': {'url': _img_to_data_url(head, 1800)}})
+        except Exception:
+            pass
+        prompt = ESSAY_PROMPT_TEMPLATE.replace('{max_score}', _fmt_num(max_score))
+        prompt = prompt.replace('{requirements}', requirements or '（本批第一份，请自行提取）')
+        parts.append({'type': 'text', 'text': prompt})
+
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=240.0)
+        resp = _vision_chat(
+            client,
+            model=use_model,
+            messages=[
+                {"role": "system", "content": "你是经验丰富的高中英语教师，读手写扫描件准确，评分严格但有建设性。"},
+                {"role": "user", "content": parts}
+            ],
+            temperature=0.2,
+            max_tokens=4000
+        )
+        raw = (resp.choices[0].message.content or '').strip()
+        data = _loads_lenient(raw)
+        if data is None:
+            return None, '模型未返回有效 JSON'
+        out = _norm_essay_result(data, max_score)
+        if not out:
+            return None, '模型返回结构异常'
+        if not out.get('text') and not out.get('errors'):
+            return None, '未能识别出作文内容（可能是空白页或图片过暗）'
+        out['_model'] = use_model
+        return out, ''
+    except Exception as e:
+        return None, '批阅失败：%s' % e
+
+
+# ---------------------------- 批次：题干 / 语料 / 佳句 ----------------------------
+
+def _batch_path(batch_id):
+    return os.path.join(BATCHES_DIR, re.sub(r'[^a-zA-Z0-9]', '', str(batch_id or '')) + '.json')
+
+
+_BATCH_MEM = {}
+
+
+def _load_batch(batch_id):
+    """读批次文件（按 mtime 缓存，避免记录列表里重复读盘）。"""
+    p = _batch_path(batch_id)
+    try:
+        mt = os.path.getmtime(p)
+    except OSError:
+        return None
+    hit = _BATCH_MEM.get(p)
+    if hit and hit[0] == mt:
+        return hit[1]
+    try:
+        with open(p, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    _BATCH_MEM[p] = (mt, data)
+    return data
+
+
+def _save_batch(b):
+    if not isinstance(b, dict) or not b.get('id'):
+        return
+    os.makedirs(BATCHES_DIR, exist_ok=True)
+    p = _batch_path(b['id'])
+    tmp = p + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(b, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, p)
+    _BATCH_MEM.pop(p, None)
+
+
+def _topic_key(topic):
+    """话题指纹：题干 + 要点规范化后取散列，同一话题跨批次复用语料。"""
+    if not isinstance(topic, dict):
+        return ''
+    raw = (str(topic.get('title') or '') + '|' + '|'.join(topic.get('requirements') or []))
+    raw = re.sub(r'\s+', '', raw)
+    if len(raw) < 6:
+        return ''
+    return hashlib.sha1(raw.encode('utf-8')).hexdigest()[:12]
+
+
+def _bigrams(text):
+    s = re.sub(r'[\s，。、；：,.;:!?！？"“”\'（）()\[\]]+', '', str(text or ''))
+    return {s[i:i + 2] for i in range(len(s) - 1)}
+
+
+def _topic_similarity(a, b):
+    """字符二元组 Jaccard 相似度：题目措辞略有出入时也能认出是同一题。"""
+    A, B = _bigrams(a), _bigrams(b)
+    if not A or not B:
+        return 0.0
+    return len(A & B) / float(len(A | B))
+
+
+def _topic_text(d):
+    """取用于相似度比较的文本；同时兼容「话题对象」与「语料缓存条目」两种结构。"""
+    if not isinstance(d, dict):
+        return ''
+    return (str(d.get('title') or d.get('topic') or '') + ' '
+            + ' '.join(d.get('requirements') or []))
+
+
+def _load_corpus_cache():
+    if not os.path.exists(CORPUS_CACHE_FILE):
+        return {}
+    try:
+        with open(CORPUS_CACHE_FILE, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_corpus_cache(cache):
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(CORPUS_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print('写入语料缓存失败: %s' % e)
+
+
+def _get_topic_corpus(tkey, topic, force=False):
+    """话题语料：同话题只生成一次，之后全批复用（省 token 的关键）。
+
+    先按指纹精确命中；未命中时再做一次相似度匹配（同一道题在不同批次里，
+    模型概括出的标题措辞往往不同，只靠散列会重复生成）。
+    """
+    cache = _load_corpus_cache()
+    if not force:
+        if tkey and isinstance(cache.get(tkey), dict):
+            return cache[tkey], ''
+        want = _topic_text(topic)
+        best_key, best_score = '', 0.0
+        for k, v in cache.items():
+            if not isinstance(v, dict):
+                continue
+            score = _topic_similarity(want, _topic_text(v))
+            if score > best_score:
+                best_key, best_score = k, score
+        if best_key and best_score >= 0.55:
+            hit = dict(cache[best_key])
+            hit['reused_from'] = best_key
+            return hit, ''
+    if not isinstance(topic, dict):
+        return {}, '缺少话题信息'
+    prompt = ('题目：%s\n要点：\n%s' % (
+        topic.get('title') or '（未提供标题）',
+        '\n'.join('· ' + str(r) for r in (topic.get('requirements') or [])) or '（未提供）'))
+    data, err = _llm_json(prompt, CORPUS_PROMPT, max_tokens=1500)
+    if err:
+        return {}, err
+    corpus = {
+        'phrases': _as_text_list(data.get('phrases'), 10),
+        'sentences': _as_text_list(data.get('sentences'), 8),
+        'patterns': [{'pattern': str(p.get('pattern') or '')[:200],
+                      'scene': str(p.get('scene') or '')[:80]}
+                     for p in (data.get('patterns') or []) if isinstance(p, dict)][:5],
+        'pitfalls': [{'wrong': str(p.get('wrong') or '')[:160],
+                      'right': str(p.get('right') or '')[:160]}
+                     for p in (data.get('pitfalls') or []) if isinstance(p, dict)][:5],
+        'topic': topic.get('title') or '',
+        'requirements': topic.get('requirements') or [],
+        'generated_at': _now_str(),
+    }
+    if tkey:
+        cache[tkey] = corpus
+        _save_corpus_cache(cache)
+    return corpus, ''
+
+
+def _pick_awards(essays, level_hint='高一'):
+    """同学佳句：全批批完后一次调用横向评选，不逐篇调用。"""
+    pool = []
+    for e in essays:
+        essay = e.get('essay') or {}
+        aw = essay.get('sentence_award') or {}
+        q = str(aw.get('quote') or '').strip()
+        if len(q) < 10:
+            continue
+        stu = essay.get('student') or {}
+        pool.append({'student_id': stu.get('student_id') or '',
+                     'name': stu.get('name') or '',
+                     'quote': q, 'why': (aw.get('why') or '')[:120]})
+    if not pool:
+        return {'awards': [], 'standard': '', 'pool_size': 0}
+    payload = json.dumps({'level': level_hint, 'candidates': pool}, ensure_ascii=False)
+    data, err = _llm_json(payload, AWARD_PROMPT, max_tokens=1200, temperature=0.3)
+    if err:
+        return {'awards': [], 'standard': '', 'pool_size': len(pool), 'error': err}
+    awards = []
+    for a in (data.get('awards') or []):
+        if not isinstance(a, dict):
+            continue
+        q = str(a.get('quote') or '').strip()
+        if not q:
+            continue
+        sid = re.sub(r'[^\d]', '', str(a.get('student_id') or ''))
+        hit = next((p for p in pool if p['quote'][:20] == q[:20]), None)
+        awards.append({'student_id': sid or (hit or {}).get('student_id', ''),
+                       'name': (hit or {}).get('name', ''),
+                       'quote': q[:300],
+                       'why': str(a.get('why') or '').strip()[:240],
+                       'takeaway': str(a.get('takeaway') or '').strip()[:200]})
+    return {'awards': awards[:6], 'standard': str(data.get('standard') or '').strip()[:200],
+            'pool_size': len(pool)}
+
+
+# ---------------------------- 自动流水线：扫描 → 出结果 ----------------------------
+_JOB_LOCK = threading.Lock()
+
+
+def _new_batch(item_ids, subject='english_essay', task_id='', note=''):
+    b = {
+        'id': uuid.uuid4().hex[:16],
+        'created_at': _now_str(),
+        'subject': subject,
+        'task_id': task_id or '',
+        'note': note or '',
+        'item_ids': list(item_ids or []),
+        'topic': {},
+        'corpus': {},
+        'awards': {'awards': []},
+        'record_ids': [],
+        'job': {'status': 'queued', 'stage': 'queued', 'total': len(item_ids or []),
+                'done': 0, 'message': '已排队，等待开始…'},
+    }
+    _save_batch(b)
+    return b
+
+
+def _auto_pipeline(batch_id):
+    """零操作流水线：读表头 → 自动分班 → 逐篇批阅 → 话题语料 → 同学佳句 → 入库。"""
+    b = _load_batch(batch_id)
+    if not b:
+        return
+
+    def bump(**kw):
+        job = b.setdefault('job', {})
+        job.update({k: v for k, v in kw.items() if v is not None})
+        job['updated_at'] = _now_str()
+        _save_batch(b)
+
+    try:
+        live = {it['id']: it for it in load_staging()}
+        pages = [live[i] for i in b.get('item_ids', []) if i in live]
+        bump(status='running', stage='reading', done=0,
+             total=len(pages), message='正在识别表头与正文…')
+        if not pages:
+            raise RuntimeError('临时区里找不到这批扫描件（可能已被清空）')
+
+        results, requirements_text = [], ''
+        for idx, it in enumerate(pages):
+            bump(message='正在批阅第 %d/%d 份…' % (idx + 1, len(pages)))
+            path = _staging_image_path(it)
+            if not path:
+                results.append({'item_id': it['id'], 'error': '图片文件缺失'})
+                bump(done=idx + 1)
+                continue
+            res, err = _vision_grade_essay(path, requirements_text, ESSAY_MAX_SCORE,
+                                           quality=it.get('quality'))
+            if err:
+                results.append({'item_id': it['id'], 'error': err, 'quality': it.get('quality')})
+            else:
+                # 第一份的题干即为本批题干，后续全部复用，避免重复分析
+                if not requirements_text:
+                    task = res.get('task') or {}
+                    reqs = task.get('requirements') or []
+                    if reqs or task.get('title'):
+                        b['topic'] = {'title': task.get('title', ''), 'requirements': reqs}
+                        requirements_text = '\n'.join('· ' + str(r) for r in reqs)
+                results.append({'item_id': it['id'], 'essay': res, 'quality': it.get('quality')})
+            bump(done=idx + 1)
+
+        ok = [r for r in results if r.get('essay')]
+        if not ok:
+            raise RuntimeError('本批全部识别失败，请检查模型配置或扫描清晰度')
+
+        # 话题语料（跨批缓存）
+        tkey = _topic_key(b.get('topic'))
+        if b.get('topic'):
+            b['topic']['key'] = tkey
+        bump(stage='corpus', message='正在生成话题语料…')
+        corpus, cerr = _get_topic_corpus(tkey, b.get('topic'))
+        b['corpus'] = corpus or {}
+        if cerr:
+            b['corpus_error'] = cerr
+
+        # 同学佳句（全批判完后一次评选）
+        bump(stage='awards', message='正在评选同学佳句…')
+        b['awards'] = _pick_awards(ok)
+
+        # 分数雷同是模型「抄示例」的典型信号，明确提示老师抽查，而不是假装正常
+        scores = [(r['essay'] or {}).get('score') for r in ok]
+        scores = [s for s in scores if isinstance(s, (int, float))]
+        if len(scores) >= 3 and len(set(scores)) == 1:
+            b['warning'] = '本批 %d 份得分完全相同（%s），建议抽查或重新批阅' % (len(scores), _fmt_num(scores[0]))
+
+        # 入库
+        bump(stage='committing', message='正在归档到用户端…')
+        commit_ids, failed = [], []
+        for r in results:
+            it = live.get(r.get('item_id'))
+            if not it:
+                continue
+            essay = r.get('essay') or {}
+            stu = essay.get('student') or {}
+            sid = str(stu.get('student_id') or '').strip() or str(it.get('student_id') or '').strip()
+            cls, resolved_name = _ensure_student_registry(sid, stu.get('name') or '')
+            if not cls:
+                cls = str(stu.get('class_no') or '').strip()
+            extra = {
+                'batch_id': b['id'],
+                'essay': essay,
+                'topic': b.get('topic') or {},
+                'quality': r.get('quality') or {},
+                'auto': True,
+                'student_name': resolved_name or (stu.get('name') or ''),
+                'essay_text': essay.get('text') or '',
+                'ai_comment': essay.get('comment') or '',
+                'score_text': ('%s/%s' % (_fmt_num(essay.get('score')), _fmt_num(essay.get('max_score')))
+                               if essay.get('score') is not None else ''),
+                'grading': {
+                    'items': [essay] if essay else [],
+                    'total': essay.get('score'),
+                    'max_total': essay.get('max_score') or ESSAY_MAX_SCORE,
+                    'level': essay.get('level', ''),
+                    'subject': b.get('subject') or 'english_essay',
+                    'subject_name': '英语作文',
+                    'graded_at': _now_str(),
+                },
+                'status': 'graded' if essay else 'pending',
+                'graded_at': _now_str() if essay else '',
+                'needs_review': (not sid) and bool(essay),
+            }
+            okc, rec = _commit_staging_item(
+                it, sid, cls, b.get('task_id') or '', '自动批阅', None, 0,
+                None, b.get('subject') or 'english_essay', extra)
+            if okc:
+                commit_ids.append(rec['id'])
+            else:
+                failed.append({'item_id': it['id'], 'reason': str(rec)})
+
+        # 从临时区移除已入库的条目
+        done_ids = {r['item_id'] for r in results if r.get('item_id')}
+        save_staging([it for it in load_staging() if it.get('id') not in done_ids])
+
+        b['record_ids'] = commit_ids
+        b['results'] = [
+            {'item_id': r.get('item_id'),
+             'student_id': ((r.get('essay') or {}).get('student') or {}).get('student_id', ''),
+             'name': ((r.get('essay') or {}).get('student') or {}).get('name', ''),
+             'score': (r.get('essay') or {}).get('score'),
+             'level': (r.get('essay') or {}).get('level', ''),
+             'model': (r.get('essay') or {}).get('_model', ''),
+             'quality': r.get('quality') or {},
+             'illegible': len((r.get('essay') or {}).get('illegible') or []),
+             'error': r.get('error', '')}
+            for r in results
+        ]
+        b['failed'] = failed
+        done_msg = '已完成 %d 份批阅，可直接在用户端查看' % len(commit_ids)
+        # 卷面体检汇总：让老师知道哪几张值得人工过一眼，而不是盲目相信分数
+        hard_n = sum(1 for r in results if (r.get('quality') or {}).get('hard'))
+        illeg_n = sum(len((r.get('essay') or {}).get('illegible') or []) for r in ok)
+        notes = []
+        if hard_n:
+            notes.append('%d 张卷面偏难' % hard_n)
+        if illeg_n:
+            notes.append('%d 处字迹读不准' % illeg_n)
+        if notes:
+            done_msg += '（%s，已在结果里标出）' % '、'.join(notes)
+        if b.get('warning'):
+            done_msg += '（' + b['warning'] + '）'
+        bump(status='done', stage='done', done=len(pages), message=done_msg)
+    except Exception as e:
+        import traceback
+        print('自动流水线失败: %s\n%s' % (e, traceback.format_exc()))
+        bump(status='error', stage='error', message=str(e))
+
+
+def _start_auto_batch(item_ids, subject='english_essay', task_id=''):
+    """建批 + 起后台线程。返回 batch（job 已在写盘）。"""
+    with _JOB_LOCK:
+        b = _new_batch(item_ids, subject=subject, task_id=task_id)
+        t = threading.Thread(target=_auto_pipeline, args=(b['id'],), daemon=True)
+        t.start()
+    return b
+
+
+def _grade_essay_record(rec, extra_prompt=None):
+    """对一条已入库的作文记录重新批阅（教师手动「重新生成」走这里）。"""
+    path = _records_image_path(rec)
+    if not path:
+        return None, '图片文件缺失'
+    reqs = ''
+    b = _load_batch(rec.get('batch_id') or '')
+    if b and isinstance(b.get('topic'), dict):
+        reqs = '\n'.join('· ' + str(r) for r in (b['topic'].get('requirements') or []))
+    essay, err = _vision_grade_essay(path, reqs, ESSAY_MAX_SCORE)
+    if err:
+        return None, err
+    rec['essay'] = essay
+    rec['essay_text'] = essay.get('text') or ''
+    rec['ai_comment'] = essay.get('comment') or ''
+    rec['score_text'] = ('%s/%s' % (_fmt_num(essay.get('score')), _fmt_num(essay.get('max_score')))
+                         if essay.get('score') is not None else '')
+    rec['grading'] = {'items': [essay], 'total': essay.get('score'),
+                      'max_total': essay.get('max_score') or ESSAY_MAX_SCORE,
+                      'level': essay.get('level', ''),
+                      'subject': 'english_essay', 'subject_name': '英语作文',
+                      'graded_at': _now_str()}
+    rec['status'] = 'graded'
+    rec['graded_at'] = _now_str()
+    return rec['grading'], ''
+
+
+def _grade_record(rec, extra_prompt=None):
+    """对一条档案执行批阅：按区域逐块评分，汇总总分与等级。返回 (grading, 错误信息)。
+
+    区域规则：
+      · 未设区域 → 整页当作一块（沿用旧的单选区 crop 也视为一块）；
+      · 设了 N 个区域（如小练习里的某几道题）→ 每块独立评分，
+        满分按「方案的每块满分」计，合计满分 = 每块满分 × 块数。
+    """
+    # 英语作文走专项契约（要点覆盖 / 语言错误 / 句子改写），而不是通用评分
+    if str(rec.get('subject') or '') == 'english_essay':
+        return _grade_essay_record(rec, extra_prompt)
+    path = _records_image_path(rec)
+    if not path:
+        return None, '图片文件缺失'
+    try:
+        base = _transform_image(_open_image(path), rec.get('rotation', 0), None)
+    except Exception as e:
+        return None, '图片读取失败：%s' % e
+
+    regions = _item_regions(rec)
+    if regions:
+        pieces = [{'id': r['id'], 'label': r['label'], 'rect': r} for r in regions]
+    else:
+        pieces = [{'id': 'r1', 'label': '整页', 'rect': None}]
+
+    subj = _get_grading_subject(rec.get('subject'))
+    try:
+        max_score = float(rec.get('max_score') or subj.get('max_score') or 100)
+    except (TypeError, ValueError):
+        max_score = 100.0
+
+    items = []
+    for p in pieces:
+        img = _transform_image(base, 0, p['rect']) if p.get('rect') else base
+        res, err = _vision_grade_one(img, rec.get('subject'), max_score, extra_prompt)
+        if err:
+            return None, ('%s：%s' % (p['label'], err)) if len(pieces) > 1 else err
+        res['id'] = p['id']
+        res['label'] = p['label']
+        items.append(res)
+
+    scored = [i for i in items if isinstance(i.get('score'), (int, float))]
+    total = round(sum(i['score'] for i in scored), 1) if scored else None
+    max_total = round(max_score * len(items), 1)
+    ratio = (total / max_total) if (total is not None and max_total) else None
+
+    grading = {
+        'items': items,
+        'total': total,
+        'max_total': max_total,
+        'level': _level_from_ratio(ratio),
+        'subject': rec.get('subject') or '',
+        'subject_name': subj.get('name', ''),
+        'graded_at': _now_str(),
+    }
+    rec['grading'] = grading
+    rec['score_text'] = (_fmt_num(total) + '/' + _fmt_num(max_total)) if total is not None else ''
+    rec['essay_text'] = '\n\n'.join((i.get('text') or '') for i in items).strip()
+    if len(items) == 1:
+        rec['ai_comment'] = items[0].get('comment', '')
+    else:
+        rec['ai_comment'] = '\n\n'.join('【%s】%s' % (i['label'], i.get('comment', '')) for i in items)
+    rec['status'] = 'graded' if (rec['ai_comment'] or total is not None) else 'pending'
+    rec['graded_at'] = _now_str()
+    return grading, ''
+
+
+@app.route('/api/grading_subjects', methods=['GET'])
+def get_grading_subjects():
+    """批阅方案列表（学科 × 题型），供扫描端选择、供设置页编辑。"""
+    return jsonify(grading_subject_options())
+
+
+@app.route('/api/grading_subjects', methods=['POST', 'PUT'])
+def save_grading_subjects():
+    """保存批阅方案。body: {current?, subjects?: {key: {name,max_score,prompt}}}。"""
+    if session.get('user_role') not in ('teacher', 'admin'):
+        return jsonify({'error': '仅教师或管理员可修改批阅方案'}), 403
+    data = request.get_json(silent=True) or {}
+    cfg = load_grading_config()
+    subs = data.get('subjects')
+    if isinstance(subs, dict):
+        for key, val in subs.items():
+            key = str(key).strip()
+            if not key or not isinstance(val, dict):
+                continue
+            cur = dict(cfg['subjects'].get(key) or {})
+            if 'name' in val:
+                cur['name'] = str(val.get('name') or key)[:60]
+            if 'max_score' in val:
+                try:
+                    cur['max_score'] = max(0.0, float(val.get('max_score')))
+                except (TypeError, ValueError):
+                    pass
+            if 'prompt' in val:
+                cur['prompt'] = str(val.get('prompt') or '')
+            if not cur:
+                continue
+            cur.setdefault('name', key)
+            cur.setdefault('max_score', 100)
+            cur.setdefault('prompt', '')
+            cfg['subjects'][key] = cur
+    cur_key = str(data.get('current') or '').strip()
+    if cur_key in cfg['subjects']:
+        cfg['current'] = cur_key
+    try:
+        save_grading_config(cfg)
+    except Exception as e:
+        return jsonify({'error': '保存失败：%s' % e}), 500
+    return jsonify({'ok': True, **grading_subject_options()})
+
+
+@app.route('/portal')
+def portal_page():
+    """用户端门户：任意设备浏览器访问，按登录角色呈现教师/学生视图。"""
+    return render_template('portal.html')
+
+
+@app.route('/api/portal/me', methods=['GET'])
+def portal_me():
+    """当前登录用户信息（含姓名）。"""
+    if not session.get('user_id'):
+        return jsonify({'logged_in': False})
+    return jsonify({
+        'logged_in': True,
+        'user': {'id': session.get('user_id'), 'name': session.get('user_name', ''),
+                 'role': session.get('user_role', 'teacher')},
+    })
+
+
+@app.route('/api/portal/overview', methods=['GET'])
+def portal_overview():
+    """门户首页数据：教师=各班已扫描汇总；学生=本人记录汇总。"""
+    if not session.get('user_id'):
+        return jsonify({'error': '未登录'}), 401
+    role = session.get('user_role', 'teacher')
+    uid = str(session.get('user_id') or '')
+    records = load_records()
+
+    if role == 'student':
+        mine = [r for r in records if str(r.get('student_id') or '') == uid]
+        return jsonify({
+            'role': 'student',
+            'total': len(mine),
+            'graded': len([r for r in mine if r.get('status') == 'graded']),
+            'records': [_public_record(r) for r in mine],
+        })
+
+    scoped = _filter_records_for_session(records)
+    names_map = get_student_names_map()
+    owners = load_class_owners()
+    groups = {}
+    for r in scoped:
+        c = r.get('class_name') or '未归档'
+        g = groups.setdefault(c, {'class_name': c, 'total': 0, 'graded': 0, 'pending': 0,
+                                  'students': set(), 'last_at': ''})
+        g['total'] += 1
+        if r.get('status') == 'graded':
+            g['graded'] += 1
+        else:
+            g['pending'] += 1
+        if r.get('student_id'):
+            g['students'].add(str(r['student_id']))
+        if (r.get('submitted_at') or '') > g['last_at']:
+            g['last_at'] = r.get('submitted_at') or ''
+    group_list = []
+    for c, g in groups.items():
+        group_list.append({
+            'class_name': c,
+            'total': g['total'],
+            'graded': g['graded'],
+            'pending': g['pending'],
+            'student_count': len(g['students']),
+            'last_at': g['last_at'],
+            'claimed_by_me': uid in (owners.get(c) or []),
+            'owners': owners.get(c) or [],
+        })
+    group_list.sort(key=lambda x: x['last_at'], reverse=True)
+
+    # 可认领的班级（有名字但尚无归属）——用于教师认领自己的班
+    all_classes = [c['name'] for c in _load_classes_roster()]
+    unclaimed = [c for c in all_classes if not (owners.get(c) or [])]
+    return jsonify({
+        'role': role,
+        'is_admin': role == 'admin',
+        'total': len(scoped),
+        'graded': len([r for r in scoped if r.get('status') == 'graded']),
+        'pending': len([r for r in scoped if r.get('status') != 'graded']),
+        'classes': group_list,
+        'all_classes': all_classes,
+        'unclaimed_classes': unclaimed,
+        'student_names': names_map,
+    })
+
+
+@app.route('/api/portal/records', methods=['GET'])
+def portal_records():
+    """按条件列出已扫描档案（教师视图）。"""
+    if not session.get('user_id'):
+        return jsonify({'error': '未登录'}), 401
+    records = _filter_records_for_session(
+        load_records(),
+        class_name=(request.args.get('class_name') or '').strip(),
+        student_id=(request.args.get('student_id') or '').strip(),
+        task_id=(request.args.get('task_id') or '').strip(),
+        status=(request.args.get('status') or '').strip(),
+    )
+    records = sorted(records, key=lambda r: r.get('submitted_at') or '', reverse=True)
+    return jsonify({'records': [_public_record(r) for r in records], 'count': len(records)})
+
+
+@app.route('/api/portal/records/<rec_id>/image')
+def portal_record_image(rec_id):
+    """档案图片。
+
+    默认原图；?processed=1 返回旋转（单 crop 时含裁剪）后的整页；
+    ?region=<区域id> 返回该区域的裁剪图（一页多区域时使用）。
+    """
+    if not session.get('user_id'):
+        return jsonify({'error': '未登录'}), 401
+    rec = _find_by_id(load_records(), rec_id)
+    if not rec:
+        return jsonify({'error': '记录不存在'}), 404
+    if not _filter_records_for_session([rec]):
+        return jsonify({'error': '无权查看该记录'}), 403
+    path = _records_image_path(rec)
+    if not path:
+        return jsonify({'error': '图片文件缺失'}), 404
+    region_id = (request.args.get('region') or '').strip()
+    if region_id:
+        region = _find_region(_clean_regions(rec.get('regions')), region_id)
+        if not region:
+            return jsonify({'error': '区域不存在'}), 404
+        try:
+            img = _transform_image(_open_image(path), rec.get('rotation', 0), region)
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            return Response(buf.getvalue(), mimetype='image/png')
+        except Exception as e:
+            return jsonify({'error': '区域取图失败：%s' % e}), 500
+    if request.args.get('processed'):
+        try:
+            crop = None if _clean_regions(rec.get('regions')) else rec.get('crop')
+            img = _transform_image(_open_image(path), rec.get('rotation', 0), crop)
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            return Response(buf.getvalue(), mimetype='image/png')
+        except Exception:
+            pass
+    return send_from_directory(RECORDS_IMAGES_DIR, os.path.basename(path))
+
+
+@app.route('/api/portal/records/<rec_id>/grade', methods=['POST'])
+def portal_record_grade(rec_id):
+    """执行 AI 批阅（教师）：按批阅方案逐块识别、评分并产出面向学生的评语。"""
+    if session.get('user_role') not in ('teacher', 'admin'):
+        return jsonify({'error': '仅教师或管理员可生成评语'}), 403
+    records = load_records()
+    rec = _find_by_id(records, rec_id)
+    if not rec:
+        return jsonify({'error': '记录不存在'}), 404
+    if not _filter_records_for_session([rec]):
+        return jsonify({'error': '无权操作该记录'}), 403
+    path = _records_image_path(rec)
+    if not path:
+        return jsonify({'error': '图片文件缺失'}), 404
+    data = request.get_json(silent=True) or {}
+    grading, err = _grade_record(rec, data.get('prompt_template'))
+    if err:
+        return jsonify({'error': err}), 500
+    save_records(records)
+    return jsonify({'ok': True, 'record': _public_record(rec), 'grading': grading})
+
+
+@app.route('/api/portal/records/<rec_id>/comment', methods=['POST'])
+def portal_record_comment(rec_id):
+    """教师填写/修改评语（可覆盖 AI 评语），或调整学号归属。"""
+    if session.get('user_role') not in ('teacher', 'admin'):
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    data = request.get_json(silent=True) or {}
+    records = load_records()
+    rec = _find_by_id(records, rec_id)
+    if not rec:
+        return jsonify({'error': '记录不存在'}), 404
+    if not _filter_records_for_session([rec]):
+        return jsonify({'error': '无权操作该记录'}), 403
+    if 'student_id' in data:
+        sid = str(data.get('student_id') or '').strip()
+        rec['student_id'] = sid
+        rec['student_name'] = get_student_names_map().get(sid, '') if sid else ''
+        if sid and not rec.get('class_name'):
+            rec['class_name'] = student_id_to_class_code(sid) or ''
+    if 'class_name' in data:
+        rec['class_name'] = str(data.get('class_name') or '').strip()
+    if 'ai_comment' in data:
+        rec['ai_comment'] = str(data.get('ai_comment') or '')
+        rec['status'] = 'graded' if rec['ai_comment'].strip() else 'pending'
+        rec['graded_at'] = _now_str()
+    if 'score_text' in data:
+        # 允许教师直接改写分数（如「8/10」），不再依赖模型
+        rec['score_text'] = str(data.get('score_text') or '').strip()
+        rec['status'] = 'graded' if (rec.get('ai_comment') or rec['score_text']) else 'pending'
+    if 'note' in data:
+        rec['note'] = str(data.get('note') or '')
+    save_records(records)
+    return jsonify({'ok': True, 'record': _public_record(rec)})
+
+
+@app.route('/api/portal/records/<rec_id>', methods=['DELETE'])
+def portal_record_delete(rec_id):
+    """删除一条档案（仅教师/管理员）。"""
+    if session.get('user_role') not in ('teacher', 'admin'):
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    records = load_records()
+    rec = _find_by_id(records, rec_id)
+    if not rec:
+        return jsonify({'error': '记录不存在'}), 404
+    if not _filter_records_for_session([rec]):
+        return jsonify({'error': '无权操作该记录'}), 403
+    path = _records_image_path(rec)
+    if path:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    save_records([r for r in records if r.get('id') != rec_id])
+    return jsonify({'ok': True, 'id': rec_id})
+
+
+@app.route('/api/portal/classes/claim', methods=['POST'])
+def portal_class_claim():
+    """教师认领/放弃班级归属，用于「只看到自己班级」。"""
+    if session.get('user_role') not in ('teacher', 'admin'):
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    data = request.get_json(silent=True) or {}
+    class_name = str(data.get('class_name') or '').strip()
+    action = str(data.get('action') or 'claim').strip()
+    if not class_name:
+        return jsonify({'error': '请指定班级'}), 400
+    uid = str(session.get('user_id') or '')
+    owners = load_class_owners()
+    lst = owners.get(class_name) or []
+    if action == 'release':
+        lst = [x for x in lst if x != uid]
+    else:
+        if uid and uid not in lst:
+            lst.append(uid)
+    if lst:
+        owners[class_name] = lst
+    else:
+        owners.pop(class_name, None)
+    save_class_owners(owners)
+    return jsonify({'ok': True, 'class_name': class_name, 'owners': owners.get(class_name) or []})
+
+
+@app.route('/api/portal/export.csv')
+def portal_export_csv():
+    """按当前筛选导出档案清单 CSV（教师用）。"""
+    if not session.get('user_id'):
+        return jsonify({'error': '未登录'}), 401
+    records = _filter_records_for_session(
+        load_records(),
+        class_name=(request.args.get('class_name') or '').strip(),
+        task_id=(request.args.get('task_id') or '').strip(),
+        status=(request.args.get('status') or '').strip(),
+    )
+    records = sorted(records, key=lambda r: (r.get('class_name') or '', r.get('student_id') or ''))
+    names_map = get_student_names_map()
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(['班级', '学号', '姓名', '任务', '批阅方案', '得分', '等级', '状态', '提交时间', '评语'])
+    for r in records:
+        sid = str(r.get('student_id') or '')
+        writer.writerow([
+            r.get('class_name', ''), sid, r.get('student_name') or names_map.get(sid, ''),
+            r.get('task_title', ''), r.get('subject_name', ''), r.get('score_text', ''),
+            (r.get('grading') or {}).get('level', '') if isinstance(r.get('grading'), dict) else '',
+            '已评' if r.get('status') == 'graded' else '待评',
+            r.get('submitted_at', ''),
+            (r.get('ai_comment') or '').replace('\r\n', '\n').replace('\n', ' '),
+        ])
+    body = out.getvalue().encode('utf-8-sig')
+    res = Response(body, mimetype='text/csv; charset=utf-8')
+    res.headers['Content-Disposition'] = 'attachment; filename="portal_records.csv"'
+    return res
+
 
 if __name__ == '__main__':
     # 初始化NAPS2 PowerShell函数（可选，主要用于测试）

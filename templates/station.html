@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>扫描工作站 · QuickJudge</title>
+<link rel="icon" href="/logo/favicon.ico">
+<style>
+:root{
+  --primary:#2563eb; --primary-dark:#1d4ed8; --primary-soft:#eff6ff;
+  --bg:#f5f6f8; --card:#ffffff; --line:#e5e7eb; --line-soft:#f1f3f5;
+  --text:#111827; --text2:#6b7280; --muted:#9ca3af;
+  --ok:#10b981; --warn:#f59e0b; --danger:#ef4444; --info:#3b82f6;
+  --radius:12px;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;
+  font-size:14px; line-height:1.6;
+}
+a{color:var(--primary);text-decoration:none;}
+
+/* 顶栏 */
+.topbar{
+  background:#fff; border-bottom:1px solid var(--line);
+  padding:12px 24px; display:flex; align-items:center; gap:16px;
+  position:sticky; top:0; z-index:50;
+}
+.topbar .brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:16px;letter-spacing:.2px;}
+.topbar .brand img{height:28px;display:block;}
+.topbar .brand .sub{color:var(--muted);font-weight:400;font-size:13px;}
+.topbar .spacer{flex:1;}
+.badge{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:4px 10px;border-radius:999px;font-size:12px;font-weight:500;
+  border:1px solid var(--line);background:#fff;color:var(--text2);
+}
+.badge.ok{background:#ecfdf5;border-color:#a7f3d0;color:#047857;}
+.badge.warn{background:#fffbeb;border-color:#fde68a;color:#b45309;}
+.badge.info{background:var(--primary-soft);border-color:#bfdbfe;color:var(--primary-dark);}
+
+.layout{display:grid;grid-template-columns:320px minmax(0,1fr);gap:20px;padding:20px 24px 60px;max-width:1680px;margin:0 auto;}
+@media (max-width:1080px){.layout{grid-template-columns:1fr;}}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);}
+.card .hd{padding:14px 18px;border-bottom:1px solid var(--line-soft);display:flex;align-items:center;gap:10px;}
+.card .hd h3{margin:0;font-size:15px;font-weight:600;}
+.card .hd .spacer{flex:1;}
+.card .bd{padding:18px;}
+
+/* 自动批阅进度 */
+.jobpanel{display:none;margin-top:14px;padding:12px 13px;border:1px solid var(--line);border-radius:10px;background:#fcfcfd;}
+.jobpanel.show{display:block;}
+.jobhd{display:flex;align-items:center;font-size:12.5px;color:var(--text2);margin-bottom:8px;}
+.jobhd .spacer{flex:1;}
+.jobpanel .bar{height:6px;border-radius:999px;background:#eef0f3;overflow:hidden;}
+.jobpanel .bar i{display:block;height:100%;width:0;background:var(--primary);border-radius:999px;transition:width .4s;}
+.jobpanel.done .bar i{background:var(--ok);}
+.jobpanel.err .bar i{background:var(--danger);}
+.joblist{margin-top:9px;display:flex;flex-direction:column;gap:4px;max-height:190px;overflow:auto;}
+.jobitem{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text2);}
+.jobitem .dot{width:6px;height:6px;border-radius:99px;background:var(--muted);flex:none;}
+.jobitem.ok .dot{background:var(--ok);}
+.jobitem.err .dot{background:var(--danger);}
+.jobitem .nm{color:var(--text);}
+.jobfoot{margin-top:10px;font-size:12.5px;color:var(--text2);}
+.jobfoot a{font-weight:500;}
+
+/* 按钮 */
+.btn{
+  appearance:none;border:1px solid var(--line);background:#fff;color:var(--text);
+  padding:8px 14px;border-radius:9px;font-size:13px;cursor:pointer;
+  transition:.15s; font-family:inherit; display:inline-flex;align-items:center;gap:6px;
+}
+.btn:hover{background:#f9fafb;border-color:#d1d5db;}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff;}
+.btn.primary:hover{background:var(--primary-dark);border-color:var(--primary-dark);}
+.btn.ok{background:var(--ok);border-color:var(--ok);color:#fff;}
+.btn.ok:hover{filter:brightness(.94);}
+.btn.ghost{background:transparent;}
+.btn.danger{color:var(--danger);border-color:#fecaca;background:#fff;}
+.btn.danger:hover{background:#fef2f2;}
+.btn.tiny{padding:5px 9px;font-size:12px;border-radius:7px;}
+
+.scan-btn{
+  width:100%;padding:22px 16px;font-size:17px;font-weight:600;border-radius:11px;
+  background:var(--primary);color:#fff;border:none;cursor:pointer;transition:.15s;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+}
+.scan-btn:hover{background:var(--primary-dark);}
+.scan-btn:disabled{background:#c7d2fe;cursor:progress;}
+.scan-btn .ico{font-size:20px;}
+
+.kv{font-size:12px;color:var(--text2);}
+.kv .row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--line-soft);}
+.kv .row:last-child{border-bottom:none;}
+.kv .row span:last-child{color:var(--text);word-break:break-all;text-align:right;max-width:65%;}
+.hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.7;}
+.hint code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:11.5px;}
+
+.urlbox{display:flex;gap:6px;align-items:center;margin-top:6px;}
+.urlbox input{flex:1;border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:12px;color:var(--text2);background:#fafafa;}
+
+/* 工具条 */
+.toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;}
+.toolbar .spacer{flex:1;}
+.counter{font-size:13px;color:var(--text2);}
+.counter b{color:var(--text);font-size:15px;}
+
+/* 队列 */
+.queue{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;}
+.empty{
+  border:1.5px dashed var(--line);border-radius:var(--radius);background:#fcfcfd;
+  padding:56px 24px;text-align:center;color:var(--muted);
+}
+.empty .big{font-size:32px;margin-bottom:10px;opacity:.5;}
+
+.item{background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;}
+.item .thumb{
+  position:relative;background:#f3f4f6;border-bottom:1px solid var(--line-soft);
+  height:230px;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:zoom-in;
+}
+.item .thumb img{max-width:100%;max-height:100%;display:block;object-fit:contain;}
+.item .badges{position:absolute;top:8px;left:8px;display:flex;gap:6px;flex-wrap:wrap;}
+.tag{padding:2px 7px;border-radius:6px;font-size:11px;font-weight:500;background:rgba(17,24,39,.72);color:#fff;backdrop-filter:blur(3px);}
+.tag.ok{background:rgba(16,185,129,.9);}
+.tag.warn{background:rgba(245,158,11,.92);color:#3b2a05;}
+.tag.crop{background:rgba(37,99,235,.9);}
+.item .seq{position:absolute;top:8px;right:8px;background:rgba(17,24,39,.72);color:#fff;font-size:11px;padding:2px 8px;border-radius:6px;}
+
+.item .body{padding:12px 14px;display:flex;flex-direction:column;gap:10px;flex:1;}
+.field{display:flex;flex-direction:column;gap:4px;}
+.field label{font-size:11.5px;color:var(--text2);font-weight:500;}
+.field .inline{display:flex;gap:6px;align-items:center;}
+input[type=text],select{
+  border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px;
+  font-family:inherit;color:var(--text);background:#fff;width:100%;outline:none;transition:.15s;
+}
+input[type=text]:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.12);}
+input.sid{font-family:ui-monospace,"SFMono-Regular",Consolas,monospace;letter-spacing:1px;}
+input.sid.match{border-color:var(--ok);background:#f0fdf4;}
+input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
+.namehint{font-size:11.5px;min-height:16px;color:var(--ok);}
+.namehint.bad{color:var(--warn);}
+
+.cands{display:flex;flex-wrap:wrap;gap:5px;}
+.cand{font-size:11.5px;padding:3px 8px;border-radius:999px;border:1px solid var(--line);background:#fafafa;cursor:pointer;}
+.cand:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-soft);}
+
+.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:4px;}
+.actions .grow{flex:1;}
+
+.ocrtxt{font-size:11.5px;color:var(--text2);background:#fafafa;border:1px solid var(--line-soft);border-radius:8px;padding:8px 10px;max-height:76px;overflow:auto;white-space:pre-wrap;}
+
+/* 卷面体检 */
+.qbox{display:flex;flex-direction:column;gap:4px;background:#fbfbfd;border:1px solid var(--line-soft);border-radius:8px;padding:7px 9px;}
+.qline{font-size:11.5px;color:var(--text2);}
+.qline.bad{color:#b45309;font-weight:600;}
+.qline.good{color:#047857;}
+.hwres{font-size:11.5px;line-height:1.7;color:var(--text2);background:#f8fafc;border:1px dashed var(--line);border-radius:8px;padding:7px 9px;width:100%;}
+
+/* 弹层 */
+.mask{position:fixed;inset:0;background:rgba(17,24,39,.62);z-index:200;display:none;align-items:center;justify-content:center;padding:24px;}
+.mask.show{display:flex;}
+.modal{background:#fff;border-radius:14px;max-width:1080px;width:100%;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;}
+.modal .mhd{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;}
+.modal .mhd h3{margin:0;font-size:15px;}
+.modal .mhd .spacer{flex:1;}
+.modal .mbd{padding:16px 20px;overflow:auto;}
+.modal .mft{padding:12px 20px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;align-items:center;}
+.modal .mft .spacer{flex:1;}
+
+.cropwrap{position:relative;display:inline-block;background:#111827;border-radius:8px;overflow:hidden;user-select:none;line-height:0;max-height:70vh;}
+.cropwrap img{max-width:100%;max-height:70vh;display:block;}
+.croplayers{position:absolute;left:0;top:0;right:0;bottom:0;}
+.cropsel{position:absolute;box-sizing:border-box;border:2px solid #34d399;background:rgba(52,211,153,.16);cursor:move;}
+.cropsel.sel{border-color:#f59e0b;background:rgba(245,158,11,.20);}
+.cropsel .rlabel{position:absolute;left:-2px;top:-20px;font-size:11px;line-height:18px;padding:0 7px;border-radius:5px 5px 5px 0;background:#059669;color:#fff;white-space:nowrap;font-weight:500;}
+.cropsel.sel .rlabel{background:#b45309;}
+.cropsel .h{position:absolute;width:12px;height:12px;background:#34d399;border-radius:3px;display:none;}
+.cropsel.sel .h{display:block;background:#fbbf24;}
+.cropsel .h.nw{left:-7px;top:-7px;cursor:nwse-resize;}
+.cropsel .h.ne{right:-7px;top:-7px;cursor:nesw-resize;}
+.cropsel .h.sw{left:-7px;bottom:-7px;cursor:nesw-resize;}
+.cropsel .h.se{right:-7px;bottom:-7px;cursor:nwse-resize;}
+.rlist{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;justify-content:center;}
+.rlist .rc{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;cursor:pointer;background:#fff;}
+.rlist .rc.sel{border-color:#f59e0b;background:#fffbeb;color:#92400e;}
+.rlist .rc .x{color:#b91c1c;font-weight:500;}
+
+.preview{display:flex;gap:16px;align-items:flex-start;}
+.preview img{max-height:68vh;max-width:100%;border:1px solid var(--line);border-radius:10px;background:#fafafa;}
+
+.toast{
+  position:fixed;right:22px;bottom:22px;z-index:500;display:flex;flex-direction:column;gap:8px;
+}
+.toast .t{background:#111827;color:#fff;padding:10px 16px;border-radius:9px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.2);animation:in .2s ease;}
+.toast .t.ok{background:#059669;}
+.toast .t.err{background:#dc2626;}
+@keyframes in{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+
+.spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;}
+@keyframes sp{to{transform:rotate(360deg);}}
+
+.blocked{
+  background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;
+  padding:12px 16px;font-size:13px;margin-bottom:16px;
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <img src="/logo/4.png" alt="QuickJudge">
+    <span class="sub">扫描工作站</span>
+  </div>
+  <span id="modeBadge" class="badge">检测中…</span>
+  <div class="spacer"></div>
+  <a class="btn ghost tiny" href="/" target="_blank" rel="noopener">进入完整后台 →</a>
+</div>
+
+<div class="layout">
+  <!-- 左：扫描控制 -->
+  <div style="display:flex;flex-direction:column;gap:20px;">
+    <div class="card">
+      <div class="hd"><h3>① 扫描</h3></div>
+      <div class="bd">
+        <div id="blockedBox" class="blocked" style="display:none;">
+          当前不是本机访问，扫描功能已锁定。请在连接扫描仪的这台电脑上打开本页。
+        </div>
+        <button class="scan-btn" id="scanBtn"><span class="ico">🖨️</span><span>开始扫描</span></button>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button class="btn" style="flex:1;justify-content:center;" id="importBtn">📁 导入本地图片</button>
+          <input type="file" id="importInput" accept="image/*" multiple style="display:none;">
+        </div>
+        <div style="margin-top:14px;">
+          <div style="font-size:12.5px;color:var(--text2);margin-bottom:5px;">批阅方案（扫完自动批，无需再点）</div>
+          <select id="subjectSel" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;background:#fff;"></select>
+        </div>
+
+        <div id="jobPanel" class="jobpanel">
+          <div class="jobhd">
+            <span id="jobStage">准备中…</span>
+            <span class="spacer"></span>
+            <span id="jobPct">0%</span>
+          </div>
+          <div class="bar"><i id="jobBar"></i></div>
+          <div id="jobList" class="joblist"></div>
+          <div id="jobFoot" class="jobfoot" style="display:none;"></div>
+        </div>
+
+        <div class="hint">
+          默认「扫完直接批」：系统自动识别学号 → 按学号分班 → 逐篇批阅 → 归档到用户端。
+          临时区用于补扫或手动修正，正常流程不需要进来。
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="hd"><h3>设备配置</h3></div>
+      <div class="bd">
+        <div class="kv" id="cfgBox"><div class="row"><span>加载中…</span><span></span></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="hd"><h3>用户端地址</h3></div>
+      <div class="bd">
+        <div class="hint" style="margin-top:0;">学生/教师在任意设备浏览器打开以下地址（同一局域网）：</div>
+        <div id="urlList"></div>
+        <div class="hint">如需校外访问，请把该地址发布到公网或使用内网穿透。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右：临时区 -->
+  <div class="card">
+    <div class="hd">
+      <h3>② 临时区</h3>
+      <span class="counter" id="counter">共 <b>0</b> 张</span>
+      <div class="spacer"></div>
+      <button class="btn tiny" id="refreshBtn">刷新</button>
+      <button class="btn tiny primary" id="submitAllBtn">全部提交</button>
+      <button class="btn tiny danger" id="clearBtn">清空临时区</button>
+    </div>
+    <div class="bd">
+      <div class="toolbar">
+        <span class="hint" style="margin:0;">自动批阅模式下这里通常是空的；只有补扫、或需要手动改学号/框选区域时才会用到。</span>
+      </div>
+      <div id="queue" class="queue"></div>
+      <div id="emptyBox" class="empty">
+        <div class="big">🗂️</div>
+        <div>临时区是空的。点击左侧「开始扫描」把卷子放进来。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 区域分割弹层（支持一页多块） -->
+<div class="mask" id="cropMask">
+  <div class="modal">
+    <div class="mhd">
+      <h3>区域分割 · 框选要评阅的部分</h3>
+      <div class="spacer"></div>
+      <span class="hint" style="margin:0;">空白处拖动＝新增一块；点框选中后可移动、拖角缩放</span>
+    </div>
+    <div class="mbd">
+      <div style="display:flex;justify-content:center;">
+        <div class="cropwrap" id="cropWrap">
+          <img id="cropImg" alt="待框选图片">
+          <div class="croplayers" id="cropLayers"></div>
+        </div>
+      </div>
+      <div class="rlist" id="regionList"></div>
+    </div>
+    <div class="mft">
+      <button class="btn ghost" id="cropWholeBtn">整页一块</button>
+      <button class="btn ghost" id="cropDelBtn">删除选中</button>
+      <button class="btn ghost" id="cropResetBtn">清空重画</button>
+      <div class="spacer"></div>
+      <span class="hint" id="cropInfo" style="margin:0;"></span>
+      <button class="btn" id="cropCancelBtn">取消</button>
+      <button class="btn primary" id="cropSaveBtn">保存区域</button>
+    </div>
+  </div>
+</div>
+
+<!-- 大图预览 -->
+<div class="mask" id="zoomMask">
+  <div class="modal">
+    <div class="mhd">
+      <h3 id="zoomTitle">预览</h3>
+      <div class="spacer"></div>
+      <button class="btn tiny" id="zoomCloseBtn">关闭</button>
+    </div>
+    <div class="mbd">
+      <div class="preview">
+        <div style="flex:1;min-width:0;">
+          <div class="hint" style="margin-top:0;">原图</div>
+          <img id="zoomOrig" alt="原图">
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div class="hint" style="margin-top:0;">提交效果（旋转+裁剪后）</div>
+          <img id="zoomProc" alt="处理后">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+
+let CTX = { classes: [], tasks: [], is_local: false };
+let QUEUE = [];
+
+function toast(msg, type) {
+  const el = document.createElement('div');
+  el.className = 't ' + (type || '');
+  el.textContent = msg;
+  $('#toast').appendChild(el);
+  setTimeout(() => el.remove(), type === 'err' ? 5200 : 2800);
+}
+
+async function api(url, opts) {
+  const res = await fetch(url, Object.assign({ credentials: 'same-origin' }, opts || {}));
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = {}; }
+  if (!res.ok) throw new Error((data && (data.error || data.message)) || ('请求失败 ' + res.status));
+  return data;
+}
+
+/* ---------------- 初始化 ---------------- */
+async function loadContext() {
+  try {
+    CTX = await api('/api/station/context');
+  } catch (e) {
+    $('#modeBadge').className = 'badge warn';
+    $('#modeBadge').textContent = '连接失败';
+    return;
+  }
+  const local = CTX.is_local;
+  const badge = $('#modeBadge');
+  badge.className = 'badge ' + (local ? 'ok' : 'warn');
+  badge.textContent = local ? '● 本机模式 · 可扫描' : '● 远程访问 · 扫描已锁定';
+  $('#blockedBox').style.display = local ? 'none' : 'block';
+  $('#scanBtn').disabled = !local;
+  $('#importBtn').disabled = !local;
+
+  $('#cfgBox').innerHTML =
+    row('扫描设备', CTX.naps2_path || '未配置') +
+    row('输出目录', CTX.scan_output_dir || '-') +
+    row('临时区', (CTX.staging_count || 0) + ' 张待整理') +
+    row('当前用户', CTX.user ? (CTX.user.name || CTX.user.id) + '（' + CTX.user.role + '）' : '未登录');
+
+  // 批阅方案下拉：默认英语作文，记住上次选择（老师不需要每次改）
+  const gs = (CTX.grading && CTX.grading.subjects) || [];
+  const sel = $('#subjectSel');
+  if (sel) {
+    const saved = localStorage.getItem('qj_station_subject') || 'english_essay';
+    sel.innerHTML = gs.map(s => '<option value="' + esc(s.key) + '">' + esc(s.name) + '（满分 ' + esc(s.max_score) + '）</option>').join('');
+    sel.value = gs.some(s => s.key === saved) ? saved : (gs[0] ? gs[0].key : 'english_essay');
+    sel.onchange = () => localStorage.setItem('qj_station_subject', sel.value);
+  }
+
+  const urls = CTX.portal_urls || [];
+  $('#urlList').innerHTML = urls.length
+    ? urls.map(u => '<div class="urlbox"><input readonly value="' + esc(u) + '"><button class="btn tiny" data-copy="' + esc(u) + '">复制</button></div>').join('')
+    : '<div class="hint">未检测到局域网地址，请确认本机已连接网络。</div>';
+  $$('#urlList [data-copy]').forEach(b => b.onclick = () => {
+    navigator.clipboard.writeText(b.dataset.copy).then(() => toast('已复制', 'ok'), () => toast('复制失败', 'err'));
+  });
+  renderQueue();
+}
+function row(k, v) { return '<div class="row"><span>' + esc(k) + '</span><span>' + esc(v) + '</span></div>'; }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+/* ---------------- 扫描 / 导入 ---------------- */
+let JOB_TIMER = null;
+
+const STAGE_TEXT = {
+  queued: '已排队…', reading: '识别表头与正文', grading: '逐篇批阅',
+  corpus: '生成话题语料', awards: '评选同学佳句', committing: '归档到用户端', done: '已完成'
+};
+
+function renderJob(j) {
+  const panel = $('#jobPanel');
+  panel.classList.add('show');
+  const job = j.job || {};
+  const done = job.status === 'done', err = job.status === 'error';
+  panel.classList.toggle('done', done);
+  panel.classList.toggle('err', err);
+  const total = job.total || 0, dn = job.done || 0;
+  const pct = done ? 100 : (total ? Math.round(dn / total * 100) : 0);
+  $('#jobStage').textContent = job.message || STAGE_TEXT[job.stage] || '处理中…';
+  $('#jobPct').textContent = pct + '%';
+  $('#jobBar').style.width = pct + '%';
+
+  $('#jobList').innerHTML = (j.results || []).map(r => {
+    if (r.error) {
+      return `<div class="jobitem err"><span class="dot"></span><span class="nm">${esc(r.student_id || '未识别')}</span><span>${esc(r.error)}</span></div>`;
+    }
+    return `<div class="jobitem ok"><span class="dot"></span><span class="nm">${esc(r.student_id || '—')} ${esc(r.name || '')}</span><span>${esc(r.score == null ? '' : r.score)}${esc(r.level ? ' · ' + r.level : '')}</span></div>`;
+  }).join('');
+
+  const foot = $('#jobFoot');
+  if (done) {
+    const n = (j.record_ids || []).length;
+    foot.style.display = 'block';
+    foot.innerHTML = `已归档 <b>${n}</b> 份 · <a href="/portal" target="_blank" rel="noopener">去用户端查看 →</a>`;
+  } else if (err) {
+    foot.style.display = 'block';
+    foot.innerHTML = '批阅中断：' + esc(job.message || '未知原因') +
+      ` <a href="#" id="jobRetry">重试本批</a>`;
+    const rb = $('#jobRetry');
+    if (rb) rb.onclick = async (ev) => {
+      ev.preventDefault();
+      await api('/api/station/jobs/' + j.id + '/retry', { method: 'POST' });
+      foot.style.display = 'none';
+      pollJob(j.id);
+      if (!JOB_TIMER) JOB_TIMER = setInterval(() => pollJob(j.id), 2500);
+    };
+  } else {
+    foot.style.display = 'none';
+  }
+}
+
+async function pollJob(bid) {
+  let j;
+  try { j = await api('/api/station/jobs/' + bid); } catch (e) { return; }
+  renderJob(j);
+  const st = (j.job || {}).status;
+  if (st === 'done' || st === 'error') {
+    if (JOB_TIMER) { clearInterval(JOB_TIMER); JOB_TIMER = null; }
+    await loadQueue();
+    if (st === 'done') toast('批阅完成，已归档 ' + (j.record_ids || []).length + ' 份', 'ok');
+  }
+}
+
+$('#scanBtn').onclick = async () => {
+  const btn = $('#scanBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span><span>扫描中，请把试卷放入扫描仪…</span>';
+  try {
+    const r = await api('/api/station/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject: ($('#subjectSel') || {}).value || 'english_essay', auto: true })
+    });
+    if (r.batch && r.batch.id) {
+      $('#jobPanel').classList.add('show');
+      $('#jobList').innerHTML = '';
+      $('#jobFoot').style.display = 'none';
+      $('#jobStage').textContent = '已扫描 ' + (r.count || 1) + ' 页，开始自动批阅…';
+      $('#jobBar').style.width = '2%';
+      if (JOB_TIMER) clearInterval(JOB_TIMER);
+      pollJob(r.batch.id);
+      JOB_TIMER = setInterval(() => pollJob(r.batch.id), 2500);
+    } else {
+      toast('已扫描 ' + (r.count || 1) + ' 页，已进入临时区', 'ok');
+      await loadQueue();
+    }
+  } catch (e) {
+    fail('扫描失败', e.message);
+  } finally {
+    btn.disabled = !CTX.is_local;
+    btn.innerHTML = '<span class="ico">🖨️</span><span>开始扫描</span>';
+  }
+};
+
+// 扫描类错误信息较长（含排查步骤），用弹窗完整展示，避免提示条截断
+function fail(title, msg) {
+  if (msg && msg.length > 90) {
+    window.alert(title + '\n\n' + msg);
+  } else {
+    toast(msg || title, 'err');
+  }
+}
+
+$('#importBtn').onclick = () => $('#importInput').click();
+$('#importInput').onchange = async (ev) => {
+  const files = ev.target.files;
+  if (!files || !files.length) return;
+  const fd = new FormData();
+  Array.from(files).forEach(f => fd.append('files', f));
+  try {
+    const r = await api('/api/station/import', { method: 'POST', body: fd });
+    toast('已导入 ' + r.count + ' 张到临时区', 'ok');
+    await loadQueue();
+  } catch (e) { toast(e.message, 'err'); }
+  ev.target.value = '';
+};
+
+/* ---------------- 临时区 ---------------- */
+async function loadQueue() {
+  try {
+    const r = await api('/api/station/staging');
+    QUEUE = r.items || [];
+  } catch (e) {
+    QUEUE = [];
+  }
+  renderQueue();
+  $('#counter').innerHTML = '共 <b>' + QUEUE.length + '</b> 张';
+}
+
+function classOptions(sel) {
+  return '<option value="">— 选择班级 —</option>' + CTX.classes.map(c =>
+    '<option value="' + esc(c.name) + '"' + (sel === c.name ? ' selected' : '') + '>' + esc(c.name) + '</option>').join('');
+}
+function taskOptions(sel) {
+  return '<option value="">— 不归属任务 —</option>' + CTX.tasks.map(t =>
+    '<option value="' + esc(t.id) + '"' + (sel === t.id ? ' selected' : '') + '>' + esc(t.title || t.id.slice(0, 8)) + '</option>').join('');
+}
+function subjectOptions(sel) {
+  const g = CTX.grading || { current: 'general', subjects: [] };
+  const cur = sel || g.current || 'general';
+  return g.subjects.map(s =>
+    '<option value="' + esc(s.key) + '"' + (cur === s.key ? ' selected' : '') + '>' +
+    esc(s.name) + '（每块 ' + esc(String(s.max_score)) + ' 分）</option>').join('');
+}
+
+function renderQueue() {
+  const box = $('#queue');
+  $('#emptyBox').style.display = QUEUE.length ? 'none' : 'block';
+  box.innerHTML = QUEUE.map((it, i) => itemHtml(it, i)).join('');
+  bindQueue();
+}
+
+function itemHtml(it, i) {
+  const nRegion = (it.regions || []).length;
+  const hasCrop = !!it.crop || nRegion > 0;
+  const ready = !!(it.student_id || it.class_name);
+  const src = '/api/station/staging/' + it.id + '/image' + ((it.crop || it.rotation) ? '?processed=1' : '');
+  const q = it.quality || null;
+  const hw = it.handwriting || null;
+  const qLabel = q ? (((q.labels || []).length) ? q.labels.join('、') : '卷面清晰') : '';
+  const qLine = q
+    ? '字高 ' + q.char_mm + 'mm · 笔画 ' + q.stroke_px + 'px · ' + q.dpi + 'dpi'
+    : '';
+  return `
+  <div class="item" data-id="${it.id}">
+    <div class="thumb" data-zoom="${it.id}">
+      <img src="${src}" alt="扫描件" loading="lazy">
+      <div class="badges">
+        <span class="tag ${ready ? 'ok' : 'warn'}">${ready ? '已填写' : '待整理'}</span>
+        ${q ? '<span class="tag ' + (q.hard ? 'warn' : 'ok') + '">' + esc(qLabel) + '</span>' : ''}
+        ${nRegion > 1 ? '<span class="tag crop">已分 ' + nRegion + ' 块</span>' : (hasCrop ? '<span class="tag crop">单块区域</span>' : '')}
+        ${it.rotation ? '<span class="tag">旋转' + it.rotation + '°</span>' : ''}
+      </div>
+      <div class="seq">#${i + 1}</div>
+    </div>
+    <div class="body">
+      <div class="field">
+        <label>学号（6 位）</label>
+        <div class="inline">
+          <input type="text" class="sid" maxlength="6" inputmode="numeric" placeholder="例如 230205"
+                 value="${esc(it.student_id || '')}" data-sid="${it.id}">
+          <button class="btn tiny" data-detect="${it.id}">识别</button>
+        </div>
+        <div class="namehint" data-name="${it.id}"></div>
+        <div class="cands" data-cands="${it.id}"></div>
+      </div>
+      <div class="field">
+        <label>归属班级</label>
+        <select data-class="${it.id}">${classOptions(it.class_name)}</select>
+      </div>
+      <div class="field">
+        <label>批阅方案</label>
+        <select data-subject="${it.id}">${subjectOptions(it.subject)}</select>
+      </div>
+      <div class="field">
+        <label>归属任务（可选）</label>
+        <select data-task="${it.id}">${taskOptions(it.task_id)}</select>
+      </div>
+      ${it.ocr_text ? '<div class="ocrtxt" style="max-height:60px;">' + esc(it.ocr_text.slice(0, 180)) + '</div>' : ''}
+      ${q ? '<div class="qbox">'
+        + '<div class="qline">📐 ' + esc(qLine) + '</div>'
+        + (hw ? '<div class="qline ' + ((hw.grade === 'C' || hw.grade === 'D') ? 'bad' : 'good') + '">✍️ 字迹 ' + esc(hw.grade)
+            + '（' + esc(hw.grade_label) + '，读不准 ' + esc(String(hw.unsure_ratio)) + '%）</div>' : '')
+        + '<button class="btn tiny" data-hw="' + it.id + '">🔍 字迹体检</button>'
+        + '</div>' : ''}
+      <div class="actions">
+        <button class="btn tiny" data-crop="${it.id}">✂️ 区域分割${nRegion > 1 ? '（' + nRegion + '）' : ''}</button>
+        <button class="btn tiny" data-rot="${it.id}">↻ 旋转</button>
+        <button class="btn tiny danger" data-del="${it.id}">丢弃</button>
+        <button class="btn tiny ok grow" data-submit="${it.id}">提交入库</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function bindQueue() {
+  $$('[data-sid]').forEach(inp => {
+    inp.onchange = () => saveItem(inp.dataset.sid, { student_id: inp.value.trim() });
+    inp.oninput = () => {
+      const sid = inp.value.trim();
+      const hint = $('[data-name="' + inp.dataset.sid + '"]');
+      if (sid.length !== 6) { hint.textContent = ''; inp.className = 'sid'; return; }
+      const info = findStudent(sid);
+      if (info) { hint.className = 'namehint'; hint.textContent = '✓ ' + (info.name || '（名单中，无姓名）') + ' · ' + info.class_name + '班'; inp.className = 'sid match'; }
+      else { hint.className = 'namehint bad'; hint.textContent = '⚠ 名单中未找到该学号，提交后将按学号前缀归档'; inp.className = 'sid unmatched'; }
+    };
+    if (inp.value.trim().length === 6) inp.oninput();
+  });
+  $$('[data-class]').forEach(sel => sel.onchange = () => saveItem(sel.dataset.class, { class_name: sel.value }));
+  $$('[data-task]').forEach(sel => sel.onchange = () => saveItem(sel.dataset.task, { task_id: sel.value }));
+  $$('[data-subject]').forEach(sel => sel.onchange = () => saveItem(sel.dataset.subject, { subject: sel.value }));
+  $$('[data-detect]').forEach(b => b.onclick = () => detectId(b.dataset.detect, b));
+  $$('[data-hw]').forEach(b => b.onclick = () => checkHandwriting(b.dataset.hw, b));
+  $$('[data-rot]').forEach(b => b.onclick = () => rotateItem(b.dataset.rot));
+  $$('[data-del]').forEach(b => b.onclick = () => removeItem(b.dataset.del));
+  $$('[data-crop]').forEach(b => b.onclick = () => openCrop(b.dataset.crop));
+  $$('[data-submit]').forEach(b => b.onclick = () => submitItem(b.dataset.submit, b));
+  $$('[data-zoom]').forEach(t => t.onclick = () => openZoom(t.dataset.zoom));
+}
+
+function findStudent(sid) {
+  for (const c of CTX.classes) {
+    if ((c.students || []).indexOf(sid) >= 0) return { class_name: c.name, name: (c.student_names || {})[sid] || '' };
+  }
+  return null;
+}
+
+async function saveItem(id, patch) {
+  try {
+    const r = await api('/api/station/staging/' + id, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch)
+    });
+    const idx = QUEUE.findIndex(x => x.id === id);
+    if (idx >= 0) QUEUE[idx] = r.item;
+    if (patch.class_name !== undefined || patch.student_id !== undefined) renderQueue();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// 字迹体检：与改卷无关，只看「这份字迹机器读起来顺不顺」
+async function checkHandwriting(id, btn) {
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '体检中…';
+  try {
+    const r = await api('/api/station/handwriting', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: id })
+    });
+    const idx = QUEUE.findIndex(x => x.id === id);
+    if (idx >= 0) {
+      QUEUE[idx] = Object.assign({}, QUEUE[idx], {
+        handwriting: {
+          grade: r.grade, grade_label: r.grade_label,
+          unsure_ratio: r.unsure_ratio, tips: r.tips || []
+        }
+      });
+    }
+    const un = (r.unsure || []).slice(0, 6);
+    const detail = [
+      '字迹等级 ' + (r.grade || '-') + ' ' + (r.grade_label || ''),
+      '读不准 ' + (r.unsure_ratio || 0) + '%（' + (r.unsure || []).length + '/' + (r.total_words || 0) + ' 词）'
+    ].concat((r.tips || []).slice(1))
+     .concat(un.map(u => '· ' + u.word + '（' + (u.why || '字迹不清') + '）'));
+    renderQueue();
+    const box = $('[data-cands="' + id + '"]');
+    if (box) box.innerHTML = '<div class="hwres">' + detail.map(esc).join('<br>') + '</div>';
+    toast('字迹体检：' + (r.grade_label || '完成'), (r.grade === 'C' || r.grade === 'D') ? 'err' : 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false; btn.textContent = old;
+}
+
+async function detectId(id, btn) {
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '识别中…';
+  try {
+    const r = await api('/api/station/staging/' + id + '/detect_id', { method: 'POST' });
+    const idx = QUEUE.findIndex(x => x.id === id);
+    if (idx >= 0) QUEUE[idx] = r.item;
+    renderQueue();
+    if (r.candidates && r.candidates.length > 1) {
+      const box = $('[data-cands="' + id + '"]');
+      if (box) {
+        box.innerHTML = r.candidates.map(c =>
+          '<span class="cand" data-pick="' + esc(c.student_id) + '" data-pid="' + id + '">' +
+          esc(c.student_id) + (c.name ? ' ' + esc(c.name) : '') + ' · ' + esc(c.class_name) + '</span>').join('');
+        $$('[data-pick]').forEach(el => el.onclick = () => {
+          saveItem(el.dataset.pid, { student_id: el.dataset.pick });
+        });
+      }
+    }
+    if (r.student_id) toast('识别到学号 ' + r.student_id, 'ok');
+    else toast(r.error || '未识别出学号，请手写输入', 'err');
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false; btn.textContent = old;
+}
+
+async function rotateItem(id) {
+  try {
+    const r = await api('/api/station/staging/' + id + '/rotate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step: 90 })
+    });
+    const idx = QUEUE.findIndex(x => x.id === id);
+    if (idx >= 0) QUEUE[idx] = r.item;
+    renderQueue();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function removeItem(id) {
+  if (!confirm('确定丢弃这张扫描件？图片将被删除。')) return;
+  try {
+    await api('/api/station/staging/' + id, { method: 'DELETE' });
+    QUEUE = QUEUE.filter(x => x.id !== id);
+    renderQueue();
+    $('#counter').innerHTML = '共 <b>' + QUEUE.length + '</b> 张';
+    toast('已丢弃', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function submitItem(id, btn) {
+  const it = QUEUE.find(x => x.id === id);
+  if (!it) return;
+  if (!it.student_id && !it.class_name) { toast('请先填写学号或选择班级', 'err'); return; }
+  btn.disabled = true;
+  const old = btn.textContent; btn.textContent = '提交中…';
+  try {
+    await api('/api/station/staging/' + id + '/submit', { method: 'POST' });
+    QUEUE = QUEUE.filter(x => x.id !== id);
+    renderQueue();
+    $('#counter').innerHTML = '共 <b>' + QUEUE.length + '</b> 张';
+    toast('已提交入库，用户端现在可见', 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
+    btn.disabled = false; btn.textContent = old;
+  }
+}
+
+$('#submitAllBtn').onclick = async () => {
+  const ready = QUEUE.filter(x => x.student_id || x.class_name);
+  if (!ready.length) { toast('没有可提交的条目（需先填写学号或班级）', 'err'); return; }
+  if (!confirm('提交临时区中 ' + ready.length + ' 张已整理的试卷？')) return;
+  const taskSel = QUEUE.length ? ($('[data-task]') ? $('[data-task]').value : '') : '';
+  try {
+    const r = await api('/api/station/staging/submit_all', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: taskSel })
+    });
+    toast('已提交 ' + r.submitted_count + ' 张，剩余 ' + r.remaining + ' 张', 'ok');
+    await loadQueue();
+  } catch (e) { toast(e.message, 'err'); }
+};
+
+$('#clearBtn').onclick = async () => {
+  if (!QUEUE.length) { toast('临时区已经是空的'); return; }
+  if (!confirm('清空临时区？' + QUEUE.length + ' 张未提交的扫描件将被永久删除。')) return;
+  try {
+    const r = await api('/api/station/staging/clear', { method: 'POST' });
+    toast('已清空 ' + r.cleared + ' 张', 'ok');
+    await loadQueue();
+  } catch (e) { toast(e.message, 'err'); }
+};
+
+$('#refreshBtn').onclick = loadQueue;
+window.addEventListener('keydown', e => {
+  if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r')) return;
+});
+
+/* ---------------- 区域分割（一页多块） ---------------- */
+let cropItemId = null, cropRegions = [], cropSel = -1, dragState = null;
+
+function openCrop(id) {
+  const it = QUEUE.find(x => x.id === id);
+  if (!it) return;
+  cropItemId = id;
+  cropSel = -1;
+  const img = $('#cropImg');
+  img.onload = () => {
+    const w = wrapBox();
+    const src = (it.regions && it.regions.length)
+      ? it.regions
+      : (it.crop ? [Object.assign({ id: 'r1', label: '选区' }, it.crop)] : []);
+    cropRegions = src.map((r, i) => ({
+      id: r.id || ('r' + (i + 1)),
+      label: r.label || ('区域' + (i + 1)),
+      x: r.x * w.width, y: r.y * w.height, w: r.w * w.width, h: r.h * w.height
+    }));
+    if (cropRegions.length) cropSel = 0;
+    renderRegions();
+  };
+  img.src = '/api/station/staging/' + id + '/image?rotated=1&t=' + Date.now();
+  $('#cropMask').classList.add('show');
+}
+
+function wrapBox() { return $('#cropWrap').getBoundingClientRect(); }
+
+function renderRegions() {
+  $('#cropLayers').innerHTML = cropRegions.map((r, i) => `
+    <div class="cropsel${i === cropSel ? ' sel' : ''}" data-idx="${i}"
+         style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;">
+      <span class="rlabel">${esc(r.label)}</span>
+      <div class="h nw" data-dir="nw"></div><div class="h ne" data-dir="ne"></div>
+      <div class="h sw" data-dir="sw"></div><div class="h se" data-dir="se"></div>
+    </div>`).join('');
+
+  const w = wrapBox();
+  $('#regionList').innerHTML = cropRegions.map((r, i) =>
+    `<span class="rc${i === cropSel ? ' sel' : ''}" data-pick="${i}">${esc(r.label)} · ` +
+    `${Math.round(r.w / w.width * 100)}%×${Math.round(r.h / w.height * 100)}%` +
+    `<span class="x" data-kill="${i}">×</span></span>`
+  ).join('') || '<span class="hint" style="margin:0;">还没有框选，整页将被当作一块评阅</span>';
+
+  $$('#cropLayers .cropsel').forEach(el => {
+    el.addEventListener('mousedown', e => onRegionDown(e, +el.dataset.idx));
+  });
+  $$('#regionList [data-pick]').forEach(el => {
+    el.onclick = () => { cropSel = +el.dataset.pick; renderRegions(); };
+  });
+  $$('#regionList [data-kill]').forEach(el => {
+    el.onclick = ev => { ev.stopPropagation(); removeRegion(+el.dataset.kill); };
+  });
+  updateCropInfo();
+}
+
+function removeRegion(i) {
+  cropRegions.splice(i, 1);
+  cropRegions.forEach((r, k) => { r.label = '区域' + (k + 1); });
+  cropSel = cropRegions.length ? Math.min(i, cropRegions.length - 1) : -1;
+  renderRegions();
+}
+
+function onRegionDown(e, idx) {
+  if (e.target.classList.contains('h')) {
+    cropSel = idx;
+    dragState = { mode: 'resize', dir: e.target.dataset.dir, idx, orig: Object.assign({}, cropRegions[idx]) };
+  } else {
+    cropSel = idx;
+    dragState = { mode: 'move', idx, sx: e.clientX, sy: e.clientY, orig: Object.assign({}, cropRegions[idx]) };
+  }
+  renderRegions();
+  e.preventDefault();
+  e.stopPropagation();
+}
+
+$('#cropWrap').addEventListener('mousedown', e => {
+  if (dragState) return;
+  if (e.target.closest('.cropsel')) return;
+  const w = wrapBox();
+  const x = e.clientX - w.left, y = e.clientY - w.top;
+  cropRegions.push({ id: 'r' + (cropRegions.length + 1), label: '区域' + (cropRegions.length + 1), x, y, w: 0, h: 0 });
+  cropSel = cropRegions.length - 1;
+  dragState = { mode: 'new', idx: cropSel, ox: x, oy: y };
+  renderRegions();
+  e.preventDefault();
+});
+
+document.addEventListener('mousemove', e => {
+  if (!dragState) return;
+  const w = wrapBox();
+  const mx = Math.min(Math.max(0, e.clientX - w.left), w.width);
+  const my = Math.min(Math.max(0, e.clientY - w.top), w.height);
+  const r = cropRegions[dragState.idx];
+  if (!r) return;
+  if (dragState.mode === 'new') {
+    r.x = Math.min(dragState.ox, mx); r.y = Math.min(dragState.oy, my);
+    r.w = Math.abs(mx - dragState.ox); r.h = Math.abs(my - dragState.oy);
+  } else if (dragState.mode === 'move') {
+    const o = dragState.orig;
+    r.x = Math.max(0, Math.min(o.x + (e.clientX - dragState.sx), w.width - o.w));
+    r.y = Math.max(0, Math.min(o.y + (e.clientY - dragState.sy), w.height - o.h));
+  } else if (dragState.mode === 'resize') {
+    const o = dragState.orig, d = dragState.dir;
+    let x1 = o.x, y1 = o.y, x2 = o.x + o.w, y2 = o.y + o.h;
+    if (d.indexOf('n') >= 0) y1 = Math.min(my, y2 - 8);
+    if (d.indexOf('s') >= 0) y2 = Math.max(my, y1 + 8);
+    if (d.indexOf('w') >= 0) x1 = Math.min(mx, x2 - 8);
+    if (d.indexOf('e') >= 0) x2 = Math.max(mx, x1 + 8);
+    r.x = x1; r.y = y1; r.w = x2 - x1; r.h = y2 - y1;
+  }
+  paintRegions();
+  updateCropInfo();
+});
+
+function paintRegions() {
+  $$('#cropLayers .cropsel').forEach((el, i) => {
+    const r = cropRegions[i];
+    if (!r) return;
+    el.style.left = r.x + 'px'; el.style.top = r.y + 'px';
+    el.style.width = r.w + 'px'; el.style.height = r.h + 'px';
+  });
+}
+
+document.addEventListener('mouseup', () => {
+  if (!dragState) return;
+  const st = dragState;
+  dragState = null;
+  const r = cropRegions[st.idx];
+  if (!r) return;
+  if (r.w < 14 || r.h < 14) {
+    cropRegions.splice(st.idx, 1);
+    cropSel = cropRegions.length ? cropRegions.length - 1 : -1;
+  }
+  renderRegions();
+});
+
+function updateCropInfo() {
+  const n = cropRegions.length;
+  if (!n) { $('#cropInfo').textContent = '未框选 · 整页当作一块'; return; }
+  const i = cropSel >= 0 ? cropSel + 1 : 1;
+  $('#cropInfo').textContent = '共 ' + n + ' 块 · 每块独立评分 · 当前第 ' + i + ' 块';
+}
+
+function normRegions() {
+  const w = wrapBox();
+  return cropRegions.map((r, i) => ({
+    id: r.id || ('r' + (i + 1)),
+    label: r.label || ('区域' + (i + 1)),
+    x: +(r.x / w.width).toFixed(4), y: +(r.y / w.height).toFixed(4),
+    w: +(r.w / w.width).toFixed(4), h: +(r.h / w.height).toFixed(4)
+  }));
+}
+
+$('#cropWholeBtn').onclick = () => {
+  const w = wrapBox();
+  cropRegions = [{ id: 'r1', label: '整页', x: w.width * 0.05, y: w.height * 0.08, w: w.width * 0.9, h: w.height * 0.84 }];
+  cropSel = 0;
+  renderRegions();
+};
+$('#cropDelBtn').onclick = () => {
+  if (cropSel < 0) { toast('先点一下要删除的框', 'err'); return; }
+  removeRegion(cropSel);
+};
+$('#cropResetBtn').onclick = () => { cropRegions = []; cropSel = -1; renderRegions(); };
+$('#cropCancelBtn').onclick = () => $('#cropMask').classList.remove('show');
+$('#cropSaveBtn').onclick = async () => {
+  const list = normRegions();
+  try {
+    await api('/api/station/staging/' + cropItemId, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ regions: list })
+    });
+    const idx = QUEUE.findIndex(x => x.id === cropItemId);
+    if (idx >= 0) { QUEUE[idx].regions = list; QUEUE[idx].crop = null; }
+    $('#cropMask').classList.remove('show');
+    renderQueue();
+    toast(list.length ? ('已保存 ' + list.length + ' 块区域') : '已清空区域，整页作为一块', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+};
+
+/* ---------------- 大图预览 ---------------- */
+function openZoom(id) {
+  const it = QUEUE.find(x => x.id === id);
+  if (!it) return;
+  $('#zoomTitle').textContent = '预览 · ' + (it.original_name || id.slice(0, 8));
+  $('#zoomOrig').src = '/api/station/staging/' + id + '/image?t=' + Date.now();
+  $('#zoomProc').src = '/api/station/staging/' + id + '/image?' + (it.crop || it.rotation ? 'processed=1&' : '') + 't=' + Date.now();
+  $('#zoomMask').classList.add('show');
+}
+$('#zoomCloseBtn').onclick = () => $('#zoomMask').classList.remove('show');
+$$('.mask').forEach(m => m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); }));
+
+/* ---------------- 启动 ---------------- */
+loadContext().then(loadQueue);
+</script>
+</body>
+</html>

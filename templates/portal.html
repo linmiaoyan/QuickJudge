@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>QuickJudge · 试卷门户</title>
+<link rel="icon" href="/logo/favicon.ico">
+<style>
+:root{
+  --primary:#2563eb; --primary-dark:#1d4ed8; --primary-soft:#eff6ff;
+  --bg:#f5f6f8; --card:#fff; --line:#e5e7eb; --line-soft:#f1f3f5;
+  --text:#111827; --text2:#6b7280; --muted:#9ca3af;
+  --ok:#10b981; --warn:#f59e0b; --danger:#ef4444;
+  --radius:14px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;
+  font-size:15px;line-height:1.65;
+}
+a{color:var(--primary);text-decoration:none;}
+
+/* 登录 */
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
+.login-card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:34px 30px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(17,24,39,.06);}
+.login-card .logo{height:34px;margin-bottom:18px;display:block;}
+.login-card h1{font-size:20px;margin:0 0 6px;font-weight:600;}
+.login-card p.sub{color:var(--text2);font-size:13px;margin:0 0 22px;}
+.login-card label{display:block;font-size:13px;color:var(--text2);margin:14px 0 6px;font-weight:500;}
+input[type=text],input[type=password],select{
+  width:100%;border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:15px;
+  font-family:inherit;color:var(--text);background:#fff;outline:none;transition:.15s;
+}
+input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.12);}
+.btn{
+  appearance:none;border:1px solid var(--line);background:#fff;color:var(--text);
+  padding:10px 16px;border-radius:10px;font-size:14px;cursor:pointer;transition:.15s;
+  font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+}
+.btn:hover{background:#f9fafb;}
+.btn:disabled{opacity:.55;cursor:not-allowed;}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff;}
+.btn.primary:hover{background:var(--primary-dark);}
+.btn.ok{background:var(--ok);border-color:var(--ok);color:#fff;}
+.btn.danger{color:var(--danger);border-color:#fecaca;}
+.btn.sm{padding:6px 12px;font-size:13px;border-radius:8px;}
+.btn.block{width:100%;margin-top:22px;padding:12px;font-size:15px;font-weight:500;}
+.err{color:var(--danger);font-size:13px;min-height:18px;margin-top:10px;}
+
+/* 顶栏 */
+.topbar{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:40;padding:12px 20px;display:flex;align-items:center;gap:14px;}
+.topbar img{height:26px;display:block;}
+.topbar .who{font-size:13px;color:var(--text2);}
+.topbar .who b{color:var(--text);font-weight:600;}
+.topbar .spacer{flex:1;}
+.chip{font-size:11.5px;padding:3px 9px;border-radius:999px;background:var(--primary-soft);color:var(--primary-dark);border:1px solid #bfdbfe;font-weight:500;}
+.chip.gray{background:#f3f4f6;border-color:var(--line);color:var(--text2);}
+
+.wrap{max-width:1280px;margin:0 auto;padding:20px 20px 70px;}
+@media (max-width:600px){.wrap{padding:14px 14px 70px;}.topbar{padding:10px 14px;}}
+
+/* 统计 */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;}
+@media (max-width:520px){.stats{grid-template-columns:repeat(3,1fr);gap:8px;}}
+.stat{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;}
+.stat .n{font-size:26px;font-weight:600;letter-spacing:-.5px;line-height:1.2;}
+.stat .l{font-size:12.5px;color:var(--text2);margin-top:2px;}
+.stat.g .n{color:var(--ok);} .stat.w .n{color:var(--warn);}
+
+h2.sec{font-size:16px;margin:26px 0 12px;font-weight:600;display:flex;align-items:center;gap:8px;}
+h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
+
+/* 班级卡 */
+.classgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;}
+.classcard{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:16px;cursor:pointer;transition:.15s;}
+.classcard:hover{border-color:var(--primary);box-shadow:0 4px 16px rgba(37,99,235,.09);transform:translateY(-1px);}
+.classcard .t{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;}
+.classcard .meta{font-size:12.5px;color:var(--text2);margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;}
+.classcard .bar{height:5px;background:#f1f3f5;border-radius:99px;margin-top:12px;overflow:hidden;display:flex;}
+.classcard .bar i{display:block;height:100%;background:var(--ok);}
+.classcard .bar i.p{background:#e5e7eb;}
+.pill{font-size:11px;padding:2px 8px;border-radius:999px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;}
+.pill.gray{background:#f3f4f6;color:var(--text2);border-color:var(--line);}
+
+/* 记录列表 */
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
+.toolbar .spacer{flex:1;}
+.records{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;}
+.rec{background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;}
+.rec .pic{height:250px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:zoom-in;position:relative;border-bottom:1px solid var(--line-soft);}
+.rec .pic img{max-width:100%;max-height:100%;object-fit:contain;display:block;}
+.rec .st{position:absolute;top:10px;left:10px;font-size:11.5px;padding:3px 9px;border-radius:999px;background:rgba(17,24,39,.75);color:#fff;}
+.rec .st.done{background:rgba(16,185,129,.92);}
+.rec .bd{padding:14px 16px;display:flex;flex-direction:column;gap:10px;flex:1;}
+.rec .head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+.rec .sid{font-family:ui-monospace,Consolas,monospace;font-size:15px;font-weight:600;letter-spacing:.5px;}
+.rec .nm{font-size:13px;color:var(--text2);}
+.rec .tm{font-size:11.5px;color:var(--muted);margin-left:auto;}
+.rec .task{font-size:12px;color:var(--text2);}
+.comment{font-size:13.5px;line-height:1.75;white-space:pre-wrap;background:#f9fafb;border-left:3px solid var(--primary);border-radius:8px;padding:11px 13px;max-height:230px;overflow:auto;}
+.comment.empty{color:var(--muted);border-left-color:var(--line);font-style:normal;}
+.rec .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;}
+.scorerow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.score{font-family:ui-monospace,Consolas,monospace;font-size:19px;font-weight:600;color:#b45309;letter-spacing:.5px;}
+.score.na{font-size:13px;color:var(--muted);font-weight:400;}
+.lvl{font-size:11.5px;padding:2px 9px;border-radius:999px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;}
+.lvl.warn{background:#fffbeb;color:#b45309;border-color:#fde68a;}
+.lvl.bad{background:#fef2f2;color:#b91c1c;border-color:#fecaca;}
+.subj{font-size:11.5px;color:var(--muted);}
+.pieces{display:flex;flex-direction:column;gap:10px;}
+.piece{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;}
+.piece .ph{display:flex;align-items:center;gap:8px;padding:7px 11px;background:#f9fafb;border-bottom:1px solid var(--line-soft);font-size:12px;}
+.piece .ph .lb{font-weight:500;}
+.piece .ph .sc{margin-left:auto;font-family:ui-monospace,Consolas,monospace;color:#b45309;font-weight:600;}
+.piece .pb{padding:10px 12px;font-size:13px;line-height:1.7;white-space:pre-wrap;}
+.piece .thumbline{display:block;cursor:zoom-in;background:#f3f4f6;}
+.piece .thumbline img{display:block;width:100%;max-height:260px;object-fit:contain;}
+.plist{display:flex;flex-wrap:wrap;gap:5px;}
+.chip{font-size:11.5px;padding:2px 8px;border-radius:6px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;}
+.chip.bad{background:#fef2f2;color:#991b1b;border-color:#fecaca;}
+
+/* ---------- 英语作文专项 ---------- */
+.eblk{margin-top:11px;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;}
+.eblk>.eh{display:flex;align-items:center;gap:7px;padding:7px 11px;background:#f9fafb;border-bottom:1px solid var(--line-soft);font-size:12px;font-weight:600;color:var(--text2);}
+.eblk>.eh .cnt{margin-left:auto;font-weight:400;color:var(--muted);}
+.eblk>.eb{padding:10px 12px;font-size:13px;line-height:1.7;}
+.req{display:flex;gap:7px;padding:4px 0;border-bottom:1px dashed var(--line-soft);}
+.req:last-child{border-bottom:none;}
+.req .mk{flex:none;width:16px;font-weight:700;}
+.req.c-covered .mk{color:var(--ok);}
+.req.c-partial .mk{color:var(--warn);}
+.req.c-missing .mk{color:var(--danger);}
+.req .pt{flex:1;}
+.req .ev{display:block;color:var(--muted);font-size:12px;margin-top:1px;}
+.err{display:flex;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line-soft);}
+.err:last-child{border-bottom:none;}
+.err .ty{flex:none;font-size:10.5px;padding:1px 6px;border-radius:5px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;height:18px;line-height:16px;}
+.err .body{flex:1;min-width:0;}
+.err .q{color:#991b1b;text-decoration:line-through;text-decoration-color:rgba(153,27,27,.45);}
+.err .f{color:#047857;font-weight:500;}
+
+/* 字迹可靠度 */
+.eblk.warnblk{border-color:#fcd34d;background:#fffdf5;}
+.eblk.warnblk>.eh{background:#fffbeb;border-bottom-color:#fde68a;color:#92400e;}
+.qtag{font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;padding:4px 8px;margin-bottom:6px;}
+.hwline{display:flex;gap:7px;padding:4px 0;border-bottom:1px dashed var(--line-soft);}
+.hwline:last-child{border-bottom:none;}
+.hwline .wr{flex:none;color:#92400e;font-weight:600;font-family:ui-monospace,Menlo,monospace;}
+.hwline .wf{color:#047857;}
+.qnote{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.6;}
+.err .w{display:block;color:var(--muted);font-size:11.5px;margin-top:1px;}
+.rw{padding:7px 0;border-bottom:1px dashed var(--line-soft);}
+.rw:last-child{border-bottom:none;}
+.rw .o{color:var(--text2);}
+.rw .n{color:#1d4ed8;font-weight:500;}
+.rw .fo{font-size:11px;color:var(--muted);margin-left:6px;}
+.award{background:#fffbeb;border:1px solid #fde68a;border-radius:9px;padding:9px 11px;font-size:13px;line-height:1.7;}
+.award .qt{font-style:italic;color:#92400e;}
+.award .wh{display:block;color:#b45309;font-size:12px;margin-top:3px;}
+.edu details{margin-top:10px;border:1px solid var(--line);border-radius:10px;background:#fcfcfd;}
+.edu summary{cursor:pointer;padding:8px 12px;font-size:12.5px;font-weight:600;color:var(--text2);list-style:none;}
+.edu summary::-webkit-details-marker{display:none;}
+.edu summary::before{content:"▸ ";color:var(--muted);}
+.edu details[open] summary::before{content:"▾ ";}
+.edu .inner{padding:2px 12px 12px;font-size:13px;line-height:1.75;}
+.edu .h{font-size:12px;font-weight:600;color:var(--text2);margin:9px 0 3px;}
+.edu .li{padding:2px 0;border-bottom:1px dashed var(--line-soft);}
+.edu .li:last-child{border-bottom:none;}
+.edu .tag{font-size:10.5px;padding:1px 6px;border-radius:5px;background:var(--primary-soft);color:var(--primary-dark);margin-right:6px;}
+.awardlist{display:flex;flex-direction:column;gap:7px;}
+.awarditem{display:flex;gap:8px;font-size:12.5px;}
+.awarditem .who{flex:none;color:var(--muted);font-family:ui-monospace,Consolas,monospace;}
+.awarditem .q{color:#92400e;font-style:italic;}
+textarea{
+  width:100%;min-height:120px;border:1px solid var(--line);border-radius:10px;padding:11px;
+  font-family:inherit;font-size:13.5px;line-height:1.7;resize:vertical;outline:none;
+}
+textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.12);}
+
+.empty{background:#fff;border:1.5px dashed var(--line);border-radius:var(--radius);padding:54px 24px;text-align:center;color:var(--muted);}
+.empty .big{font-size:34px;opacity:.45;margin-bottom:8px;}
+
+/* 弹层 */
+.mask{position:fixed;inset:0;background:rgba(17,24,39,.66);z-index:200;display:none;align-items:center;justify-content:center;padding:20px;}
+.mask.show{display:flex;}
+.modal{background:#fff;border-radius:16px;width:100%;max-width:1000px;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;}
+.modal .mhd{padding:15px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;}
+.modal .mhd h3{margin:0;font-size:16px;}
+.modal .mhd .spacer{flex:1;}
+.modal .mbd{padding:18px 20px;overflow:auto;}
+.modal .mft{padding:12px 20px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;}
+.modal img.full{max-width:100%;display:block;margin:0 auto;border:1px solid var(--line);border-radius:10px;}
+
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:28px;z-index:500;display:flex;flex-direction:column;gap:8px;align-items:center;width:max-content;max-width:92vw;}
+.toast .t{background:#111827;color:#fff;padding:10px 18px;border-radius:10px;font-size:13.5px;box-shadow:0 8px 24px rgba(0,0,0,.22);}
+.toast .t.ok{background:#059669;} .toast .t.err{background:#dc2626;}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;}
+@keyframes sp{to{transform:rotate(360deg);}}
+.hidden{display:none !important;}
+</style>
+</head>
+<body>
+
+<!-- 未登录 -->
+<div id="loginView" class="login-wrap">
+  <div class="login-card">
+    <img class="logo" src="/logo/4.png" alt="QuickJudge">
+    <h1>试卷门户</h1>
+    <p class="sub">教师与学生在任意设备上查看已扫描的试卷与批阅评语。</p>
+    <label for="uid">账号（工号 / 学号）</label>
+    <input type="text" id="uid" autocomplete="username" placeholder="请输入账号">
+    <label for="pwd">密码</label>
+    <input type="password" id="pwd" autocomplete="current-password" placeholder="请输入密码">
+    <button class="btn primary block" id="loginBtn">登 录</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- 已登录 -->
+<div id="appView" class="hidden">
+  <div class="topbar">
+    <img src="/logo/4.png" alt="QuickJudge">
+    <div class="who" id="whoBox"></div>
+    <div class="spacer"></div>
+    <span class="chip gray" id="roleChip"></span>
+    <button class="btn sm" id="logoutBtn">退出</button>
+  </div>
+
+  <div class="wrap">
+    <!-- 学生视图 -->
+    <div id="studentView" class="hidden">
+      <div class="stats">
+        <div class="stat"><div class="n" id="sTotal">0</div><div class="l">已扫描试卷</div></div>
+        <div class="stat g"><div class="n" id="sDone">0</div><div class="l">已有评语</div></div>
+        <div class="stat w"><div class="n" id="sWait">0</div><div class="l">等待批阅</div></div>
+      </div>
+      <h2 class="sec">我的试卷 <span class="cnt" id="sHint"></span></h2>
+      <div id="studentRecords" class="records"></div>
+    </div>
+
+    <!-- 教师视图 -->
+    <div id="teacherView" class="hidden">
+      <div class="stats">
+        <div class="stat"><div class="n" id="tTotal">0</div><div class="l">已扫描试卷</div></div>
+        <div class="stat g"><div class="n" id="tDone">0</div><div class="l">已批阅</div></div>
+        <div class="stat w"><div class="n" id="tWait">0</div><div class="l">待批阅</div></div>
+      </div>
+
+      <h2 class="sec">我的班级 <span class="cnt" id="tClassHint"></span></h2>
+      <div class="classgrid" id="classGrid"></div>
+
+      <div id="detailBox" class="hidden">
+        <h2 class="sec" id="detailTitle"></h2>
+        <div class="toolbar">
+          <button class="btn sm" id="backToClassesBtn">← 返回班级</button>
+          <select id="statusFilter" style="width:auto;min-width:130px;padding:8px 12px;font-size:13.5px;">
+            <option value="">全部状态</option>
+            <option value="pending">待批阅</option>
+            <option value="graded">已批阅</option>
+          </select>
+          <input type="text" id="sidSearch" placeholder="按学号筛选" style="width:auto;min-width:150px;padding:8px 12px;font-size:13.5px;">
+          <button class="btn sm" id="applyFilterBtn">筛选</button>
+          <div class="spacer"></div>
+          <button class="btn sm ok" id="gradeAllBtn">为本批全部待评生成评语</button>
+          <button class="btn sm" id="exportBtn">导出清单 CSV</button>
+        </div>
+        <div id="teacherRecords" class="records"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 大图 -->
+<div class="mask" id="zoomMask">
+  <div class="modal">
+    <div class="mhd"><h3 id="zoomTitle">试卷</h3><div class="spacer"></div><button class="btn sm" id="zoomClose">关闭</button></div>
+    <div class="mbd"><img id="zoomImg" class="full" alt="试卷"></div>
+  </div>
+</div>
+
+<!-- 编辑评语 -->
+<div class="mask" id="editMask">
+  <div class="modal" style="max-width:720px;">
+    <div class="mhd"><h3 id="editTitle">评语</h3><div class="spacer"></div><button class="btn sm" id="editClose">关闭</button></div>
+    <div class="mbd">
+      <div id="editMeta" style="font-size:13px;color:var(--text2);margin-bottom:10px;"></div>
+      <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:12px;">
+        <div style="flex:0 0 150px;">
+          <div style="font-size:12.5px;color:var(--text2);margin-bottom:6px;">得分（可手改）</div>
+          <input id="editScore" placeholder="如 8/10"
+                 style="width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:13.5px;outline:none;font-family:ui-monospace,Consolas,monospace;">
+        </div>
+        <div id="editSubj" style="font-size:12px;color:var(--muted);padding-bottom:10px;"></div>
+      </div>
+      <div style="font-size:12.5px;color:var(--text2);margin-bottom:6px;">评语内容（可直接修改后保存）</div>
+      <textarea id="editComment" placeholder="还没有评语，可点击「生成 AI 评语」或直接手写。"></textarea>
+      <details style="margin-top:12px;">
+        <summary style="cursor:pointer;font-size:13px;color:var(--text2);">查看识别出的正文</summary>
+        <pre id="editEssay" style="font-size:12.5px;white-space:pre-wrap;background:#f9fafb;border:1px solid var(--line-soft);border-radius:10px;padding:12px;margin-top:8px;max-height:280px;overflow:auto;font-family:inherit;"></pre>
+      </details>
+    </div>
+    <div class="mft">
+      <button class="btn" id="genAiBtn">✨ 生成 AI 评语</button>
+      <button class="btn primary" id="saveCommentBtn">保存评语</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+let ME = null, CTX = null, VIEW = { class_name: '', status: '', student_id: '' };
+let RECORDS = [], EDIT_ID = null;
+
+function toast(msg, type) {
+  const el = document.createElement('div');
+  el.className = 't ' + (type || '');
+  el.textContent = msg;
+  $('#toast').appendChild(el);
+  setTimeout(() => el.remove(), type === 'err' ? 5200 : 2800);
+}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function fmt(t) { return t ? String(t).replace('T', ' ').slice(0, 16) : ''; }
+
+async function api(url, opts) {
+  const res = await fetch(url, Object.assign({ credentials: 'same-origin' }, opts || {}));
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = {}; }
+  if (!res.ok) throw new Error((data && (data.error || data.message)) || ('请求失败 ' + res.status));
+  return data;
+}
+function jpost(url, body) {
+  return api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+}
+
+/* ------------ 登录 ------------ */
+async function boot() {
+  try {
+    const me = await api('/api/portal/me');
+    if (me.logged_in) { ME = me.user; return enterApp(); }
+  } catch (e) { /* 未登录 */ }
+  $('#loginView').classList.remove('hidden');
+  $('#appView').classList.add('hidden');
+}
+
+$('#loginBtn').onclick = doLogin;
+$('#pwd').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+$('#uid').addEventListener('keydown', e => { if (e.key === 'Enter') $('#pwd').focus(); });
+
+async function doLogin() {
+  const id = $('#uid').value.trim(), pwd = $('#pwd').value;
+  $('#loginErr').textContent = '';
+  if (!id || !pwd) { $('#loginErr').textContent = '请输入账号和密码'; return; }
+  const btn = $('#loginBtn');
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> 登录中';
+  try {
+    const r = await jpost('/api/login', { id, password: pwd });
+    ME = r.user;
+    enterApp();
+  } catch (e) {
+    $('#loginErr').textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = '登 录';
+  }
+}
+
+$('#logoutBtn').onclick = async () => {
+  try { await jpost('/api/logout'); } catch (e) { }
+  location.reload();
+};
+
+/* ------------ 进入应用 ------------ */
+async function enterApp() {
+  $('#loginView').classList.add('hidden');
+  $('#appView').classList.remove('hidden');
+  const isTeacher = ME.role === 'teacher' || ME.role === 'admin';
+  $('#whoBox').innerHTML = '<b>' + esc(ME.name || ME.id) + '</b>' + (ME.name ? ' · ' + esc(ME.id) : '');
+  $('#roleChip').textContent = ME.role === 'admin' ? '管理员' : (ME.role === 'teacher' ? '教师' : '学生');
+  $('#studentView').classList.toggle('hidden', isTeacher);
+  $('#teacherView').classList.toggle('hidden', !isTeacher);
+  $('#detailBox').classList.add('hidden');
+  try {
+    CTX = await api('/api/portal/overview');
+  } catch (e) { toast(e.message, 'err'); return; }
+  if (isTeacher) renderTeacher(); else renderStudent();
+}
+
+/* ------------ 学生视图 ------------ */
+function lvlClass(l) { return l === '优秀' ? '' : (l === '待改进' ? 'bad' : 'warn'); }
+
+function scoreLine(r) {
+  const st = r.score_text || '';
+  let html = '<div class="scorerow">';
+  if (st) {
+    html += '<span class="score">' + esc(st) + '</span>';
+    if (r.level) html += '<span class="lvl ' + lvlClass(r.level) + '">' + esc(r.level) + '</span>';
+  } else {
+    html += '<span class="score na">未评分</span>';
+  }
+  if (r.subject_name) html += '<span class="subj">方案：' + esc(r.subject_name) + '</span>';
+  html += '</div>';
+  return html;
+}
+
+function chips(arr, cls) {
+  arr = arr || [];
+  if (!arr.length) return '';
+  return '<div class="plist" style="margin-top:8px;">' + arr.map(x =>
+    '<span class="chip ' + cls + '">' + esc(x) + '</span>').join('') + '</div>';
+}
+
+function piecesHtml(r) {
+  const ps = r.pieces || [];
+  if (!ps.length) return '';
+  return '<div class="pieces">' + ps.map(p => {
+    const sc = (p.score != null && p.max_score != null) ? (p.score + ' / ' + p.max_score) : '';
+    return '<div class="piece">'
+      + '<div class="ph"><span class="lb">' + esc(p.label || '') + '</span>'
+      + (p.level ? '<span class="lvl ' + lvlClass(p.level) + '">' + esc(p.level) + '</span>' : '')
+      + (sc ? '<span class="sc">' + esc(sc) + '</span>' : '') + '</div>'
+      + '<span class="thumbline" data-zoom="' + esc(p.image_url) + '" data-title="' + esc(p.label || '作答') + '">'
+      + '<img src="' + esc(p.image_url) + '" loading="lazy" alt="' + esc(p.label || '') + '"></span>'
+      + '<div class="pb">' + (p.comment ? esc(p.comment) : '<span style="color:var(--muted)">暂无评语</span>')
+      + chips(p.strengths, '') + chips(p.issues, 'bad')
+      + '</div></div>';
+  }).join('') + '</div>';
+}
+
+/* ---------- 英语作文专项展示 ---------- */
+const REQ_MARK = { covered: '✓', partial: '△', missing: '✗' };
+const ERR_TYPE_CN = {
+  grammar: '语法', tense: '时态', agreement: '主谓一致', article: '冠词',
+  preposition: '介词', collocation: '搭配', word_choice: '用词',
+  spelling: '拼写', chinese_english: '中式英语', punctuation: '标点', structure: '结构'
+};
+
+function essayHtml(r, anon) {
+  const e = r.essay;
+  if (!e || typeof e !== 'object') return '';
+  let h = '';
+
+  // 0) 字迹可靠度：这份卷子机器有几处没读准，直接决定分数该不该当真
+  const un = e.illegible || [];
+  const q = r.quality || (r.handwriting && r.handwriting.local) || {};
+  const qFlags = q.flags || [];
+  if (un.length || qFlags.length) {
+    h += '<div class="eblk warnblk"><div class="eh">🖊 字迹可靠度'
+      + (un.length ? '<span class="cnt">' + un.length + ' 处读不准</span>' : '<span class="cnt">全部可辨认</span>')
+      + '</div><div class="eb">';
+    if (qFlags.length) {
+      h += '<div class="qtag">卷面：' + esc((q.labels || []).join('、'))
+        + (q.char_mm ? '　字高 ' + esc(String(q.char_mm)) + 'mm' : '')
+        + (q.dpi ? '　' + esc(String(q.dpi)) + 'dpi' : '') + '</div>';
+    }
+    h += un.map(u => '<div class="hwline"><span class="wr">' + esc(u.as_read || '?') + '</span>'
+      + '<div>' + (u.guess ? '<span class="wf">猜作 ' + esc(u.guess) + '</span> ' : '')
+      + (u.where ? '<span style="color:var(--muted);font-size:12px;">' + esc(u.where) + '</span> ' : '')
+      + (u.why ? '<span style="color:var(--muted);font-size:12px;">（' + esc(u.why) + '）</span>' : '')
+      + '</div></div>').join('');
+    if (un.length) {
+      h += '<div class="qnote">标出的词是识别时没把握、按上下文推测的，不一定代表写错；'
+        + '这处不影响评分结论，但核对原卷时值得看一眼。</div>';
+    }
+    h += '</div></div>';
+  }
+
+  // 1) 要点覆盖（防要点偏离）
+  const reqs = e.requirements_check || [];
+  if (reqs.length) {
+    const got = reqs.filter(x => x.status === 'covered').length;
+    h += '<div class="eblk"><div class="eh">🎯 要点覆盖<span class="cnt">' + got + ' / ' + reqs.length + ' 已覆盖</span></div><div class="eb">'
+      + reqs.map(x => '<div class="req c-' + esc(x.status || 'partial') + '"><span class="mk">' + (REQ_MARK[x.status] || '·') + '</span>'
+        + '<span class="pt">' + esc(x.point || '')
+        + (x.evidence ? '<span class="ev">原文：' + esc(x.evidence) + '</span>' : '') + '</span></div>').join('')
+      + '</div></div>';
+  }
+
+  // 2) 语言错误
+  const errs = e.errors || [];
+  if (errs.length) {
+    h += '<div class="eblk"><div class="eh">✍️ 语言错误<span class="cnt">' + errs.length + ' 处</span></div><div class="eb">'
+      + errs.map(x => '<div class="err"><span class="ty">' + esc(ERR_TYPE_CN[x.type] || x.type || '错误') + '</span><div class="body">'
+        + (x.quote ? '<span class="q">' + esc(x.quote) + '</span> ' : '')
+        + (x.fix ? '<span class="f">→ ' + esc(x.fix) + '</span>' : '')
+        + (x.why ? '<span class="w">' + esc(x.why) + '</span>' : '')
+        + '</div></div>').join('')
+      + '</div></div>';
+  }
+
+  // 3) 个性化句子修改
+  const rw = e.rewrites || [];
+  if (rw.length) {
+    h += '<div class="eblk"><div class="eh">🔧 这几句可以写得更好<span class="cnt">' + rw.length + ' 句</span></div><div class="eb">'
+      + rw.map(x => '<div class="rw"><div class="o">' + esc(x.original) + '</div><div class="n">' + esc(x.improved)
+        + (x.focus ? '<span class="fo">（' + esc(x.focus) + '）</span>' : '') + '</div></div>').join('')
+      + '</div></div>';
+  }
+
+  // 4) 本篇佳句
+  const aw = e.sentence_award || {};
+  if (aw.quote) {
+    h += '<div class="eblk"><div class="eh">⭐ 本篇佳句</div><div class="eb">'
+      + '<div class="award"><span class="qt">“' + esc(aw.quote) + '”</span>'
+      + (aw.why ? '<span class="wh">' + esc(aw.why) + '</span>' : '') + '</div></div></div>';
+  }
+
+  // 5) 批次级：话题语料 + 同学佳句
+  h += batchHtml(r, anon);
+  return h;
+}
+
+function batchHtml(r, anon) {
+  const b = r.batch;
+  if (!b || typeof b !== 'object') return '';
+  const co = b.corpus || {};
+  const aws = b.awards || [];
+  let corpusHtml = '';
+  if ((co.sentences || []).length) {
+    corpusHtml += '<div class="h">可直接套用的句子</div>' + co.sentences.map(s => '<div class="li">' + esc(s) + '</div>').join('');
+  }
+  if ((co.phrases || []).length) {
+    corpusHtml += '<div class="h">高频短语</div>' + co.phrases.map(s => '<div class="li">' + esc(s) + '</div>').join('');
+  }
+  if ((co.patterns || []).length) {
+    corpusHtml += '<div class="h">可迁移句式</div>' + co.patterns.map(p =>
+      '<div class="li"><span class="tag">模板</span>' + esc(p.pattern || '')
+      + (p.scene ? ' <span style="color:var(--muted)">（' + esc(p.scene) + '）</span>' : '') + '</div>').join('');
+  }
+  if ((co.pitfalls || []).length) {
+    corpusHtml += '<div class="h">本话题易错</div>' + co.pitfalls.map(p =>
+      '<div class="li"><span style="color:#991b1b">' + esc(p.wrong || '') + '</span> → <span style="color:#047857">' + esc(p.right || '') + '</span></div>').join('');
+  }
+  let awHtml = '';
+  if (aws.length) {
+    awHtml = (b.award_standard ? '<div class="h" style="font-weight:400;color:var(--muted)">' + esc(b.award_standard) + '</div>' : '')
+      + '<div class="awardlist">' + aws.map(a => {
+        const who = anon ? '同学 ' + esc((a.student_id || '').slice(-2) || '') : (esc(a.student_id || '') + ' ' + esc(a.name || ''));
+        return '<div class="awarditem"><span class="who">' + who + '</span><span><span class="q">“' + esc(a.quote || '') + '”</span>'
+          + (a.why ? '<br><span style="color:var(--muted);font-size:11.5px">' + esc(a.why) + '</span>' : '')
+          + (a.takeaway ? '<br><span style="color:var(--primary-dark);font-size:11.5px">借鉴：' + esc(a.takeaway) + '</span>' : '')
+          + '</span></div>';
+      }).join('') + '</div>';
+  }
+  if (!corpusHtml && !awHtml) return '';
+  let inner = '';
+  if (corpusHtml) inner += '<details><summary>📚 本话题语料包</summary><div class="inner">' + corpusHtml + '</div></details>';
+  if (awHtml) inner += '<details open><summary>🌟 本批同学佳句</summary><div class="inner">' + awHtml + '</div></details>';
+  return '<div class="edu">' + inner + '</div>';
+}
+
+function renderStudent() {
+  const list = CTX.records || [];
+  $('#sTotal').textContent = CTX.total || 0;
+  $('#sDone').textContent = CTX.graded || 0;
+  $('#sWait').textContent = (CTX.total || 0) - (CTX.graded || 0);
+  RECORDS = list;
+  $('#sHint').textContent = list.length ? '' : '暂无';
+  const box = $('#studentRecords');
+  if (!list.length) {
+    box.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="big">📄</div>还没有已扫描的试卷。老师扫描并提交后会出现在这里。</div>';
+    return;
+  }
+  box.innerHTML = list.map(r => {
+    const hasPieces = (r.pieces || []).length > 0;
+    return `
+    <div class="rec">
+      ${hasPieces ? '' : `
+      <div class="pic" data-zoom="${esc(r.essay_image_url)}" data-title="${esc((r.task_title || '试卷') + ' · ' + fmt(r.submitted_at))}">
+        <img src="${esc(r.essay_image_url)}" alt="试卷" loading="lazy">
+        <div class="st ${r.status === 'graded' ? 'done' : ''}">${r.status === 'graded' ? '已批阅' : '待批阅'}</div>
+      </div>`}
+      <div class="bd">
+        <div class="head">
+          <span class="sid">${esc(r.student_id || '—')}</span>
+          <span class="nm">${esc(r.student_name || '')}</span>
+          ${hasPieces ? `<span class="lvl ${r.status === 'graded' ? '' : 'warn'}">${r.status === 'graded' ? '已批阅' : '待批阅'}</span>` : ''}
+          <span class="tm">${esc(fmt(r.submitted_at))}</span>
+        </div>
+        ${r.task_title ? '<div class="task">📝 ' + esc(r.task_title) + '</div>' : ''}
+        ${scoreLine(r)}
+        ${hasPieces
+          ? piecesHtml(r)
+          : `<div class="comment ${r.ai_comment ? '' : 'empty'}">${r.ai_comment ? esc(r.ai_comment) : '老师还没有给出评语，请稍后再来看看。'}</div>`}
+        ${essayHtml(r, true)}
+      </div>
+    </div>`;
+  }).join('');
+  bindCommon();
+}
+
+/* 教师视角：本批共性分析（错误类型分布 + 要点覆盖 + 均分），一次批完自动得出 */
+function errStats(list) {
+  const cnt = {}, req = { covered: 0, partial: 0, missing: 0 };
+  let graded = 0, sum = 0, maxSum = 0, withId = 0;
+  (list || []).forEach(r => {
+    if (r.student_id) withId++;
+    const e = r.essay;
+    if (!e || typeof e !== 'object') return;
+    graded++;
+    if (r.score != null) sum += Number(r.score) || 0;
+    if (r.max_total) maxSum += Number(r.max_total) || 0;
+    (e.errors || []).forEach(x => {
+      const k = ERR_TYPE_CN[x.type] || x.type || '其他';
+      cnt[k] = (cnt[k] || 0) + 1;
+    });
+    (e.requirements_check || []).forEach(x => {
+      if (req[x.status] != null) req[x.status]++;
+    });
+  });
+  if (!graded) return '';
+  const totalErr = Object.values(cnt).reduce((a, b) => a + b, 0);
+  const types = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const reqTotal = req.covered + req.partial + req.missing;
+  const avg = maxSum ? (sum / (graded || 1)).toFixed(1) : '';
+  const pct = maxSum ? Math.round(sum / maxSum * 100) : 0;
+
+  return '<div class="eblk"><div class="eh">📊 本批共性分析<span class="cnt">已批 ' + graded + ' 份</span></div><div class="eb">'
+    + '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:8px;">'
+    + '<span>平均分 <b style="color:#b45309">' + (avg || '—') + '</b>' + (maxSum ? ' / ' + (maxSum / graded).toFixed(0) + '（' + pct + '%）' : '') + '</span>'
+    + '<span>人均错误 <b>' + (totalErr / graded).toFixed(1) + '</b> 处</span>'
+    + (reqTotal ? '<span>要点覆盖 <b style="color:#047857">' + Math.round(req.covered / reqTotal * 100) + '%</b>'
+      + '（缺失 ' + req.missing + '）</span>' : '')
+    + '</div>'
+    + (types.length ? '<div style="display:flex;flex-direction:column;gap:5px;">' + types.map(([k, v]) => {
+      const w = Math.round(v / types[0][1] * 100);
+      return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;">'
+        + '<span style="width:64px;color:var(--text2)">' + esc(k) + '</span>'
+        + '<span style="flex:1;height:7px;background:#f1f3f5;border-radius:99px;overflow:hidden;">'
+        + '<i style="display:block;height:100%;width:' + w + '%;background:#ef4444;opacity:.65;"></i></span>'
+        + '<span style="width:34px;text-align:right;color:var(--muted)">' + v + ' 处</span></div>';
+    }).join('') + '</div>' : '')
+    + '</div></div>';
+}
+
+/* ------------ 教师视图 ------------ */
+function renderTeacher() {
+  $('#tTotal').textContent = CTX.total || 0;
+  $('#tDone').textContent = CTX.graded || 0;
+  $('#tWait').textContent = CTX.pending || 0;
+  const cls = CTX.classes || [];
+  $('#tClassHint').textContent = cls.length ? cls.length + ' 个班级' : '';
+  const grid = $('#classGrid');
+  if (!cls.length) {
+    grid.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="big">🏫</div>还没有已扫描的试卷。请到扫描端扫描并提交。</div>';
+  } else {
+    grid.innerHTML = cls.map(c => {
+      const pct = c.total ? Math.round(c.graded / c.total * 100) : 0;
+      return `
+      <div class="classcard" data-class="${esc(c.class_name)}">
+        <div class="t">${esc(c.class_name)} <span class="pill ${c.claimed_by_me ? '' : 'gray'}">${c.claimed_by_me ? '我的班级' : (c.owners && c.owners.length ? '他人班级' : '未认领')}</span></div>
+        <div class="meta"><span>${c.total} 份</span><span>已批 ${c.graded}</span><span>待批 ${c.pending}</span><span>${c.student_count} 人</span></div>
+        <div class="bar"><i style="width:${pct}%"></i><i class="p" style="width:${100 - pct}%"></i></div>
+        <div class="meta" style="margin-top:6px;"><span>最近提交 ${esc(fmt(c.last_at))}</span></div>
+      </div>`;
+    }).join('');
+    $$('[data-class]', grid).forEach(el => el.onclick = () => openClass(el.dataset.class));
+  }
+
+  const un = CTX.unclaimed_classes || [];
+  if (un.length && ME.role !== 'admin') {
+    $('#tClassHint').innerHTML = (cls.length ? cls.length + ' 个班级 · ' : '') +
+      '未认领：' + un.slice(0, 6).map(c =>
+        '<button class="btn sm" style="padding:3px 9px;font-size:12px;margin-left:4px;" data-claim="' + esc(c) + '">认领 ' + esc(c) + '</button>').join('');
+    $$('[data-claim]').forEach(b => b.onclick = async (e) => {
+      e.stopPropagation();
+      try { await jpost('/api/portal/classes/claim', { class_name: b.dataset.claim, action: 'claim' }); toast('已认领 ' + b.dataset.claim, 'ok'); enterApp(); }
+      catch (err) { toast(err.message, 'err'); }
+    });
+  }
+}
+
+async function openClass(cname) {
+  VIEW = { class_name: cname, status: '', student_id: '' };
+  $('#statusFilter').value = '';
+  $('#sidSearch').value = '';
+  $('#detailBox').classList.remove('hidden');
+  $('#detailTitle').textContent = cname + ' · 已扫描试卷';
+  await loadTeacherRecords();
+  $('#detailBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+$('#backToClassesBtn').onclick = () => { $('#detailBox').classList.add('hidden'); };
+$('#applyFilterBtn').onclick = () => {
+  VIEW.status = $('#statusFilter').value;
+  VIEW.student_id = $('#sidSearch').value.trim();
+  loadTeacherRecords();
+};
+$('#sidSearch').addEventListener('keydown', e => { if (e.key === 'Enter') $('#applyFilterBtn').click(); });
+$('#statusFilter').onchange = () => { VIEW.status = $('#statusFilter').value; loadTeacherRecords(); };
+
+async function loadTeacherRecords() {
+  const qs = new URLSearchParams();
+  if (VIEW.class_name) qs.set('class_name', VIEW.class_name);
+  if (VIEW.status) qs.set('status', VIEW.status);
+  if (VIEW.student_id) qs.set('student_id', VIEW.student_id);
+  let data;
+  try { data = await api('/api/portal/records?' + qs.toString()); }
+  catch (e) { toast(e.message, 'err'); return; }
+  RECORDS = data.records || [];
+  const box = $('#teacherRecords');
+  if (!RECORDS.length) {
+    box.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="big">🗂️</div>该筛选条件下没有试卷。</div>';
+    return;
+  }
+  const statsHtml = errStats(RECORDS);
+  box.innerHTML = (statsHtml ? '<div style="grid-column:1/-1;">' + statsHtml + '</div>' : '')
+    + RECORDS.map(r => {
+    const hasPieces = (r.pieces || []).length > 0;
+    return `
+    <div class="rec">
+      ${hasPieces ? '' : `
+      <div class="pic" data-zoom="${esc(r.essay_image_url)}" data-title="${esc((r.student_id || '') + ' ' + (r.student_name || '') + ' · ' + fmt(r.submitted_at))}">
+        <img src="${esc(r.essay_image_url)}" alt="试卷" loading="lazy">
+        <div class="st ${r.status === 'graded' ? 'done' : ''}">${r.status === 'graded' ? '已批阅' : '待批阅'}</div>
+      </div>`}
+      <div class="bd">
+        <div class="head">
+          <span class="sid">${esc(r.student_id || '未填学号')}</span>
+          <span class="nm">${esc(r.student_name || '')}</span>
+          ${hasPieces ? `<span class="lvl ${r.status === 'graded' ? '' : 'warn'}">${r.status === 'graded' ? '已批阅' : '待批阅'}</span>` : ''}
+          <span class="tm">${esc(fmt(r.submitted_at))}</span>
+        </div>
+        ${r.task_title ? '<div class="task">📝 ' + esc(r.task_title) + '</div>' : ''}
+        ${scoreLine(r)}
+        ${hasPieces
+          ? piecesHtml(r)
+          : `<div class="comment ${r.ai_comment ? '' : 'empty'}">${r.ai_comment ? esc(r.ai_comment) : '尚无评语'}</div>`}
+        ${essayHtml(r, false)}
+        <div class="acts">
+          <button class="btn sm primary" data-edit="${esc(r.id)}">评语 / 批阅</button>
+          <button class="btn sm" data-zoombtn="${esc(r.image_url)}">看原图</button>
+          <button class="btn sm danger" data-del="${esc(r.id)}">删除</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  bindCommon();
+  $$('[data-edit]').forEach(b => b.onclick = () => openEdit(b.dataset.edit));
+  $$('[data-zoombtn]').forEach(b => b.onclick = () => showZoom(b.dataset.zoombtn, '原图'));
+  $$('[data-del]').forEach(b => b.onclick = () => delRecord(b.dataset.del));
+}
+
+function bindCommon() {
+  $$('[data-zoom]').forEach(el => el.onclick = () => showZoom(el.dataset.zoom, el.dataset.title || '试卷'));
+}
+
+/* ------------ 评语编辑 ------------ */
+function openEdit(id) {
+  const r = RECORDS.find(x => x.id === id);
+  if (!r) return;
+  EDIT_ID = id;
+  $('#editTitle').textContent = '评语 · ' + (r.student_id || '未填学号') + ' ' + (r.student_name || '');
+  $('#editMeta').textContent =
+    '班级 ' + (r.class_name || '—') +
+    (r.task_title ? ' · 任务 ' + r.task_title : '') +
+    ' · 提交 ' + fmt(r.submitted_at) +
+    (r.graded_at ? ' · 评于 ' + fmt(r.graded_at) : '');
+  $('#editComment').value = r.ai_comment || '';
+  $('#editScore').value = r.score_text || '';
+  $('#editSubj').textContent = (r.subject_name ? '方案：' + r.subject_name : '')
+    + ((r.pieces || []).length ? ' · 共 ' + r.pieces.length + ' 块' : '');
+  $('#editEssay').textContent = r.essay_text || '（还没有识别记录）';
+  $('#editMask').classList.add('show');
+}
+$('#editClose').onclick = () => { $('#editMask').classList.remove('show'); };
+
+$('#saveCommentBtn').onclick = async () => {
+  if (!EDIT_ID) return;
+  const btn = $('#saveCommentBtn');
+  btn.disabled = true;
+  try {
+    const r = await jpost('/api/portal/records/' + EDIT_ID + '/comment', {
+      ai_comment: $('#editComment').value,
+      score_text: $('#editScore').value.trim()
+    });
+    toast('评语已保存', 'ok');
+    $('#editMask').classList.remove('show');
+    await refreshCurrent();
+    return r;
+  } catch (e) { toast(e.message, 'err'); }
+  finally { btn.disabled = false; }
+};
+
+$('#genAiBtn').onclick = async () => {
+  if (!EDIT_ID) return;
+  const btn = $('#genAiBtn');
+  const old = btn.textContent;
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> 生成中…';
+  try {
+    const r = await jpost('/api/portal/records/' + EDIT_ID + '/grade');
+    $('#editComment').value = r.record.ai_comment || '';
+    $('#editScore').value = r.record.score_text || '';
+    $('#editSubj').textContent = (r.record.subject_name ? '方案：' + r.record.subject_name : '')
+      + ((r.record.pieces || []).length ? ' · 共 ' + r.record.pieces.length + ' 块' : '');
+    $('#editEssay').textContent = r.record.essay_text || '';
+    toast('批阅已生成，可修改后保存', 'ok');
+    await refreshCurrent();
+  } catch (e) { toast(e.message, 'err'); }
+  finally { btn.disabled = false; btn.textContent = old; }
+};
+
+$('#gradeAllBtn').onclick = async () => {
+  const pend = RECORDS.filter(r => r.status !== 'graded');
+  if (!pend.length) { toast('本批没有待评的试卷', 'err'); return; }
+  if (!confirm('为当前列表中的 ' + pend.length + ' 张待评试卷逐张生成 AI 评语？耗时较长，请保持页面打开。')) return;
+  const btn = $('#gradeAllBtn');
+  const old = btn.textContent;
+  btn.disabled = true;
+  let ok = 0, fail = 0;
+  for (let i = 0; i < pend.length; i++) {
+    btn.innerHTML = '<span class="spin"></span> 生成中 ' + (i + 1) + '/' + pend.length;
+    try { await jpost('/api/portal/records/' + pend[i].id + '/grade'); ok++; }
+    catch (e) { fail++; }
+  }
+  btn.disabled = false; btn.textContent = old;
+  toast('完成：成功 ' + ok + ' 张' + (fail ? '，失败 ' + fail + ' 张' : ''), fail ? 'err' : 'ok');
+  await refreshCurrent();
+};
+
+async function delRecord(id) {
+  if (!confirm('删除这张试卷记录？图片会一并删除，不可恢复。')) return;
+  try {
+    await api('/api/portal/records/' + id, { method: 'DELETE' });
+    toast('已删除', 'ok');
+    await refreshCurrent();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function refreshCurrent() {
+  if (ME.role === 'student') { CTX = await api('/api/portal/overview'); renderStudent(); }
+  else { CTX = await api('/api/portal/overview'); renderTeacher(); if (VIEW.class_name) await loadTeacherRecords(); }
+}
+
+/* ------------ 导出 ------------ */
+$('#exportBtn').onclick = () => {
+  const qs = new URLSearchParams();
+  if (VIEW.class_name) qs.set('class_name', VIEW.class_name);
+  if (VIEW.status) qs.set('status', VIEW.status);
+  window.open('/api/portal/export.csv?' + qs.toString(), '_blank');
+};
+
+/* ------------ 大图 ------------ */
+function showZoom(url, title) {
+  $('#zoomImg').src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+  $('#zoomTitle').textContent = title;
+  $('#zoomMask').classList.add('show');
+}
+$('#zoomClose').onclick = () => $('#zoomMask').classList.remove('show');
+$$('.mask').forEach(m => m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); }));
+
+boot();
+</script>
+</body>
+</html>

@@ -2,6 +2,12 @@
 .env
 .env.local
 *.env
+# .env 的备份/副本（同样含明文密钥，切勿提交）
+.env.bak*
+.env.old
+.env.save
+.env.copy
+.env.*.bak
 
 # Python
 __pycache__/
@@ -38,6 +44,16 @@ data/**/*.JPEG
 
 # 备份目录（含完整历史镜像与运行时数据，勿提交）
 QuickJudge-BACKUP*/
+
+# 手工改动前打的源码快照（*.bak-时间戳-备注），属于本地临时文件
+app.py.bak-*
+*.bak-2026*
+*.bak-2025*
+
+# ---------- 本地实验脚本：含真实学生真值，严禁提交 ----------
+# temp/probe_*.py 里硬编码了「记录ID → 真实姓名+学号」的对照真值，
+# temp/probe_result.json 含模型返回的真实姓名，均属学生个人信息。
+temp/
 
 # ---------- 学生名单：含真实姓名与学号，严禁提交 ----------
 # 根目录 namelist.csv 用于「从 namelist.csv 导入学生」，属运行时数据，
