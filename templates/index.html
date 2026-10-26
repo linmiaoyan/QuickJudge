@@ -108,7 +108,26 @@
                 <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; font-size: 1rem;">登录</button>
             </form>
             <p id="loginError" style="color: var(--danger-color); font-size: 13px; margin-top: 12px; display: none;"></p>
-            <p style="margin-top: 20px; font-size: 12px; color: var(--text-muted);">账号由管理员统一发放；首次登录后请立即修改默认密码。</p>
+            <div class="login-help">
+                <div class="login-help-title">💡 账号和密码怎么填？</div>
+                <div class="login-help-row">
+                    <span class="who">学生</span>
+                    <span>账号是<b>完整学号</b>，密码同学号</span>
+                </div>
+                <div class="login-help-row">
+                    <span class="who"></span>
+                    <span>卷面后四位要补 <code>26</code>：<code>0101</code> → <code>260101</code></span>
+                </div>
+                <div class="login-help-row">
+                    <span class="who">教师</span>
+                    <span>账号是<b>工号 / 手机号</b>，初始密码 <code>qj2026</code></span>
+                </div>
+                <div class="login-help-row">
+                    <span class="who">管理员</span>
+                    <span>账号 <code>admin</code></span>
+                </div>
+                <div class="login-help-foot">教师账号由管理员发放；学生账号即学号。忘记密码请找管理员重置。</div>
+            </div>
             <p style="margin-top: 12px; font-size: 13px;"><a href="javascript:void(0)" id="showTeacherRegisterLink" onclick="showTeacherRegisterForm()">教师注册</a>（需邀请码）</p>
             <p style="margin-top: 8px; font-size: 13px;"><a href="/guide" target="_blank" rel="noopener">📘 第一次使用？打开教师新手教程</a></p>
         </div>

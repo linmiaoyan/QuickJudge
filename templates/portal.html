@@ -49,6 +49,16 @@ input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(3
 .btn.block{width:100%;margin-top:22px;padding:12px;font-size:15px;font-weight:500;}
 .err{color:var(--danger);font-size:13px;min-height:18px;margin-top:10px;}
 
+/* 登录页：账号密码提示 */
+.login-help{margin-top:14px;padding:12px 14px;background:#f9fafb;border:1px solid var(--line);
+  border-radius:10px;font-size:12.5px;line-height:1.8;color:var(--text2);}
+.login-help .tt{font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;}
+.login-help .row{display:flex;gap:8px;align-items:flex-start;}
+.login-help .row .who{flex:0 0 46px;color:var(--muted);}
+.login-help code{background:#fff;border:1px solid var(--line);border-radius:4px;padding:0 5px;
+  font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--primary-dark);white-space:nowrap;}
+.login-help .foot{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);font-size:11.5px;color:var(--muted);}
+
 /* 顶栏 */
 .topbar{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:40;padding:12px 20px;display:flex;align-items:center;gap:14px;}
 .topbar img{height:26px;display:block;}
@@ -111,7 +121,7 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 /* 记录列表 */
 .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
 .toolbar .spacer{flex:1;}
-.records{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;}
+.records{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px;}
 .rec{background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;}
 .rec .pic{height:250px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:zoom-in;position:relative;border-bottom:1px solid var(--line-soft);}
 .rec .pic img{max-width:100%;max-height:100%;object-fit:contain;display:block;}
@@ -280,6 +290,13 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
     <input type="password" id="pwd" autocomplete="current-password" placeholder="请输入密码">
     <button class="btn primary block" id="loginBtn">登 录</button>
     <div class="err" id="loginErr"></div>
+    <div class="login-help">
+      <div class="tt">💡 账号和密码怎么填？</div>
+      <div class="row"><span class="who">学生</span><span>账号是<b>完整学号</b>，密码同学号</span></div>
+      <div class="row"><span class="who"></span><span>卷面后四位要补 <code>26</code>：<code>0101</code> → <code>260101</code></span></div>
+      <div class="row"><span class="who">教师</span><span>账号是<b>工号 / 手机号</b>，初始密码 <code>qj2026</code></span></div>
+      <div class="foot">教师账号由管理员发放；忘记密码请找管理员重置。</div>
+    </div>
   </div>
 </div>
 
