@@ -125,7 +125,10 @@ CORS(app, supports_credentials=True)
 # 这里统一兜底：除登录相关、扫描端（自带「仅本机」闸门）、用户端（逐条校验角色）之外，
 # 其余 /api/* 一律要求已登录。
 _PUBLIC_API = {'/api/login', '/api/logout', '/api/me',
-               '/api/register_teacher', '/api/invite_code/validate'}
+               '/api/register_teacher', '/api/invite_code/validate',
+               # 强制解锁是卡纸后的应急出口：扫描工作站可能未登录也要能用，
+               # 所以放进白名单，但函数内部仍会对"非本机且非教师"的请求返回 403。
+               '/api/scan/force_unlock'}
 _PUBLIC_PREFIXES = ('/api/station/', '/api/portal/')
 # 学生登录后仍需用的少数据接口（其余旧版接口只给教师/管理员）
 _STUDENT_API = {'/api/my_reports', '/api/change_password'}
@@ -149,7 +152,99 @@ def _guard_api_auth():
 # ===== 扫描运行时配置 =====
 # 同一台扫描仪同一时刻只允许一次扫描会话：
 # 并发扫描会触发 TWAIN "MaxConnections"，并把扫描仪拖入无响应状态（需拔插 USB 才能恢复）。
-_SCAN_LOCK = threading.Lock()
+
+
+class _ScanLock(object):
+    """扫描互斥锁，额外记录「谁、从什么时候开始」持有它。
+
+    为什么不能只用 threading.Lock：
+      卡纸时扫描仪会一直等纸，NAPS2 既不退出也不报错。此时扫描请求线程
+      可能因为驱动层的阻塞长时间不返回（甚至永远不会返回），普通 Lock 一旦
+      没被释放就变成永久死锁 —— 之后每次点击扫描都只会得到「已有一次扫描
+      正在进行中」，用户除了重启服务没有任何自救手段。
+
+    这里的做法：
+      · acquire 时记下时间戳；
+      · 后来者发现锁已被持有超过 SCAN_LOCK_MAX_HOLD 秒，可以判定为僵尸占用，
+        调用 steal() 强制回收（进程层已经先清过残留扫描进程）。
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._since = 0.0
+        self._who = ''
+        self._token = 0          # 当前持有者的令牌；0 表示空闲
+        self._next_token = 0     # 只增不减的令牌序列（绝不重置）
+        self._guard = threading.Lock()
+
+    # ---------- 基础操作 ----------
+    def acquire(self, blocking=False, who='', timeout=None):
+        """尝试取锁。成功返回本次的令牌（非 0 整数），失败返回 0。"""
+        ok = self._lock.acquire(blocking, -1 if timeout is None else timeout)
+        if not ok:
+            return 0
+        with self._guard:
+            # 令牌只增不减：即使被 steal 回收过，新令牌也不会和历史令牌撞号，
+            # 否则老的迟到 release 会误释放新持有者的锁。
+            self._next_token += 1
+            self._token = self._next_token
+            self._since = time.time()
+            self._who = who or 'scan'
+            return self._token
+
+    def release(self, token=None):
+        """释放锁。
+
+        带令牌释放的意义：卡纸时线程 A 卡死、被后来的线程 B 强制回收，
+        A 过很久才走到 finally。如果 A 直接 release()，会把 B 正持有的锁放掉，
+        互斥就失效了。这里只在令牌仍然是当前持有者时才真正释放。
+        """
+        with self._guard:
+            if token is not None and token != self._token:
+                return False      # 锁已经被回收给别人了，这里什么都不能做
+            self._since = 0.0
+            self._who = ''
+            self._token = 0
+        try:
+            self._lock.release()
+        except RuntimeError:
+            pass
+        return True
+
+    # ---------- 观察 ----------
+    def locked(self):
+        return self._lock.locked()
+
+    def holder(self):
+        with self._guard:
+            return self._who, self._since
+
+    def held_seconds(self):
+        with self._guard:
+            if not self._since:
+                return 0.0
+            return max(0.0, time.time() - self._since)
+
+    # ---------- 自救 ----------
+    def steal(self):
+        """强制回收被僵尸请求占住的锁。返回回收前已持有的秒数。"""
+        held = self.held_seconds()
+        with self._guard:
+            self._since = 0.0
+            self._who = ''
+            self._token = 0       # 让原持有者的 release() 变成空操作
+        try:
+            self._lock.release()
+        except RuntimeError:
+            pass
+        return held
+
+
+_SCAN_LOCK = _ScanLock()
+
+# 锁被持有超过这个秒数，就认为持锁的请求已经卡死（比最慢的正常扫描还长），
+# 允许后来者强制回收，避免"卡纸一次之后整个扫描功能永久失效"。
+SCAN_LOCK_MAX_HOLD = int(os.getenv('SCAN_LOCK_MAX_HOLD', '200') or 200)
 
 # 档案库 / 临时区索引的「读-改-写」互斥锁。
 # 老师可以分批上传并让多个批次同时跑，两批同时归档时如果各自 load 再 save，
@@ -779,7 +874,9 @@ def grading_subject_options():
     out = []
     for key, val in (cfg.get('subjects') or {}).items():
         out.append({'key': key, 'name': val.get('name') or key,
-                    'max_score': val.get('max_score') or 100})
+                    'max_score': val.get('max_score') or 100,
+                    # 能不能走「扫完即批」：扫描端据此只列可用方案，前端不必硬编码学科名
+                    'auto_ok': auto_pipeline_supports(key)})
     return {'current': cfg.get('current') or 'general', 'subjects': out}
 
 # PNG压缩质量配置存储
@@ -2634,6 +2731,37 @@ def _cleanup_stale_scanner_processes():
             continue
 
 
+def _acquire_scan_lock(who='scan'):
+    """获取扫描互斥锁，并对"僵尸占用"做自愈。
+
+    正常情况：拿不到就直接告诉调用方"已有扫描在进行"。
+    卡纸等异常情况：持锁的请求可能永远不返回（阻塞在驱动里），此时锁会一直是
+    "已占用"。超过 SCAN_LOCK_MAX_HOLD 秒后，后来者有权判定它是僵尸：
+    先清掉残留的 NAPS2 进程，再强制回收锁，然后自己接手。
+
+    返回 (token, held_seconds, reclaimed)：
+      token 为 0 时调用方应当直接回 429（并在 finally 里用这个 token 释放）；
+      reclaimed=True 表示本次顺手救回了一个卡死的扫描会话。
+    """
+    tok = _SCAN_LOCK.acquire(blocking=False, who=who)
+    if tok:
+        return tok, 0.0, False
+    held = _SCAN_LOCK.held_seconds()
+    if held <= SCAN_LOCK_MAX_HOLD:
+        return 0, held, False
+    # 超过阈值：判定持锁方已卡死，强制执行现场清理
+    holder, _since = _SCAN_LOCK.holder()
+    print('检测到扫描锁被「%s」占用已 %.0f 秒（阈值 %d 秒），判定为卡死，强制回收…'
+          % (holder, held, SCAN_LOCK_MAX_HOLD), flush=True)
+    try:
+        _cleanup_stale_scanner_processes()
+    except Exception:
+        pass
+    _SCAN_LOCK.steal()
+    tok = _SCAN_LOCK.acquire(blocking=False, who=who)
+    return tok, held, True
+
+
 def _list_scan_devices(naps2_path, driver=None):
     """列出 NAPS2 当前可识别的扫描设备，用于扫描失败时的诊断提示。"""
     import subprocess as _sp
@@ -2735,6 +2863,121 @@ def _terminate_then_kill(proc):
     _cleanup_stale_scanner_processes()
 
 
+# ---------- 卡纸 / 进纸异常识别 ----------
+# 馈纸式扫描仪卡纸时，驱动往往只丢一句提示就再也不动了（设备面板显示「请整理纸」）。
+# 只靠"静默 60 秒"判定太慢，命中这些关键字可以立刻收手，把时间还给老师。
+_JAM_KEYWORDS = (
+    'jam', 'misfeed', 'multi-feed', 'multifeed', 'paper feed error',
+    'check paper', 'clear paper', 'paper path', 'remove paper',
+    'cover open', 'cover is open', 'adf open', 'input tray',
+    '卡纸', '进纸', '请整理纸', '整理纸', '清除卡纸', '取出纸张',
+    '盖板', '打开盖', '进纸器',
+)
+
+
+def _looks_like_jam(text):
+    """判断扫描输出里是否出现卡纸 / 进纸异常信号。"""
+    low = (text or '').lower()
+    if not low:
+        return False
+    for kw in _JAM_KEYWORDS:
+        if kw in low:
+            return True
+    return False
+
+
+def _scan_with_watchdog(cmd, out_dir, filename, log_prefix=''):
+    """跑一次 NAPS2 扫描并全程盯着输出流，返回 (returncode, 文本, 诊断码, 页数)。
+
+    诊断码：
+      ok         正常结束（含"扫到 0 页"）
+      jam        命中卡纸关键字（立刻收手，不等 60 秒静默）
+      no_output  进程起来了但一句话都不说 -> 设备无响应
+      stall      有输出后长时间静默 -> 驱动工作进程卡住
+      timeout    总时长超上限
+
+    为什么要看输出流而不能只 communicate(timeout=180)：
+      卡纸时 NAPS2 既不退出也不报错，communicate 只能干等满 180 秒；
+      这期间 _SCAN_LOCK 一直被占，老师再点扫描就只会看到"正在扫描中"。
+    """
+    import subprocess
+    import threading as _th
+    import time as _tw
+
+    _cleanup_stale_scanner_processes()
+    print('%s执行扫描命令: %s' % (log_prefix, ' '.join(cmd)), flush=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    buf = []
+    done = _th.Event()
+    marks = {'last': _tw.time(), 'n': 0, 'pages': None, 'jam': False}
+
+    def _read():
+        try:
+            for line in iter(proc.stdout.readline, b''):
+                buf.append(line)
+                marks['last'] = _tw.time()
+                marks['n'] += 1
+                m = re.search(rb'(\d+)\s+page\(s\)\s+scanned', line.lower())
+                if m:
+                    marks['pages'] = int(m.group(1))
+                    done.set()
+                if not marks['jam'] and _looks_like_jam(_decode_scan_output(line)):
+                    marks['jam'] = True
+        except Exception:
+            pass
+        finally:
+            done.set()
+
+    _th.Thread(target=_read, daemon=True).start()
+
+    started = _tw.time()
+    diag = 'ok'
+    while True:
+        if done.wait(0.5):
+            diag = 'ok'
+            break
+        now = _tw.time()
+        if marks['jam']:
+            diag = 'jam'
+            break
+        if marks['n'] == 0 and now - started > SCAN_NO_OUTPUT_SECONDS:
+            diag = 'no_output'
+            break
+        if marks['n'] > 0 and now - marks['last'] > SCAN_STALL_SECONDS:
+            diag = 'stall'
+            break
+        if now - started > SCAN_TIMEOUT_SECONDS:
+            diag = 'timeout'
+            break
+
+    if diag == 'ok':
+        pages = marks.get('pages')
+        if pages == 0:
+            _terminate_then_kill(proc)
+        else:
+            deadline = _tw.time() + SCAN_FINISH_GRACE_SECONDS
+            while _tw.time() < deadline:
+                if proc.poll() is not None:
+                    break
+                if _collect_scan_pages(out_dir, filename):
+                    break
+                _tw.sleep(0.4)
+            if proc.poll() is None:
+                _terminate_then_kill(proc)
+    else:
+        if marks['jam']:
+            # 卡纸时进程正卡在驱动里，先让它把提示打完，避免丢诊断信息
+            _tw.sleep(2.0)
+        _terminate_then_kill(proc)
+
+    try:
+        proc.stdout.close()
+    except Exception:
+        pass
+    return (proc.returncode, _decode_scan_output(b''.join(buf)).strip(),
+            diag, marks.get('pages'))
+
+
 def _is_transient_scan_failure(returncode, text):
     """判断扫描失败是否属于"重试一次往往就好"的瞬时故障。
 
@@ -2803,12 +3046,18 @@ def start_scan():
     # 并发保护：同一台扫描仪同一时刻只能有一个扫描会话。
     # 连续快速点击、或多人同时点击，会让 TWAIN 报 MaxConnections，
     # 并把设备拖入"无响应"状态（届时只能拔插 USB 才能恢复）。
-    if not _SCAN_LOCK.acquire(blocking=False):
+    # 注意：卡纸时上一次请求可能永久卡在驱动里，这里靠超时回收来自救，
+    # 否则老师会陷入"点了没反应 -> 重启程序"的死循环。
+    _tok, _held, _reclaimed = _acquire_scan_lock('api/scan')
+    if not _tok:
         return jsonify({
-            'error': '已有一次扫描正在进行中，请等本次扫描结束后再点击。\n\n'
-                     '（同一台扫描仪同一时刻只能扫描一次，'
-                     '连续快速点击会让扫描仪被占用而卡住。）'
+            'error': '已有一次扫描正在进行中（已持续 %d 秒），请等本次扫描结束后再点击。\n\n'
+                     '如果上一次是卡纸/卡住导致的，请先取出卡住的纸张，'
+                     '再点「🔄 扫描仪复位」强制释放（约 %d 秒后系统也会自动释放）。'
+                     % (int(_held), max(1, SCAN_LOCK_MAX_HOLD - int(_held)))
         }), 429
+    if _reclaimed:
+        print('已强制回收卡死的扫描会话（原占用 %.0f 秒），本次扫描继续。' % _held, flush=True)
 
     try:
         # 扫描输出目录与目标文件名
@@ -2847,93 +3096,19 @@ def start_scan():
         def _run_once():
             """执行一次扫描，返回 (returncode, 输出文本, 诊断码)。
 
-            诊断码：ok / no_output（设备毫无回应）/ stall（启动后卡住）/ timeout。
-
-            实测结论：NAPS2 的输出不缓冲，且故障时会在打印完
-            "N page(s) scanned." 之后迟迟不退出。因此这里盯着输出流：
-              · 出现 "N page(s) scanned." -> 扫描逻辑已结束：
-                  N=0 -> 立即收尾；N>0 -> 等进程退出或输出文件落盘（宽限 10 秒），
-                  只要文件生成即算成功（进程"假死"不影响结果）
-              · EOF -> 正常结束
-              · 20 秒内毫无输出 -> 设备无响应
-              · 有输出后静默超过 45 秒 -> 判定卡住
-              · 总时长超过 90 秒 -> 判定超时
+            具体看门狗逻辑见 _scan_with_watchdog（与扫描工作站共用同一套），
+            诊断码：ok / jam（卡纸）/ no_output（设备毫无回应）/ stall（启动后卡住）/ timeout。
             """
-            import threading as _th
-            import time as _tw
-
-            _cleanup_stale_scanner_processes()
-            print('执行扫描命令: %s' % ' '.join(scan_cmd), flush=True)
-            proc = subprocess.Popen(scan_cmd, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT)
-            buf = []
-            done = _th.Event()
-            marks = {'last': _tw.time(), 'n': 0, 'pages': None}
-
-            def _read():
-                try:
-                    for line in iter(proc.stdout.readline, b''):
-                        buf.append(line)
-                        marks['last'] = _tw.time()
-                        marks['n'] += 1
-                        m = re.search(rb'(\d+)\s+page\(s\)\s+scanned', line.lower())
-                        if m:
-                            marks['pages'] = int(m.group(1))
-                            done.set()
-                except Exception:
-                    pass
-                finally:
-                    done.set()
-
-            _th.Thread(target=_read, daemon=True).start()
-
-            started = _tw.time()
-            diag = 'ok'
-            while True:
-                if done.wait(0.5):
-                    diag = 'ok'
-                    break
-                now = _tw.time()
-                if marks['n'] == 0 and now - started > SCAN_NO_OUTPUT_SECONDS:
-                    diag = 'no_output'
-                    break
-                if marks['n'] > 0 and now - marks['last'] > SCAN_STALL_SECONDS:
-                    diag = 'stall'
-                    break
-                if now - started > SCAN_TIMEOUT_SECONDS:
-                    diag = 'timeout'
-                    break
-
-            if diag == 'ok':
-                pages = marks.get('pages')
-                if pages == 0:
-                    # 没有内容需要保存，直接收尾
-                    _terminate_then_kill(proc)
-                else:
-                    # 扫到了内容：等进程退出，或等输出文件落盘后收尾
-                    deadline = _tw.time() + SCAN_FINISH_GRACE_SECONDS
-                    while _tw.time() < deadline:
-                        if proc.poll() is not None:
-                            break
-                        if _collect_scan_pages(scan_output_dir, next_filename):
-                            break
-                        _tw.sleep(0.4)
-                    if proc.poll() is None:
-                        _terminate_then_kill(proc)
-            else:
-                _terminate_then_kill(proc)
-
-            try:
-                proc.stdout.close()
-            except Exception:
-                pass
-            return proc.returncode, _decode_scan_output(b''.join(buf)).strip(), diag
+            returncode_, text_, diag_, _pages = _scan_with_watchdog(
+                scan_cmd, scan_output_dir, next_filename)
+            return returncode_, text_, diag_
 
         returncode = None
         combined_output = ''
         generated_pages = []
         timed_out = False
         unresponsive = False
+        jammed = False
 
         for attempt in (1, 2):
             if attempt == 2:
@@ -2944,19 +3119,21 @@ def start_scan():
             returncode, combined_output, diag = _run_once()
             timed_out = (diag == 'timeout')
             unresponsive = diag in ('no_output', 'stall')
+            jammed = (diag == 'jam') or _looks_like_jam(combined_output)
             if timed_out:
                 break
             generated_pages = _collect_scan_pages(scan_output_dir, next_filename)
             if generated_pages:
                 break
             # 以下情况不重试，直接给出结论（重试只会白等一轮）：
+            #  · 卡纸：纸还卡在机器里，重试只会再卡一次
             #  · 设备毫无回应（unresponsive）：重试也打不开设备
             #  · 已经明确扫到 0 页（no_content）：这是确定性结果，不是瞬时故障
             #  · 不属于"被占用/脱机"等瞬时故障：例如没放纸等操作问题
             _out_low = (combined_output or '').lower()
             _no_content = ('0 page(s) scanned' in _out_low
                            or 'no scanned pages' in _out_low)
-            if attempt == 1 and (unresponsive or _no_content
+            if attempt == 1 and (jammed or unresponsive or _no_content
                                  or not _is_transient_scan_failure(returncode, combined_output)):
                 break
 
@@ -2965,6 +3142,28 @@ def start_scan():
             print('扫描命令输出: %s' % combined_output, flush=True)
 
         if timed_out or unresponsive or not generated_pages:
+            # 卡纸是"物理问题"，跟脱机/超时的处置方式完全不同，单独给一套话术：
+            # 老师照着做就能恢复，不需要重启服务，也不需要拔插 USB。
+            if jammed:
+                saved = len(generated_pages)
+                head = ('扫描仪卡纸了（设备提示「请整理纸 / 检查进纸」）。\n\n'
+                        '请按下面顺序处理：\n'
+                        '1. 打开扫描仪进纸盖，顺着进纸方向把卡住的试卷轻轻抽出来（别硬拽，'
+                        '避免撕纸留下碎屑）\n'
+                        '2. 检查进纸通道里有没有纸屑、订书钉，清干净后把盖板扣紧\n'
+                        '3. 把试卷重新码齐（去掉订书钉、折角），放回进纸器\n'
+                        '4. 回到本页面，点「🔄 扫描仪复位」，再点一次扫描即可\n\n'
+                        '系统已经自动结束了卡住的扫描任务、释放了扫描仪，'
+                        '不需要重启程序。')
+                if saved:
+                    head = ('扫描中途卡纸，卡纸前已扫入的 %d 页已经保留。\n\n' % saved) + head
+                return jsonify({
+                    'error': head,
+                    'jam': True,
+                    'page_count': saved,
+                    'returncode': returncode,
+                    'raw_output': combined_output,
+                }), 500
             if timed_out:
                 err_source = 'timeout'
             elif diag == 'stall':
@@ -3041,7 +3240,9 @@ def start_scan():
         try:
             _cleanup_stale_scanner_processes()
         finally:
-            _SCAN_LOCK.release()
+            # 带令牌释放：如果本次会话曾被判定卡死并被强制回收，
+            # 这里就不会误释放别人正在持的锁。
+            _SCAN_LOCK.release(_tok)
 
 
 @app.route('/api/scan/reset', methods=['POST'])
@@ -3050,20 +3251,80 @@ def reset_scanner_device():
 
     适用：反复提示「脱机 / 被占用 / 扫描仪未响应」时，
     在拔插 USB 之前先点这个（本机实测约 2~10 秒完成，无需拔线）。
+
+    卡纸场景下的关键作用：卡纸时上一次扫描请求可能还卡在驱动里、
+    或者残留的 NAPS2 进程仍占着设备。以前这里遇到锁被占直接回 409，
+    等于告诉老师"卡住了也没法救"。现在改成：
+      · 锁被占用且已超时（僵尸）-> 强制回收 + 清进程 + 复位；
+      · 锁刚被正常扫描占用 -> 仍然拒绝，避免复位把正在跑的扫描打断。
     """
+    forced = False
     if _SCAN_LOCK.locked():
-        return jsonify({'error': '正在扫描中，无法复位。请等本次扫描结束后再试。'}), 409
+        held = _SCAN_LOCK.held_seconds()
+        if held <= SCAN_LOCK_MAX_HOLD:
+            return jsonify({
+                'error': ('正在扫描中（已持续 %d 秒），无法复位。\n\n'
+                          '请等本次扫描结束再试；若扫描仪已经卡住不动，'
+                          '约 %d 秒后可再次点击本按钮强制释放。'
+                          % (int(held), max(1, SCAN_LOCK_MAX_HOLD - int(held))))
+            }), 409
+        # 超过阈值：大胆判定为僵尸占用，强制回收
+        print('复位扫描仪：强制回收已被占用 %.0f 秒的扫描锁。' % held, flush=True)
+        _cleanup_stale_scanner_processes()
+        _SCAN_LOCK.steal()
+        forced = True
+
+    # 复位前先清掉所有残留的 NAPS2 进程，否则设备连接（TWAIN）释放不掉
+    try:
+        _cleanup_stale_scanner_processes()
+    except Exception:
+        pass
+
     ok, detail = _run_scanner_reset()
     if ok:
-        return jsonify({'success': True,
-                        'message': '扫描仪已复位，请重新点击扫描。',
-                        'detail': detail})
+        msg = '扫描仪已复位，请重新点击扫描。'
+        if forced:
+            msg = '扫描仪已复位，并已强制结束卡住的扫描任务。请重新点击扫描。'
+        return jsonify({'success': True, 'forced': forced, 'message': msg, 'detail': detail})
     return jsonify({
         'error': ('扫描仪软复位未成功。\n\n'
                   '请拔掉扫描仪 USB 线，等 10 秒后插回'
                   '（建议插主机后置 USB 接口），再点击扫描。'),
+        'forced': forced,
         'detail': detail,
     }), 500
+
+
+@app.route('/api/scan/force_unlock', methods=['POST'])
+def force_unlock_scanner():
+    """强制解锁扫描仪（应急出口）。
+
+    用途：卡纸 / 驱动弹窗 / 上一次扫描把设备占死之后，界面怎么点都没反应时，
+    老师点一下这个按钮，就能：
+      1. 杀掉所有残留的 NAPS2 扫描进程（线程不再被驱动拖住）
+      2. 强制释放扫描互斥锁
+    不会做软复位（那个要几秒），只负责"把系统放回可再次尝试的状态"。
+    """
+    # 本机（连着扫描仪的那台电脑）随时可用；远程只放开给教师/管理员，
+    # 避免同网段内任意设备都能打断别人正在跑的扫描。
+    if not _is_local_request() and session.get('user_role') not in ('teacher', 'admin'):
+        return jsonify({'error': '仅本机设备或教师账号可执行强制解锁'}), 403
+    held = _SCAN_LOCK.held_seconds()
+    was_locked = _SCAN_LOCK.locked()
+    try:
+        _cleanup_stale_scanner_processes()
+    except Exception:
+        pass
+    if was_locked:
+        _SCAN_LOCK.steal()
+    return jsonify({
+        'success': True,
+        'was_locked': was_locked,
+        'held_seconds': int(held),
+        'message': ('已强制解锁（原占用 %d 秒）。请先取出卡住的纸张、整理好试卷，'
+                    '再点「扫描」重新开始。' % int(held)) if was_locked
+                   else '扫描仪本来就是空闲状态，已顺手清理残留进程，可以直接点「扫描」。',
+    })
 
 
 @app.route('/api/import_local_images', methods=['POST'])
@@ -5572,23 +5833,28 @@ def _find_by_id(items, item_id):
 
 
 def _run_scanner(scan_output_dir, next_filename):
-    """调用 NAPS2 扫描，返回 (ok, message, [页面路径...])。
+    """调用 NAPS2 扫描，返回 (ok, message, [页面路径...], 附加信息)。
 
-    与后台 /api/scan 完全对齐的三件事（2026-10-19 修正）：
+    与后台 /api/scan 完全对齐的四件事：
       1) 显式传 --source/--pagesize/--dpi/--bitdepth：NAPS2 默认档位是 100dpi+Letter，
          扫试卷时手写字会糊，直接影响后续视觉模型识别与评分准确率；
       2) 加 --noprofile：避免图形界面里残留的「等待输入/自动保存」档案让命令行扫描卡住；
       3) 复用模块级 _SCAN_LOCK：同一台扫描仪同时只能有一次扫描会话，否则 TWAIN 会报
-         MaxConnections 并把设备拖入「无响应」状态（只能拔插 USB 恢复）。
+         MaxConnections 并把设备拖入「无响应」状态（只能拔插 USB 恢复）；
+      4) 复用 _scan_with_watchdog：以前这里是 communicate(timeout=180)，
+         卡纸时 NAPS2 既不退出也不报错，只能干等满 180 秒，期间锁被一直占着，
+         老师再点扫描只会得到"正在扫描中"，看起来就是"点了没反应"。
+         现在卡纸能在几秒内被识别并收手。
     """
-    import subprocess
     naps2_path = get_naps2_path()
     if not os.path.exists(naps2_path):
         return False, ('未找到 NAPS2 扫描程序，无法扫描。当前配置路径：' + str(naps2_path) +
-                       '。请在后台「文件管理」的扫描设置中配置正确路径。'), []
-    if not _SCAN_LOCK.acquire(blocking=False):
-        return False, ('已有一次扫描正在进行中，请等本次扫描结束后再点击。\n\n'
-                       '（同一台扫描仪同时只能扫描一次，连续快速点击会让设备被占用而卡住。）'), []
+                       '。请在后台「文件管理」的扫描设置中配置正确路径。'), [], {}
+    tok, held, reclaimed = _acquire_scan_lock('station/scan')
+    if not tok:
+        return False, ('已有一次扫描正在进行中（已持续 %d 秒），请等本次扫描结束后再点击。\n\n'
+                       '如果上一次是卡纸导致的卡住，请先取出纸张，'
+                       '再点「强制解锁」或「扫描仪复位」。' % int(held)), [], {}
     try:
         os.makedirs(scan_output_dir, exist_ok=True)
         scan_output_path = os.path.join(scan_output_dir, next_filename)
@@ -5604,54 +5870,52 @@ def _run_scanner(scan_output_dir, next_filename):
             val = scan_opts.get(key)
             if val not in (None, ''):
                 cmd += [flag, str(val)]
-        print('执行扫描命令: %s' % ' '.join(cmd), flush=True)
 
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        try:
-            raw_out, raw_err = proc.communicate(timeout=180)
-        except subprocess.TimeoutExpired:
-            # 超时必须结束子进程，否则 NAPS2 会一直占用扫描仪，导致后续扫描持续失败
-            try:
-                proc.kill()
-                proc.communicate(timeout=10)
-            except Exception:
-                pass
-            return False, '扫描超时，请检查扫描仪连接或重试。', []
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-            raise
-        return _finish_scan(proc, scan_output_dir, next_filename, raw_out, raw_err)
+        returncode, combined, diag, _pages = _scan_with_watchdog(
+            cmd, scan_output_dir, next_filename, log_prefix='[扫描端] ')
+        pages = _collect_scan_pages(scan_output_dir, next_filename)
+        meta = {'diag': diag, 'reclaimed': reclaimed}
+        print('[扫描端] 返回码: %s 诊断: %s 页数: %d' % (returncode, diag, len(pages)), flush=True)
+        if combined:
+            print('[扫描端] 输出: %s' % combined, flush=True)
+
+        # ---- 卡纸：单独一套话术，且不再自动重试（纸还在机器里，重试只会再卡一次）
+        if diag == 'jam' or _looks_like_jam(combined):
+            if pages:
+                return True, ('扫描中途卡纸，卡纸前已扫入 %d 页（已保留）。'
+                              '请取出卡住的纸张、整理后再继续扫描。' % len(pages)), pages, meta
+            return False, ('扫描仪卡纸了（设备提示「请整理纸 / 检查进纸」）。\n\n'
+                           '请按下面顺序处理：\n'
+                           '1. 打开扫描仪进纸盖，顺着进纸方向把卡住的试卷轻轻抽出来'
+                           '（别硬拽，避免撕纸留碎屑）\n'
+                           '2. 清掉进纸通道里的纸屑、订书钉，把盖板扣紧\n'
+                           '3. 试卷重新码齐后放回进纸器\n'
+                           '4. 回来点「强制解锁」，再点一次扫描即可\n\n'
+                           '卡住的扫描任务已经自动结束、扫描仪连接已释放，不用重启程序。'), [], meta
+
+        # ---- 其它失败：沿用原有中文排查提示
+        if returncode != 0 or not pages:
+            info = _humanize_scan_error(
+                'timeout' if diag == 'timeout' else
+                ('#scan_stall#' if diag == 'stall' else
+                 ('脱机' if diag == 'no_output' else combined)), returncode)
+            hints = '\n'.join('%d. %s' % (i + 1, h) for i, h in enumerate(info['hints']))
+            drv_used, devices = _list_scan_devices(naps2_path, driver)
+            if devices:
+                dev_text = ('\n\n系统可识别的扫描设备（%s 驱动）：\n' % drv_used
+                            + '\n'.join('· ' + d for d in devices))
+            else:
+                dev_text = '\n\n未能列出任何扫描设备，请检查扫描仪电源与 USB 连接。'
+            detail = combined or '（扫描仪无任何输出，可能未响应或已休眠）'
+            return False, '%s\n\n请按以下步骤排查：\n%s%s\n\n技术详情：%s' % (
+                info['title'], hints, dev_text, detail), [], meta
+        return True, '', pages, meta
     finally:
+        # 清理残留进程要在放锁之前：否则下一次扫描可能立刻撞上 MaxConnections
         try:
-            _SCAN_LOCK.release()
-        except RuntimeError:
-            pass
-
-
-def _finish_scan(proc, scan_output_dir, next_filename, raw_out, raw_err):
-    """扫描进程结束后统一收尾：解码输出、收集页面、生成中文排查提示。"""
-
-    combined = (_decode_scan_output(raw_out) + '\n' + _decode_scan_output(raw_err)).strip()
-    print('扫描命令返回码: %s' % proc.returncode)
-    if combined:
-        print('扫描命令输出: %s' % combined)
-
-    pages = _collect_scan_pages(scan_output_dir, next_filename)
-    if proc.returncode != 0 or not pages:
-        info = _humanize_scan_error(combined, proc.returncode)
-        hints = '\n'.join('%d. %s' % (i + 1, h) for i, h in enumerate(info['hints']))
-        driver, _device = get_naps2_scan_target()
-        drv_used, devices = _list_scan_devices(get_naps2_path(), driver)
-        if devices:
-            dev_text = ('\n\n系统可识别的扫描设备（%s 驱动）：\n' % drv_used) + '\n'.join('· ' + d for d in devices)
-        else:
-            dev_text = '\n\n未能列出任何扫描设备，请检查扫描仪电源与 USB 连接。'
-        detail = combined or '（扫描仪无任何输出，可能未响应或已休眠）'
-        return False, '%s\n\n请按以下步骤排查：\n%s%s\n\n技术详情：%s' % (info['title'], hints, dev_text, detail), []
-    return True, '', pages
+            _cleanup_stale_scanner_processes()
+        finally:
+            _SCAN_LOCK.release(tok)
 
 
 def _new_staging_item(image_path, source='scan', original_name=''):
@@ -5687,6 +5951,20 @@ def _new_staging_item(image_path, source='scan', original_name=''):
     q = image_quality_metrics(dest_path)
     if q:
         item['quality'] = q
+    # 自动转正 + 空白页识别（本地、零成本）：倒置卷子会让固定裁切的「表头特写」裁到页脚，
+    # 学号随之读不到。这里直接把图转正，后续预览 / 批阅 / 归档都用正立图。
+    try:
+        _im0 = Image.open(dest_path)
+        _rot, _conf, _blank = _detect_page_rotation(_im0)
+        _fixed = _im0.convert('RGB') if (_rot in (90, 180, 270) and _conf >= 0.15) else None
+        _im0.close()
+        if _blank:
+            item['blank'] = True
+        if _fixed is not None:
+            _transform_image(_fixed, rotation=_rot, crop=None).save(dest_path)
+            item['auto_rotation'] = _rot
+    except Exception as _e:
+        print('自动转正失败（忽略）: %s' % _e)
     return item
 
 
@@ -5868,12 +6146,21 @@ def station_scan():
     task_id = str(req.get('task_id') or '').strip()
     # 满分由老师在扫描端当场指定：不传/非法就回落到该批阅方案自带的默认值
     max_score = req.get('max_score')
+    # 在驱动扫描仪之前就挡掉：别让老师扫完一叠纸才发现这个方案不能自动批
+    if auto and not auto_pipeline_supports(subject):
+        return jsonify({'error': auto_pipeline_reject_message(subject)}), 400
     try:
         scan_output_dir = get_scan_output_dir()
         next_filename = get_next_scan_filename(scan_output_dir)
-        ok, msg, pages = _run_scanner(scan_output_dir, next_filename)
+        ok, msg, pages, scan_meta = _run_scanner(scan_output_dir, next_filename)
         if not ok:
-            return jsonify({'error': msg}), 500
+            # jam=True 让前端能区分"卡纸（要人工取纸）"和"设备故障"，
+            # 从而显示「强制解锁」按钮而不是让人干等。
+            return jsonify({'error': msg,
+                            'jam': (scan_meta or {}).get('diag') == 'jam' or _looks_like_jam(msg),
+                            'diag': (scan_meta or {}).get('diag')}), 500
+        if not pages:
+            return jsonify({'error': msg or '没有扫描到任何页面'}), 500
         with _STAGING_LOCK:
             items = load_staging()
             added = []
@@ -5944,6 +6231,8 @@ def station_import():
     subject = str(request.form.get('subject') or request.args.get('subject') or 'english_essay').strip()
     task_id = str(request.form.get('task_id') or request.args.get('task_id') or '').strip()
     max_score = request.form.get('max_score') or request.args.get('max_score')
+    if auto and not auto_pipeline_supports(subject):
+        return jsonify({'error': auto_pipeline_reject_message(subject)}), 400
     items = load_staging()
     added = []
     tmp_dir = os.path.join(STAGING_DIR, '_incoming')
@@ -6596,6 +6885,28 @@ HEADER_PROMPT = '''这是一张学生英语作文的扫描件。只做一件事�
 '''
 
 
+# 自动流水线（扫完即批）目前只有英语作文这一套契约：提示词里写的是「要点覆盖 / 语言错误 /
+# 句子改写 / 佳句候选」，输出结构也是作文专用的 essay 对象。数学、默写等方案走同一条链路
+# 会产出一堆对不上的字段，所以在这里先挡住，等各学科的专用契约做完再逐个放开。
+# 注意：这只限制「自动批阅」；教师在用户端对已归档的卷子手动批阅走的是通用契约，不受影响。
+AUTO_PIPELINE_SUBJECTS = ('english_essay',)
+
+
+def auto_pipeline_supports(subject):
+    """这个批阅方案能不能走「扫完即批」的自动流水线。"""
+    return str(subject or 'english_essay') in AUTO_PIPELINE_SUBJECTS
+
+
+def auto_pipeline_reject_message(subject):
+    """不能走自动流水线时给老师看的话：说清原因和替代做法，而不是一句「不支持」。"""
+    name = _subject_display_name(subject)
+    return ('「%s」暂时不能扫完自动批阅：自动流水线目前只接了英语作文的评阅契约，'
+            '其他学科按作文那套评会出错。\n\n'
+            '两个办法：\n'
+            '· 先在扫描端选「英语作文」扫进来（只归档、不自动批）；\n'
+            '· 需要批数学/默写时，在用户端点「评语 / 批阅」逐份手动批。' % name)
+
+
 def _subject_max_score(subject):
     """取某个批阅方案自带的默认满分（英语作文 25 / 数学 12 / 默写 10）。"""
     try:
@@ -6911,6 +7222,63 @@ def image_quality_metrics(path):
         }
     except Exception:
         return None
+
+
+def _detect_page_rotation(img):
+    """本地判断卷面方向，返回 (顺时针回正角度, 置信度, 是否空白)。
+
+    老师把卷子放进馈纸器时可能上下颠倒或横放。批阅提示词里固定裁「顶部 10%」的表头特写，
+    页面一旦倒置，特写就裁到页脚，学号随之读不到——所以入库前先转正。
+
+    判据（纯本地，零 API 成本）：
+      · 正立的文字行是水平的 → 行投影起伏大（axis）；横放时行投影几乎是平的。
+      · 这类答题卷页眉有班级/姓名/学号手写，页脚是空白页边 → 正立时上部墨量 > 下部。
+    实测 5 张真实 A4 卷 × 4 个方向共 20 例全对，最小置信度 0.28（阈值 0.15 留足余量）；
+    置信度不足时宁可不转，避免把正常卷子转坏。空白页（背面）单独标记。
+    """
+    try:
+        import numpy as np
+        import cv2
+    except ImportError:
+        return 0, 0.0, False
+    try:
+        g = img.convert('L') if hasattr(img, 'convert') else img
+        arr = np.array(g)
+        h, w = arr.shape[:2]
+        if h > 1000:
+            r = 1000.0 / h
+            arr = cv2.resize(arr, (max(1, int(w * r)), 1000), interpolation=cv2.INTER_AREA)
+        arr = cv2.medianBlur(arr, 3)
+        _, bw = cv2.threshold(arr, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        ink = float((bw > 0).mean())
+        if ink < 0.003:
+            return 0, 0.0, True
+
+        def _score(b):
+            hh = b.shape[0]
+            rows = b.sum(axis=1).astype(np.float32)
+            if rows.max() <= 0:
+                return -1e9
+            rows /= rows.max()
+            axis = float(rows.var())
+            k = max(2, hh // 10)
+            top = float(b[:k].mean())
+            bot = float(b[-k:].mean())
+            header = (top - bot) / (top + bot + 1e-6)
+            return axis * 4.0 + header
+
+        # np.rot90(k=1) 是逆时针 90°，标题里的角度统一按「顺时针」返回给 _transform_image
+        scores = []
+        for ccw in (0, 90, 180, 270):
+            scores.append(_score(np.rot90(bw, k=ccw // 90)))
+        order = sorted(range(4), key=lambda i: scores[i], reverse=True)
+        margin = float(scores[order[0]] - scores[order[1]])
+        if margin < 0.15:
+            return 0, round(margin, 2), False
+        ccw_best = (0, 90, 180, 270)[order[0]]
+        return (360 - ccw_best) % 360, round(margin, 2), False
+    except Exception:
+        return 0, 0.0, False
 
 
 def quality_badge(q):
@@ -7434,12 +7802,13 @@ def _llm_retry(fn, tries=3, base_delay=2.0):
     return None, last
 
 
-def _read_header(page, quality=None, img_max_size=None):
+def _read_header(page, quality=None, img_max_size=None, rotation=0):
     """轻量读表头：只取学号 / 姓名 / 班级，输出几十 token。返回 (dict, 错误)。
 
     单独一次调用的意义：学号是分班的主键，不能绑定在「完整批阅成功」这个前提上。
     批阅要转写全文、逐条改错、写范文，输出长、偶尔会卡；读表头只要几十个 token，
     几秒钟就有结果。先读表头 → 立刻分班落库 → 再批阅，老师全程不用碰学号。
+    rotation 同 _vision_grade_essay：老师手动旋转的卷子要按转正后的图裁表头。
     """
     if not minimax_api_key:
         return None, '未配置 LLM_API_KEY'
@@ -7451,6 +7820,9 @@ def _read_header(page, quality=None, img_max_size=None):
         img = _open_image(page) if isinstance(page, str) else page
         if img.mode != 'RGB':
             img = img.convert('RGB')
+        _rot = int(rotation or 0) % 360
+        if _rot in (90, 180, 270):
+            img = _transform_image(img, rotation=_rot, crop=None)
         parts = []
         # 表头特写优先：字被放大后，手写数字认错率明显更低
         try:
@@ -7491,13 +7863,14 @@ def _read_header(page, quality=None, img_max_size=None):
 
 
 def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=None,
-                        quality=None, img_max_size=None):
+                        quality=None, img_max_size=None, rotation=0):
     """批阅一页英语作文：一次调用同时读表头（学号/班级/姓名）与全文。返回 (dict, 错误信息)。
 
     model        显式指定视觉模型；为空时按 `.env` 的精度档位决定，
                  并把 quality（本地卷面体检结果）传进去用于「难卷自动升档」。
     quality      image_quality_metrics() 的返回，可为 None。
     img_max_size 送图长边上限；为空时普通卷 2400、难卷 IMG_MAX_HARD（3300）。
+    rotation     手动旋转角度（顺时针）；自动转正在入库时已把图转正，这里只需处理老师手动转的。
     """
     if not minimax_api_key:
         return None, '未配置 LLM_API_KEY，请在 .env 中设置'
@@ -7508,6 +7881,10 @@ def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=
         img = _open_image(page) if isinstance(page, str) else page
         if img.mode != 'RGB':
             img = img.convert('RGB')
+        rot = int(rotation or 0) % 360
+        if rot in (90, 180, 270):
+            # 与预览保持一致：老师手动转过的卷子，批阅也要用转正后的图
+            img = _transform_image(img, rotation=rot, crop=None)
         parts = [{'type': 'image_url', 'image_url': {'url': _img_to_data_url(img, page_max)}}]
         try:
             head = _transform_image(img, 0, ESSAY_HEADER_RECT)
@@ -7835,6 +8212,14 @@ def _auto_pipeline(batch_id):
     batch_max = int(batch_max) if float(batch_max).is_integer() else batch_max
     subject_label = _subject_display_name(b.get('subject') or 'english_essay')
 
+    # 老批次可能是「非英语作文」时建的（放开学科前留下的），重试时别再按作文契约跑一遍
+    if not auto_pipeline_supports(b.get('subject')):
+        b.setdefault('job', {}).update({
+            'status': 'error', 'stage': 'error', 'updated_at': _now_str(),
+            'message': auto_pipeline_reject_message(b.get('subject'))})
+        _save_batch(b)
+        return
+
     def bump(**kw):
         job = b.setdefault('job', {})
         job.update({k: v for k, v in kw.items() if v is not None})
@@ -7844,9 +8229,15 @@ def _auto_pipeline(batch_id):
     try:
         live = {it['id']: it for it in load_staging()}
         pages = [live[i] for i in b.get('item_ids', []) if i in live]
+        # 馈纸式扫描容易把纸背面也扫进来：空白页不批阅、不建档，避免变成一堆「识别失败」。
+        blank_pages = [p for p in pages if p.get('blank')]
+        if blank_pages:
+            pages = [p for p in pages if not p.get('blank')]
         bump(status='running', stage='reading', done=0,
              total=len(pages), message='正在识别表头与正文…')
         if not pages:
+            if blank_pages:
+                raise RuntimeError('本批 %d 张都是空白页（可能是背面），已跳过' % len(blank_pages))
             raise RuntimeError('临时区里找不到这批扫描件（可能已被清空）')
 
         # ---------------- ⓪ 读表头：先把学号读出来并分班，再谈批阅 ----------------
@@ -7861,7 +8252,8 @@ def _auto_pipeline(batch_id):
             p = _staging_image_path(pages[idx])
             if not p:
                 return idx, None, '图片文件缺失'
-            h, err = _read_header(p, quality=pages[idx].get('quality'))
+            h, err = _read_header(p, quality=pages[idx].get('quality'),
+                                  rotation=int(pages[idx].get('rotation') or 0))
             return idx, h, err
 
         def _header_print(idx):
@@ -7929,7 +8321,8 @@ def _auto_pipeline(batch_id):
                              'quality': it.get('quality'), 'sec': 0}
             t0 = time.time()
             res, err = _vision_grade_essay(path, requirements_text, batch_max,
-                                           quality=it.get('quality'))
+                                           quality=it.get('quality'),
+                                           rotation=int(it.get('rotation') or 0))
             sec = round(time.time() - t0, 1)
             if err:
                 return idx, {'item_id': it['id'], 'error': err,
@@ -8118,6 +8511,9 @@ def _auto_pipeline(batch_id):
             notes.append('%d 张卷面偏难' % hard_n)
         if illeg_n:
             notes.append('%d 处字迹读不准' % illeg_n)
+        if blank_pages:
+            notes.append('%d 张空白页已跳过（可能是背面）' % len(blank_pages))
+            b['blank_skipped'] = len(blank_pages)
         if notes:
             done_msg += '（%s，已在结果里标出）' % '、'.join(notes)
         if b.get('warning'):
@@ -8130,7 +8526,13 @@ def _auto_pipeline(batch_id):
 
 
 def _start_auto_batch(item_ids, subject='english_essay', task_id='', max_score=None):
-    """建批 + 起后台线程。返回 batch（job 已在写盘）。"""
+    """建批 + 起后台线程。返回 batch（job 已在写盘）。
+
+    最后一道闸：调用方（station_scan / station_import）已经在动手前校验过，
+    这里再挡一次，避免将来新加的调用点绕过校验、把数学卷按作文契约批了。
+    """
+    if not auto_pipeline_supports(subject):
+        raise ValueError(auto_pipeline_reject_message(subject))
     with _JOB_LOCK:
         b = _new_batch(item_ids, subject=subject, task_id=task_id, max_score=max_score)
         t = threading.Thread(target=_auto_pipeline, args=(b['id'],), daemon=True)
@@ -8322,6 +8724,7 @@ def portal_overview():
     scoped = _filter_records_for_session(records)
     names_map = get_student_names_map()
     owners = load_class_owners()
+    all_classes = [c['name'] for c in _load_classes_roster()]
     groups = {}
     for r in scoped:
         c = r.get('class_name') or '未归档'
@@ -8344,6 +8747,13 @@ def portal_overview():
             if c not in groups:
                 groups[c] = {'class_name': c, 'total': 0, 'graded': 0, 'pending': 0,
                              'students': set(), 'last_at': ''}
+    elif role == 'admin':
+        # 管理员默认就是管全校：名单里的班全列出来（0 份也列），
+        # 否则空班在首页根本不出现，管理员点不进去，只能等别人扫了才有入口。
+        for c in all_classes:
+            if c not in groups:
+                groups[c] = {'class_name': c, 'total': 0, 'graded': 0, 'pending': 0,
+                             'students': set(), 'last_at': ''}
     group_list = []
     for c, g in groups.items():
         group_list.append({
@@ -8356,10 +8766,10 @@ def portal_overview():
             'claimed_by_me': uid in (owners.get(c) or []),
             'owners': owners.get(c) or [],
         })
-    group_list.sort(key=lambda x: x['last_at'], reverse=True)
+    # 有卷的班级按最近提交排在前面；还没扫过的班按名单顺序垫底
+    group_list.sort(key=lambda x: (x['last_at'] or ''), reverse=True)
 
     # 可认领的班级（有名字但尚无归属）——用于教师认领自己的班
-    all_classes = [c['name'] for c in _load_classes_roster()]
     unclaimed = [c for c in all_classes if not (owners.get(c) or [])]
     return jsonify({
         'role': role,

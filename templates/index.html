@@ -5748,15 +5748,13 @@
             });
         }
         async function startScanFromImportModal() {
-            var btn = document.getElementById('importStartScanBtn');
-            if (btn) { btn.disabled = true; btn.textContent = '扫描中…'; }
+            // 直接把弹窗收掉、交给 startScan 自己管按钮状态。
+            // 之前这里是「先关弹窗 -> 400ms 后才真扫」，中间那段延迟里
+            // 按钮已经被复位，老师连点会让两次状态互相覆盖。
             setImportScanProgressStep(1, 'active');
-            setTimeout(function() {
-                closeImportPaperModal();
-                if (btn) { btn.disabled = false; btn.textContent = '开始扫描'; }
-                resetImportScanProgress();
-                startScan();
-            }, 400);
+            closeImportPaperModal();
+            resetImportScanProgress();
+            startScan();
         }
         async function importLocalFiles() {
             const input = document.getElementById('importLocalFileInput');
@@ -5934,50 +5932,102 @@
         }
         
         // 扫描功能
+        // 说明：扫描入口已经改成「去扫描」弹窗里的「开始扫描」按钮，
+        // 页面里早就不存在 id="startScanBtn" 的元素了。之前这里直接
+        // document.getElementById('startScanBtn').innerHTML 会抛 TypeError，
+        // 整个函数在发请求之前就中断，表现为「点扫描一点反应都没有」
+        //（连报错提示都没有）—— 卡纸后用户会误以为系统卡死。
+        let SCAN_BUSY = false;
         async function startScan() {
-            const scanBtn = document.getElementById('startScanBtn');
-            const originalText = scanBtn.innerHTML;
-            
+            if (SCAN_BUSY) {
+                showAlert('上一次扫描还没结束，请稍等片刻…', 'warning', 3000);
+                return;
+            }
+            SCAN_BUSY = true;
+            const scanBtn = document.getElementById('importStartScanBtn')
+                         || document.getElementById('startScanBtn');
+            const originalText = scanBtn ? scanBtn.textContent : '开始扫描';
+            if (scanBtn) { scanBtn.disabled = true; scanBtn.textContent = '⏳ 扫描中…'; }
+
+            // 兜底超时：后端最坏情况是「卡住 60 秒 + 收尾」，给 150 秒足够；
+            // 有了它，即使请求悬挂，按钮也一定能恢复，不会永久停在"扫描中"。
+            const AC = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+            const killer = AC ? setTimeout(function () { AC.abort(); }, 150000) : null;
             try {
-                // 禁用按钮并显示加载状态
-                scanBtn.disabled = true;
-                scanBtn.innerHTML = '⏳ 扫描中...';
-                scanBtn.style.opacity = '0.6';
-                
-                showAlert('正在启动扫描...', 'info', 0);
-                
+                showAlert('正在启动扫描…（若机器提示卡纸，请先取出纸张再重试）', 'info', 0);
+
                 const response = await fetch('/api/scan', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'}
+                    headers: {'Content-Type': 'application/json'},
+                    signal: AC ? AC.signal : undefined
                 });
-                
-                const data = await response.json();
-                
+
+                let data = {};
+                try { data = await response.json(); } catch (e) { data = {}; }
+
                 if (response.ok) {
                     if (data.success) {
-                        showAlert('扫描成功！文件已保存到 scan 文件夹。', 'success');
-                        // 刷新文件夹列表
-                        setTimeout(() => {
-                            loadFolders();
-                        }, 1000);
+                        showAlert('扫描成功！共 ' + (data.page_count || 1)
+                                  + ' 页，文件已保存到 scan 文件夹。', 'success');
+                        setTimeout(() => { loadFolders(); }, 800);
                     } else if (data.warning) {
-                        showAlert(data.warning, 'warning');
+                        showAlert(data.warning, 'warning', 6000);
                     } else {
                         showAlert('扫描完成', 'success');
-                        setTimeout(() => {
-                            loadFolders();
-                        }, 1000);
+                        setTimeout(() => { loadFolders(); }, 800);
                     }
                 } else {
-                    showAlert(data.error || '扫描失败，请检查扫描仪连接和配置', 'error');
+                    // 卡纸时后端会带 jam=true，这里额外给一个「强制解锁」按钮，
+                    // 让老师不用重启程序也能自救。
+                    showScanError(data.error || '扫描失败，请检查扫描仪连接和配置',
+                                  !!data.jam);
                 }
             } catch (error) {
-                showAlert('扫描失败: ' + error.message, 'error');
+                if (error && error.name === 'AbortError') {
+                    showScanError('扫描请求超过 150 秒仍未返回，已自动中断。\n\n'
+                                  + '扫描仪很可能卡住了：请打开进纸盖取出卡住的试卷，'
+                                  + '盖好盖板后点下面「强制解锁」，再重新扫描。', true);
+                } else {
+                    showAlert('扫描失败: ' + error.message, 'error', 8000);
+                }
             } finally {
-                // 恢复按钮状态
-                scanBtn.disabled = false;
-                scanBtn.innerHTML = originalText;
-                scanBtn.style.opacity = '1';
+                if (killer) clearTimeout(killer);
+                SCAN_BUSY = false;
+                if (scanBtn) {
+                    scanBtn.disabled = false;
+                    scanBtn.textContent = originalText || '开始扫描';
+                }
+            }
+        }
+
+        // 扫描失败提示：卡纸类错误额外挂一个「强制解锁」按钮
+        function showScanError(message, withUnlock) {
+            const box = showAlert(message, 'error', 0);
+            if (!withUnlock || !box) return box;
+            const bar = document.createElement('div');
+            bar.style.marginTop = '10px';
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-warning';
+            btn.textContent = '🔄 强制解锁扫描仪';
+            btn.onclick = forceUnlockScanner;
+            bar.appendChild(btn);
+            box.appendChild(bar);
+            return box;
+        }
+
+        // 应急出口：杀掉残留扫描进程 + 释放扫描锁，让"点了没反应"能立刻恢复
+        async function forceUnlockScanner() {
+            try {
+                const r = await fetch('/api/scan/force_unlock', {method: 'POST'});
+                const d = await r.json().catch(() => ({}));
+                if (r.ok) {
+                    showAlert(d.message || '已强制解锁，请重新点击扫描。', 'success', 6000);
+                } else {
+                    showAlert(d.error || '强制解锁失败', 'error', 6000);
+                }
+            } catch (e) {
+                showAlert('强制解锁失败：' + e.message, 'error', 6000);
             }
         }
         

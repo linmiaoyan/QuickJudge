@@ -233,6 +233,12 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
           当前不是本机访问，扫描功能已锁定。请在连接扫描仪的这台电脑上打开本页。
         </div>
         <button class="scan-btn" id="scanBtn"><span class="ico">🖨️</span><span>开始扫描</span></button>
+        <!-- 卡纸 / 驱动弹窗把设备占死时的应急出口：点一下就杀掉残留扫描进程并释放锁，
+             不用重启程序、不用拔插 USB。平时是隐藏的，扫描出问题时才出现。 -->
+        <button id="unlockBtn" type="button"
+                style="display:none;width:100%;margin-top:8px;padding:9px 12px;border:1px dashed #d9a441;border-radius:9px;background:#fff8ec;color:#8a5300;font-size:13px;cursor:pointer;">
+          🔄 强制解锁扫描仪（取出卡纸后点这里）
+        </button>
         <!-- 默认勾选状态＝全自动批阅；只有需要一页多块时才让老师主动改成「先只扫」 -->
         <label id="manualWrap" style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;font-size:12.5px;color:var(--text2);cursor:pointer;line-height:1.45;">
           <input type="checkbox" id="manualScan" style="margin:2px 0 0;flex:0 0 auto;cursor:pointer;">
@@ -245,7 +251,7 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
           <input type="file" id="importInput" accept="image/*" multiple style="display:none;">
         </div>
         <div style="margin-top:14px;">
-          <div style="font-size:12.5px;color:var(--text2);margin-bottom:5px;">批阅方案（扫完自动批，无需再点）</div>
+          <div style="font-size:12.5px;color:var(--text2);margin-bottom:5px;">自动批阅方案（扫完直接批，无需再点）</div>
           <div style="display:flex;gap:8px;align-items:stretch;">
             <select id="subjectSel" style="flex:1 1 auto;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;background:#fff;"></select>
             <label for="maxScore" title="这一批卷子的满分；默认跟着上面的方案走，改了就按你填的算"
@@ -256,8 +262,9 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
             </label>
           </div>
           <div style="font-size:11.5px;color:var(--text3,#999);margin-top:5px;line-height:1.45;">
-            默认按方案分值（英语作文 25 / 数学 12 / 默写 10）；这次卷子不是这个分值，直接改右边数字，本批全部按它算。
+            默认按方案分值（英语作文 25）；这次卷子不是这个分值，直接改右边数字，本批全部按它算。
           </div>
+          <div id="subjNote" style="font-size:11.5px;color:#8a5300;background:#fff8ec;border:1px solid #f5d9a8;border-radius:8px;padding:6px 9px;margin-top:7px;line-height:1.5;display:none;"></div>
         </div>
 
         <div id="jobPanel" class="jobpanel">
@@ -389,11 +396,39 @@ function toast(msg, type) {
 }
 
 async function api(url, opts) {
-  const res = await fetch(url, Object.assign({ credentials: 'same-origin' }, opts || {}));
-  let data = null;
-  try { data = await res.json(); } catch (e) { data = {}; }
-  if (!res.ok) throw new Error((data && (data.error || data.message)) || ('请求失败 ' + res.status));
-  return data;
+  // 扫描接口最坏情况要等几十秒（卡纸识别 / 无响应判定），给个兜底超时，
+  // 保证请求一定会结束、按钮一定能恢复，不会永久停在「扫描中」。
+  const opts2 = Object.assign({ credentials: 'same-origin' }, opts || {});
+  const ms = opts2.timeout_ms || 150000;
+  delete opts2.timeout_ms;
+  let timer = null;
+  if (typeof AbortController !== 'undefined' && !opts2.signal) {
+    const ac = new AbortController();
+    opts2.signal = ac.signal;
+    timer = setTimeout(function () { ac.abort(); }, ms);
+  }
+  try {
+    const res = await fetch(url, opts2);
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = {}; }
+    if (!res.ok) {
+      const err = new Error((data && (data.error || data.message)) || ('请求失败 ' + res.status));
+      err.jam = !!(data && data.jam);
+      err.diag = data && data.diag;
+      throw err;
+    }
+    return data;
+  } catch (e) {
+    if (e && e.name === 'AbortError') {
+      const err = new Error('请求超过 ' + Math.round(ms / 1000) + ' 秒仍未返回，已自动中断。'
+        + '扫描仪很可能卡住了：请取出卡纸、盖好盖板，然后点「强制解锁」再重试。');
+      err.jam = true;
+      throw err;
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /* ---------------- 初始化 ---------------- */
@@ -419,12 +454,28 @@ async function loadContext() {
     row('临时区', (CTX.staging_count || 0) + ' 张待整理') +
     row('当前用户', CTX.user ? (CTX.user.name || CTX.user.id) + '（' + CTX.user.role + '）' : '未登录');
 
-  // 批阅方案下拉：默认英语作文，记住上次选择（老师不需要每次改）
-  const gs = (CTX.grading && CTX.grading.subjects) || [];
+  // 批阅方案下拉：自动批阅目前只接了英语作文这一套评阅契约，其余方案从下拉里拿掉并说明原因，
+  // 免得老师选了数学、扫完一叠纸才发现批出来是作文那套结构。
+  const gsAll = (CTX.grading && CTX.grading.subjects) || [];
+  const gs = gsAll.filter(s => s.auto_ok !== false);
+  const skipped = gsAll.filter(s => s.auto_ok === false).map(s => s.name);
+  const noteEl = $('#subjNote');
+  if (noteEl) {
+    if (skipped.length) {
+      noteEl.style.display = '';
+      noteEl.innerHTML = '<b>暂不开放：</b>' + skipped.map(esc).join('、')
+        + '。自动批阅目前只接了英语作文的评阅规则，其他学科接好之前先不放出来；'
+        + '要批这些科目的卷子，请扫进来后在用户端点「评语 / 批阅」逐份手动批。';
+    } else {
+      noteEl.style.display = 'none';
+      noteEl.innerHTML = '';
+    }
+  }
   const sel = $('#subjectSel');
   if (sel) {
     const saved = localStorage.getItem('qj_station_subject') || 'english_essay';
-    sel.innerHTML = gs.map(s => '<option value="' + esc(s.key) + '">' + esc(s.name) + '（满分 ' + esc(s.max_score) + '）</option>').join('');
+    sel.innerHTML = gs.map(s => '<option value="' + esc(s.key) + '">' + esc(s.name) + '（满分 ' + esc(s.max_score) + '）</option>').join('')
+      || '<option value="english_essay">英语作文（满分 25）</option>';
     sel.value = gs.some(s => s.key === saved) ? saved : (gs[0] ? gs[0].key : 'english_essay');
     sel.onchange = () => { localStorage.setItem('qj_station_subject', sel.value); syncMaxScore(); };
     syncMaxScore();
@@ -578,12 +629,15 @@ $('#scanBtn').onclick = async () => {
       JOB_TIMER = setInterval(() => pollJob(r.batch.id), 2500);
     } else {
       await loadQueue();
+      hideUnlock();
       toast(manual
         ? '已扫入临时区 ' + (r.count || 1) + ' 页，请框选区域或核对学号后提交'
         : '已扫描 ' + (r.count || 1) + ' 页，已进入临时区', 'ok');
     }
   } catch (e) {
     fail('扫描失败', e.message);
+    // 卡纸 / 请求卡住：把「强制解锁」摆到台面上，老师不用重启程序
+    if (e.jam) showUnlock();
   } finally {
     btn.disabled = !CTX.is_local;
     btn.innerHTML = '<span class="ico">🖨️</span><span>开始扫描</span>';
@@ -592,6 +646,33 @@ $('#scanBtn').onclick = async () => {
     if (cb && cb.checked) { cb.checked = false; syncManualScanLook(); }
   }
 };
+
+/* ---------- 卡纸自救：强制解锁 ---------- */
+function showUnlock() {
+  const b = $('#unlockBtn');
+  if (b) b.style.display = 'block';
+}
+function hideUnlock() {
+  const b = $('#unlockBtn');
+  if (b) b.style.display = 'none';
+}
+if ($('#unlockBtn')) {
+  $('#unlockBtn').onclick = async () => {
+    const b = $('#unlockBtn');
+    b.disabled = true;
+    b.textContent = '正在解锁…';
+    try {
+      const r = await api('/api/scan/force_unlock', { method: 'POST', timeout_ms: 20000 });
+      toast(r.message || '已强制解锁，请重新点击扫描。', 'ok');
+      hideUnlock();
+    } catch (e) {
+      toast('强制解锁失败：' + e.message, 'err');
+    } finally {
+      b.disabled = false;
+      b.textContent = '🔄 强制解锁扫描仪（取出卡纸后点这里）';
+    }
+  };
+}
 
 // 「先只扫描」勾选后视觉上要明显，防止老师以为还是全自动
 function syncManualScanLook() {
@@ -685,6 +766,8 @@ function itemHtml(it, i) {
         ${q ? '<span class="tag ' + (q.hard ? 'warn' : 'ok') + '">' + esc(qLabel) + '</span>' : ''}
         ${nRegion > 1 ? '<span class="tag crop">已分 ' + nRegion + ' 块</span>' : (hasCrop ? '<span class="tag crop">单块区域</span>' : '')}
         ${it.rotation ? '<span class="tag">旋转' + it.rotation + '°</span>' : ''}
+        ${it.auto_rotation ? '<span class="tag ok">已自动转正 ' + it.auto_rotation + '°</span>' : ''}
+        ${it.blank ? '<span class="tag warn">空白页</span>' : ''}
       </div>
       <div class="seq">#${i + 1}</div>
     </div>

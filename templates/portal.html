@@ -338,7 +338,9 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
         <div class="stat w"><div class="n" id="tWait">0</div><div class="l">待批阅</div></div>
       </div>
 
-      <h2 class="sec">我的班级 <span class="cnt" id="tClassHint"></span></h2>
+      <h2 class="sec"><span id="tClassTitle">我的班级</span> <span class="cnt" id="tClassHint"></span>
+        <button class="btn sm" id="allPapersBtn" style="display:none;margin-left:10px;">查看全部试卷</button>
+      </h2>
       <div class="classgrid" id="classGrid"></div>
       <div id="claimBar" class="claimbar hidden"></div>
 
@@ -930,11 +932,20 @@ function errStats(list) {
 
 /* ------------ 教师视图 ------------ */
 function renderTeacher() {
+  const isAdmin = ME.role === 'admin';
   $('#tTotal').textContent = CTX.total || 0;
   $('#tDone').textContent = CTX.graded || 0;
   $('#tWait').textContent = CTX.pending || 0;
   const cls = CTX.classes || [];
+  $('#tClassTitle').textContent = isAdmin ? '全校班级' : '我的班级';
   $('#tClassHint').textContent = cls.length ? cls.length + ' 个班级' : '';
+  // 管理员默认看全校：给一个跨班的「全部试卷」入口，不用先点某个班
+  const allBtn = $('#allPapersBtn');
+  if (allBtn) {
+    allBtn.style.display = isAdmin ? '' : 'none';
+    allBtn.textContent = '查看全部试卷（' + (CTX.total || 0) + ' 份）';
+    allBtn.onclick = () => openAllPapers();
+  }
   const grid = $('#classGrid');
   if (!cls.length) {
     const hasUn = ((CTX && CTX.unclaimed_classes) || []).length && ME.role !== 'admin';
@@ -945,12 +956,17 @@ function renderTeacher() {
   } else {
     grid.innerHTML = cls.map(c => {
       const pct = c.total ? Math.round(c.graded / c.total * 100) : 0;
+      // 管理员不属于任何班，标「他人班级 / 未认领」没有意义，统一标全校
+      const pill = isAdmin ? '<span class="pill gray">全校</span>'
+        : '<span class="pill ' + (c.claimed_by_me ? '' : 'gray') + '">'
+          + (c.claimed_by_me ? '我的班级' : (c.owners && c.owners.length ? '他人班级' : '未认领')) + '</span>';
+      const empty = !c.total ? ' style="opacity:.62;"' : '';
       return `
-      <div class="classcard" data-class="${esc(c.class_name)}">
-        <div class="t">${esc(c.class_name)} <span class="pill ${c.claimed_by_me ? '' : 'gray'}">${c.claimed_by_me ? '我的班级' : (c.owners && c.owners.length ? '他人班级' : '未认领')}</span></div>
+      <div class="classcard" data-class="${esc(c.class_name)}"${empty}>
+        <div class="t">${esc(c.class_name)} ${pill}</div>
         <div class="meta"><span>${c.total} 份</span><span>已批 ${c.graded}</span><span>待批 ${c.pending}</span><span>${c.student_count} 人</span></div>
         <div class="bar"><i style="width:${pct}%"></i><i class="p" style="width:${100 - pct}%"></i></div>
-        <div class="meta" style="margin-top:6px;"><span>最近提交 ${esc(fmt(c.last_at))}</span>${c.claimed_by_me ? '<button class="btn sm" data-release="' + esc(c.class_name) + '" style="margin-left:auto;padding:2px 8px;font-size:11.5px;" title="退出后会回到「未认领」，可重新认领">退出认领</button>' : ''}</div>
+        <div class="meta" style="margin-top:6px;"><span>${c.total ? '最近提交 ' + esc(fmt(c.last_at)) : '还没有扫描件'}</span>${c.claimed_by_me ? '<button class="btn sm" data-release="' + esc(c.class_name) + '" style="margin-left:auto;padding:2px 8px;font-size:11.5px;" title="退出后会回到「未认领」，可重新认领">退出认领</button>' : ''}</div>
       </div>`;
     }).join('');
     $$('[data-class]', grid).forEach(el => el.onclick = () => openClass(el.dataset.class));
@@ -1092,6 +1108,19 @@ async function openClass(cname) {
   scrollToDetail();
 }
 
+/* 管理员：不选班，直接看全校所有试卷（跨班按时间倒序） */
+async function openAllPapers() {
+  VIEW = { class_name: '', status: '', student_id: '', all: true };
+  $('#statusFilter').value = '';
+  $('#sidSearch').value = '';
+  $('#detailBox').classList.remove('hidden');
+  $('#detailTitle').innerHTML = '全校 · 全部试卷 <span class="cnt">加载中…</span>';
+  $('#teacherRecords').innerHTML = '<div class="loadingbox"><span class="spin dark"></span>正在加载全校试卷…</div>';
+  syncClassView();
+  await loadTeacherRecords();
+  scrollToDetail();
+}
+
 $('#backToClassesBtn').onclick = () => {
   $('#detailBox').classList.add('hidden');
   VIEW = { class_name: '', status: '', student_id: '' };
@@ -1124,11 +1153,12 @@ async function loadTeacherRecords() {
   RECORDS = data.records || [];
   const box = $('#teacherRecords');
   const filtered = !!(VIEW.status || VIEW.student_id);
-  $('#detailTitle').innerHTML = esc(VIEW.class_name || '全部班级') + ' · 已扫描试卷'
+  const titlePrefix = VIEW.all ? '全校 · 全部试卷' : (esc(VIEW.class_name || '全部班级') + ' · 已扫描试卷');
+  $('#detailTitle').innerHTML = titlePrefix
     + ' <span class="cnt">共 ' + RECORDS.length + ' 份' + (filtered ? '（已筛选）' : '') + '</span>';
   if (!RECORDS.length) {
     box.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="big">🗂️</div>'
-      + (filtered ? '该筛选条件下没有试卷。' : '这个班级还没有试卷。') + '</div>';
+      + (filtered ? '该筛选条件下没有试卷。' : (VIEW.all ? '全校还没有已扫描的试卷。' : '这个班级还没有试卷。')) + '</div>';
     return;
   }
   const statsHtml = errStats(RECORDS);
@@ -1146,6 +1176,7 @@ async function loadTeacherRecords() {
         <div class="head">
           <span class="sid">${esc(r.student_id || '未填学号')}</span>
           <span class="nm">${esc(r.student_name || '')}</span>
+          ${VIEW.all && r.class_name ? `<span class="subj">${esc(r.class_name)}</span>` : ''}
           ${hasPieces ? `<span class="lvl ${r.status === 'graded' ? '' : 'warn'}">${r.status === 'graded' ? '已批阅' : '待批阅'}</span>` : ''}
           <span class="tm">${esc(fmt(r.submitted_at))}</span>
         </div>
