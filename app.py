@@ -6297,7 +6297,10 @@ def station_job_retry(batch_id):
             return jsonify({'error': '批次不存在'}), 404
         job = b.get('job') or {}
         runner = b.get('runner') or {}
-        if job.get('status') in ('running', 'queued') and runner.get('boot') == _BOOT_ID:
+        # 本进程在跑、或者另一个活着的进程在跑，都不许再起一个：
+        # 两个线程同时归档同一批图片 → 同一张卷子建两份档案（261431 出现 4 条就是这个）
+        if job.get('status') in ('running', 'queued') and (
+                runner.get('boot') == _BOOT_ID or _pid_alive(runner.get('pid'))):
             return jsonify({
                 'error': '这个批次正在批阅中（%s），请等它跑完再重试，'
                          '重复启动会让同一份卷子被归档两次。'
@@ -8165,12 +8168,48 @@ def _load_batch(batch_id):
     return data
 
 
+def _pid_alive(pid):
+    """判断某个进程是否还活着（Windows 用 OpenProcess，其它平台退回 os.kill）。"""
+    try:
+        pid = int(pid)
+    except Exception:
+        return False
+    if pid <= 0:
+        return False
+    if os.name != 'nt':
+        try:
+            os.kill(pid, 0)
+            return True
+        except Exception:
+            return False
+    try:
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not h:
+            # 打不开通常是权限不足（进程存在）或进程已不存在，用错误码区分
+            return k32.GetLastError() == 5      # ERROR_ACCESS_DENIED
+        try:
+            code = ctypes.c_ulong()
+            ok = k32.GetExitCodeProcess(h, ctypes.byref(code))
+            return bool(ok) and code.value == STILL_ACTIVE
+        finally:
+            k32.CloseHandle(h)
+    except Exception:
+        # 判断不了就当它活着：宁可让僵尸批次多留一会儿，也不能误杀正在跑的批次
+        return True
+
+
 def _heal_stale_batch(b):
     """把「进程已死但状态还 running」的批次收尾。返回是否做了修改。
 
-    判据只用 boot_id：同一进程内提交的批次 boot 一定相同，跨进程必然不同。
-    老批次没有 runner 字段（本逻辑上线前创建的）也按僵尸处理——它们同样是
-    「线程早就没了、状态还挂着」的情况。
+    判据必须是「boot_id 对不上」**且**「那个进程确实没了」：
+      · 只看 boot_id 会误伤——测试脚本、命令行工具 import 本模块时也算一个新进程，
+        它一读批次就会把线上正在跑的批次标成中断（2026-10-27 07:11 就这么干过一次）；
+      · 只看 pid 又会被 PID 复用骗到。两个条件一起用才安全。
+    老批次没有 runner 字段（本逻辑上线前创建的）同样按僵尸处理。
     """
     if not isinstance(b, dict):
         return False
@@ -8180,6 +8219,8 @@ def _heal_stale_batch(b):
     runner = b.get('runner') or {}
     if runner.get('boot') == _BOOT_ID:
         return False     # 就是本进程在跑，别乱动
+    if _pid_alive(runner.get('pid')):
+        return False     # 另一个活着的进程在跑，交给它
 
     # 先清幽灵条目：图片已经搬进档案库的，临时区不该再留着
     purged = 0
@@ -8745,6 +8786,16 @@ def _auto_pipeline(batch_id):
         # 幂等表：上一次归档被中断后重跑时，已经入过库的条目直接复用原记录，
         # 不再建第二份档案（否则用户端会看到同一份卷子好几条分数）。
         already = _records_by_staging_item(b.get('item_ids') or [])
+        # 同学号撞车检测：同一批里同一个学号出现两次以上，多半是别人的卷子被认错了。
+        # 以前这种卷子会静默建出第二条档案，班级人数虚高、老师也看不出哪张是错的
+        # （2026-10-26 那批 261431 就积了 4 条、261435 积了 2 条，四张原图各不相同）。
+        # 现在第二条起直接进「待确认」，带上「本批已有一份」的说明，等老师用「指定学号」改。
+        seen_sid = {}
+        for _r0 in load_records():
+            if str(_r0.get('batch_id') or '') == str(b['id']):
+                _s0 = str(_r0.get('student_id') or '')
+                if _s0:
+                    seen_sid.setdefault(_s0, _r0.get('id') or '')
         new_done = 0
         for r in results:
             it = live.get(r.get('item_id'))
@@ -8765,7 +8816,13 @@ def _auto_pipeline(batch_id):
             if not cls:
                 # 学号没落到名单上的卷子统一进「待确认」，不要按后四位硬推班级
                 cls = PENDING_CLASS_NAME if sid_note else str(stu.get('class_no') or '').strip()
-            resolved_map[r.get('item_id')] = (sid, sid_note, resolved_name)
+            # 学号撞车：本批已经有人叫这个学号了，这张就不要再占用同一个学生
+            dup_note = ''
+            if sid and sid in seen_sid:
+                dup_note = ('本批已有学号 %s 的档案，这张可能是别人的卷子被认成了它，请核对后改成正确学号'
+                            % sid)
+                cls = PENDING_CLASS_NAME
+            resolved_map[r.get('item_id')] = (sid, dup_note or sid_note, resolved_name)
             extra = {
                 'batch_id': b['id'],
                 # 幂等键：同一条临时区条目只允许有一条档案
@@ -8790,9 +8847,9 @@ def _auto_pipeline(batch_id):
                 },
                 'status': 'graded' if essay else 'pending',
                 'graded_at': _now_str() if essay else '',
-                # 学号没能唯一落到名单上时，这份卷子必须人工确认归属
-                'needs_review': (not sid or bool(sid_note)) and bool(essay),
-                'sid_note': sid_note,
+                # 学号没能唯一落到名单上、或本批已有人占了这个学号时，这份卷子必须人工确认归属
+                'needs_review': ((not sid or bool(sid_note) or bool(dup_note)) and bool(essay)),
+                'sid_note': dup_note or sid_note,
                 'student_id_seen': sid_seen,
             }
             okc, rec = _commit_staging_item(
@@ -8800,6 +8857,8 @@ def _auto_pipeline(batch_id):
                 None, b.get('subject') or 'english_essay', extra)
             if okc:
                 commit_ids.append(rec['id'])
+                if sid:
+                    seen_sid.setdefault(sid, rec['id'])
                 new_done += 1
                 # 断点：每入库一条就把临时区里这条摘掉。
                 # 以前是整批跑完再一次性清理，中途进程一重启，记录进了档案库、
@@ -8925,8 +8984,8 @@ def _find_running_batch(item_ids):
         runner = b.get('runner') or {}
         if job.get('status') not in ('running', 'queued'):
             continue
-        if runner.get('boot') != _BOOT_ID:
-            continue        # 死进程留下的，交给 _load_batch 自愈
+        if runner.get('boot') != _BOOT_ID and _pid_alive(runner.get('pid')):
+            continue        # 另一个活着的进程在跑，别抢
         if wanted & {str(i) for i in (b.get('item_ids') or [])}:
             return b
     return None
