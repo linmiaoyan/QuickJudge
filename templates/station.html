@@ -273,6 +273,38 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
           <div id="subjNote" style="font-size:11.5px;color:#8a5300;background:#fff8ec;border:1px solid #f5d9a8;border-radius:8px;padding:6px 9px;margin-top:7px;line-height:1.5;display:none;"></div>
         </div>
 
+        <!-- 本批题目与批改备注：默认收起。不填就按卷面自动识别题干（多数情况够用）；
+             老师要精批、或这次的口径跟卷面印的不一样，才展开填一下。
+             用 <details> 而不是弹窗：不想看的时候它只占一行，扫卷的主按钮位置不变。 -->
+        <details id="promptBox" style="margin-top:12px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;background:#fbfcfd;">
+          <summary style="cursor:pointer;font-size:12.5px;color:var(--text2);outline:none;">
+            📝 本批题目与批改备注<span style="color:var(--text3,#999);">（可选，不填就按卷面识别）</span>
+            <span id="promptBadge" style="display:none;margin-left:6px;padding:1px 6px;border-radius:9px;background:#e7f6ec;color:#1a7f37;border:1px solid #b7e0c4;font-size:11px;">已设置</span>
+          </summary>
+          <div style="margin-top:9px;">
+            <div style="display:flex;gap:8px;">
+              <select id="taskSel" style="flex:1 1 auto;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;"></select>
+              <button class="btn tiny" type="button" id="taskNewBtn">＋ 新建题目</button>
+            </div>
+            <div id="taskNewBox" style="display:none;margin-top:8px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#fff;">
+              <input id="taskNewTitle" type="text" maxlength="60" placeholder="题目名称，如：Unit 3 建议信（80 词）"
+                     style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12.5px;">
+              <textarea id="taskNewReqs" rows="4" placeholder="评分要点，一行一条，例如：&#10;1. 说明推荐的理由（至少两条）&#10;2. 提到活动的时间和地点&#10;3. 表达祝愿"
+                        style="width:100%;box-sizing:border-box;margin-top:6px;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12.5px;resize:vertical;"></textarea>
+              <div style="display:flex;gap:6px;margin-top:6px;">
+                <button class="btn tiny primary" type="button" id="taskNewSave">保存并使用</button>
+                <button class="btn tiny ghost" type="button" id="taskNewCancel">取消</button>
+              </div>
+            </div>
+            <label for="teacherNote" style="display:block;margin-top:9px;font-size:12px;color:var(--text2);">批改备注</label>
+            <textarea id="teacherNote" rows="2" maxlength="300" placeholder="写一句话给批阅参考，例：这次只看第 2 段的建议部分；按中考标准评分，不扣书写分"
+                      style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;resize:vertical;"></textarea>
+            <div style="font-size:11.5px;color:var(--text3,#999);margin-top:4px;line-height:1.45;">
+              题目与备注跟着这一批卷子一起送去批阅，优先级高于卷面上印的要求；不填就完全按卷面判。
+            </div>
+          </div>
+        </details>
+
         <div id="jobPanel" class="jobpanel">
           <div class="jobhd">
             <span id="jobStage">准备中…</span>
@@ -469,8 +501,8 @@ async function loadContext() {
       cw.style.display = '';
       cw.innerHTML = '<b>服务需要重启：</b>' + esc(ci.file || 'app.py') + ' 在 '
         + esc(ci.changed_at) + ' 改过，但当前进程是 ' + esc(ci.started_at) + ' 启动的。'
-        + '页面会热加载、后端不会——现在看到的设置可能不生效（例如扫描端填的满分）。
-           请关掉服务窗口重新启动 QuickJudge 再扫。';
+        + '页面是热加载的、后端不是——现在看到的设置可能不生效（例如扫描端填的满分会被按默认值批）。'
+        + '请关掉服务窗口重新启动 QuickJudge 再扫。';
     } else {
       cw.style.display = 'none';
     }
@@ -510,6 +542,7 @@ async function loadContext() {
   $$('#urlList [data-copy]').forEach(b => b.onclick = () => {
     navigator.clipboard.writeText(b.dataset.copy).then(() => toast('已复制', 'ok'), () => toast('复制失败', 'err'));
   });
+  renderTaskOptions();
   renderQueue();
 }
 function row(k, v) { return '<div class="row"><span>' + esc(k) + '</span><span>' + esc(v) + '</span></div>'; }
@@ -560,6 +593,101 @@ if ($('#maxScore')) {
     try { localStorage.setItem('qj_station_max', JSON.stringify(store)); } catch (e) {}
   };
   syncMaxScore();   // 先给个默认值，别让输入框空着；loadContext 拿到方案后会再校准
+}
+
+/* ---------------- 本批题目与批改备注 ---------------- */
+// 题干来源按优先级：扫描端选的题目 → 卷面自动识别。
+// 选了题目，批阅就不用等第一张卷子读完才知道题干，整批直接并行，扫完更快出结果。
+function taskStore() {
+  try { return localStorage.getItem('qj_station_task') || ''; } catch (e) { return ''; }
+}
+function selectedTaskId() {
+  const sel = $('#taskSel');
+  return (sel && sel.value) || '';
+}
+function readTeacherNote() {
+  const el = $('#teacherNote');
+  return el ? String(el.value || '').trim() : '';
+}
+function syncPromptBadge() {
+  const b = $('#promptBadge');
+  if (!b) return;
+  b.style.display = (selectedTaskId() || readTeacherNote()) ? '' : 'none';
+}
+function renderTaskOptions() {
+  const sel = $('#taskSel');
+  if (!sel) return;
+  // 只列带题干要点的任务：没要点的任务选了也帮不上批阅，还会让人误以为题目已指定
+  const usable = (CTX.tasks || [])
+    .filter(t => t && t.id && t.has_reqs)
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  const keep = sel.value || taskStore();
+  sel.innerHTML = '<option value="">— 不指定题目（按卷面识别题干）—</option>'
+    + usable.map(t => '<option value="' + esc(t.id) + '">' + esc(t.title || '未命名题目') + '</option>').join('');
+  sel.value = usable.some(t => t.id === keep) ? keep : '';
+  syncPromptBadge();
+}
+if ($('#taskSel')) {
+  $('#taskSel').onchange = () => {
+    try { localStorage.setItem('qj_station_task', selectedTaskId()); } catch (e) {}
+    syncPromptBadge();
+  };
+}
+if ($('#teacherNote')) {
+  const el = $('#teacherNote');
+  try { el.value = localStorage.getItem('qj_station_note') || ''; } catch (e) {}
+  el.oninput = el.onchange = () => {
+    try { localStorage.setItem('qj_station_note', el.value.slice(0, 300)); } catch (e) {}
+    syncPromptBadge();
+  };
+  syncPromptBadge();
+}
+// 上次填过题目或备注就自动展开，别让老师以为自己的设置丢了
+if ($('#promptBox') && (taskStore() || readTeacherNote())) $('#promptBox').open = true;
+
+if ($('#taskNewBtn')) {
+  $('#taskNewBtn').onclick = () => {
+    const box = $('#taskNewBox');
+    if (!box) return;
+    const show = box.style.display === 'none';
+    box.style.display = show ? '' : 'none';
+    if (show && $('#taskNewTitle')) $('#taskNewTitle').focus();
+  };
+}
+if ($('#taskNewCancel')) {
+  $('#taskNewCancel').onclick = () => { if ($('#taskNewBox')) $('#taskNewBox').style.display = 'none'; };
+}
+if ($('#taskNewSave')) {
+  $('#taskNewSave').onclick = async () => {
+    const btn = $('#taskNewSave');
+    const title = String(($('#taskNewTitle') || {}).value || '').trim();
+    const reqs = String(($('#taskNewReqs') || {}).value || '').trim();
+    if (!title && !reqs) { toast('题目名称和评分要点至少填一项', 'err'); return; }
+    btn.disabled = true;
+    try {
+      const r = await api('/api/tasks/quick', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title, requirements: reqs, subject: currentSubjectKey() })
+      });
+      const t = r.task || {};
+      CTX.tasks = (CTX.tasks || []).concat([{ id: t.id, title: t.title, has_reqs: true, created_at: t.created_at || '' }]);
+      renderTaskOptions();
+      const sel = $('#taskSel');
+      if (sel) {
+        sel.value = t.id;
+        try { localStorage.setItem('qj_station_task', t.id); } catch (e) {}
+      }
+      syncPromptBadge();
+      if ($('#taskNewBox')) $('#taskNewBox').style.display = 'none';
+      if ($('#taskNewTitle')) $('#taskNewTitle').value = '';
+      if ($('#taskNewReqs')) $('#taskNewReqs').value = '';
+      toast('已建好「' + (t.title || '题目') + '」，本批按它的要点批', 'ok');
+    } catch (e) {
+      toast('保存失败：' + e.message, 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  };
 }
 
 /* ---------------- 扫描 / 导入 ---------------- */
@@ -628,6 +756,18 @@ async function pollJob(bid) {
   }
 }
 
+// 起了批次就盯进度：扫描和导入共用同一段，别让两条路的提示长得不一样
+function watchBatch(bid, label) {
+  $('#jobPanel').classList.add('show');
+  $('#jobList').innerHTML = '';
+  $('#jobFoot').style.display = 'none';
+  $('#jobStage').textContent = label || '开始自动批阅…';
+  $('#jobBar').style.width = '2%';
+  if (JOB_TIMER) clearInterval(JOB_TIMER);
+  pollJob(bid);
+  JOB_TIMER = setInterval(() => pollJob(bid), 2500);
+}
+
 $('#scanBtn').onclick = async () => {
   const btn = $('#scanBtn');
   const manual = !!($('#manualScan') || {}).checked;
@@ -637,18 +777,14 @@ $('#scanBtn').onclick = async () => {
     const r = await api('/api/station/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subject: currentSubjectKey(), max_score: readMaxScore(), auto: !manual })
+      body: JSON.stringify({
+        subject: currentSubjectKey(), max_score: readMaxScore(), auto: !manual,
+        task_id: selectedTaskId(), teacher_note: readTeacherNote()
+      })
     });
     if (r.batch && r.batch.id) {
-      $('#jobPanel').classList.add('show');
-      $('#jobList').innerHTML = '';
-      $('#jobFoot').style.display = 'none';
-      $('#jobStage').textContent = '已扫描 ' + (r.count || 1) + ' 页（满分 '
-        + (r.batch.max_score != null ? r.batch.max_score : readMaxScore()) + '），开始自动批阅…';
-      $('#jobBar').style.width = '2%';
-      if (JOB_TIMER) clearInterval(JOB_TIMER);
-      pollJob(r.batch.id);
-      JOB_TIMER = setInterval(() => pollJob(r.batch.id), 2500);
+      watchBatch(r.batch.id, '已扫描 ' + (r.count || 1) + ' 页（满分 '
+        + (r.batch.max_score != null ? r.batch.max_score : readMaxScore()) + '），开始自动批阅…');
     } else {
       await loadQueue();
       hideUnlock();
@@ -786,12 +922,24 @@ $('#importBtn').onclick = () => $('#importInput').click();
 $('#importInput').onchange = async (ev) => {
   const files = ev.target.files;
   if (!files || !files.length) return;
+  // 导入和扫描走同一条流水线：默认导完直接批，勾了「先只扫描」才只进临时区。
+  const manual = !!($('#manualScan') || {}).checked;
   const fd = new FormData();
   Array.from(files).forEach(f => fd.append('files', f));
+  fd.append('auto', manual ? '0' : '1');
+  fd.append('subject', currentSubjectKey());
+  fd.append('max_score', String(readMaxScore()));
+  if (selectedTaskId()) fd.append('task_id', selectedTaskId());
+  if (readTeacherNote()) fd.append('teacher_note', readTeacherNote());
   try {
     const r = await api('/api/station/import', { method: 'POST', body: fd });
-    toast('已导入 ' + r.count + ' 张到临时区', 'ok');
-    await loadQueue();
+    if (r.batch && r.batch.id) {
+      watchBatch(r.batch.id, '已导入 ' + (r.count || 1) + ' 页（满分 '
+        + (r.batch.max_score != null ? r.batch.max_score : readMaxScore()) + '），开始自动批阅…');
+    } else {
+      toast('已导入 ' + r.count + ' 张到临时区，请框选区域或核对学号后提交', 'ok');
+      await loadQueue();
+    }
   } catch (e) { toast(e.message, 'err'); }
   ev.target.value = '';
 };

@@ -703,6 +703,39 @@ def save_tasks(tasks):
         json.dump(tasks, f, ensure_ascii=False, indent=2)
 
 
+def find_task(task_id):
+    """按 id 取阅卷任务；取不到返回 None（任务被删了也不该让批阅整批失败）。"""
+    tid = str(task_id or '').strip()
+    if not tid:
+        return None
+    for t in load_tasks():
+        if str((t or {}).get('id') or '') == tid:
+            return t
+    return None
+
+
+def task_requirement_lines(task):
+    """把任务上记着的题干要点摊成一行一条，直接喂给批阅提示词。
+
+    旧版「组卷布置」发出来的任务没有 requirements 字段（题干是 HTML/图片），
+    这时返回空列表，让批阅退回「从卷面读题干」的老路——不能凭空替老师编要点。
+    """
+    if not task:
+        return []
+    raw = task.get('requirements')
+    if isinstance(raw, str):
+        raw = raw.replace('\r', '\n').split('\n')
+    lines = []
+    for x in (raw or []):
+        s = str(x or '').strip()
+        s = re.sub(r'^[\s·•*\-–—]+', '', s)
+        s = re.sub(r'^\d+\s*[.、)）]\s*', '', s)
+        s = s.strip()
+        if s:
+            lines.append(s)
+    return lines[:12]
+
+
 def decode_qr_from_image(image_bytes):
     """从图片字节中解析二维码内容，返回解码字符串或 None。用于试卷扫码自动归类。"""
     if not image_bytes or len(image_bytes) < 100:
@@ -1665,6 +1698,67 @@ def create_task():
         'subject': subject,
     }
     tasks = load_tasks()
+    tasks.append(task)
+    save_tasks(tasks)
+    return jsonify({'ok': True, 'task': task})
+
+
+@app.route('/api/tasks/quick', methods=['POST'])
+def create_quick_task():
+    """建一张只带题干的「轻量任务」（题目名称 + 评分要点），供扫描端现场指定题目。
+
+    旧版「组卷布置」是一条完整链路（选题 → 排版 → 生成答题卡 → 发布），对在别的
+    平台组卷的英语老师完全用不上。但他们确实需要「这次批的是哪道题、要点有哪些」——
+    这张轻量任务就是为这一件事存在的：两个输入框，不涉及班级、答题卡、截止时间。
+
+    body: {id?, title, requirements（多行文本或数组）, subject?}
+    带 id 表示改已有的这张，只改 title / requirements。
+    """
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    data = request.get_json(silent=True) or {}
+    title = str(data.get('title') or '').strip()[:60]
+    raw = data.get('requirements')
+    if isinstance(raw, str):
+        lines = raw.replace('\r', '\n').split('\n')
+    elif isinstance(raw, list):
+        lines = raw
+    else:
+        lines = []
+    lines = task_requirement_lines({'requirements': lines})
+    if not title and not lines:
+        return jsonify({'error': '题目名称和评分要点至少填一项'}), 400
+
+    tasks = load_tasks()
+    tid = str(data.get('id') or '').strip()
+    if tid:
+        for t in tasks:
+            if str((t or {}).get('id') or '') != tid:
+                continue
+            if title:
+                t['title'] = title
+            if lines:
+                t['requirements'] = lines
+            t['updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            save_tasks(tasks)
+            return jsonify({'ok': True, 'task': t})
+        return jsonify({'error': '任务不存在'}), 404
+
+    task = {
+        'id': str(uuid.uuid4()),
+        'title': title or '未命名题目',
+        # 轻量任务不绑班级、不收答题卡：扫描端按学号自动分班，班级不在这里定
+        'class_names': [],
+        'deadline': '',
+        'student_ids': [],
+        'items': [],
+        'answer_sheet_html': '',
+        'requirements': lines,
+        'kind': 'prompt',
+        'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'status': 'published',
+        'subject': str(data.get('subject') or 'english').strip() or 'english',
+    }
     tasks.append(task)
     save_tasks(tasks)
     return jsonify({'ok': True, 'task': task})
@@ -6221,7 +6315,10 @@ def station_context():
     if session.get('user_id'):
         user = {'id': session.get('user_id'), 'name': session.get('user_name', ''),
                 'role': session.get('user_role', '')}
-    tasks = [{'id': t.get('id'), 'title': t.get('title'), 'class_names': t.get('class_names') or []}
+    tasks = [{'id': t.get('id'), 'title': t.get('title'), 'class_names': t.get('class_names') or [],
+              # 有题干要点的任务才值得在扫描端选：选了它，批阅就不用再从卷面猜题干
+              'has_reqs': bool(task_requirement_lines(t)),
+              'created_at': t.get('created_at') or ''}
              for t in load_tasks() if t.get('id')]
     return jsonify({
         'is_local': is_local,
@@ -6251,6 +6348,8 @@ def station_scan():
     auto = req.get('auto', True) not in (False, 0, '0', 'false', 'False')
     subject = str(req.get('subject') or 'english_essay').strip() or 'english_essay'
     task_id = str(req.get('task_id') or '').strip()
+    # 老师写的批改备注：整批生效，拼进批阅提示词的末尾
+    teacher_note = str(req.get('teacher_note') or '').strip()[:300]
     # 满分由老师在扫描端当场指定：不传/非法就回落到该批阅方案自带的默认值
     max_score = req.get('max_score')
     # 在驱动扫描仪之前就挡掉：别让老师扫完一叠纸才发现这个方案不能自动批
@@ -6281,7 +6380,7 @@ def station_scan():
                 'filename': os.path.basename(pages[0]) if pages else '', 'auto': auto}
         if auto and added:
             b = _start_auto_batch([it['id'] for it in added], subject=subject, task_id=task_id,
-                                  max_score=max_score)
+                                  max_score=max_score, teacher_note=teacher_note)
             resp['batch'] = {'id': b['id'], 'job': b.get('job'), 'max_score': b.get('max_score')}
         return jsonify(resp)
     except Exception as e:
@@ -6359,6 +6458,8 @@ def station_import():
     auto = str(request.form.get('auto') or request.args.get('auto') or '').lower() in ('1', 'true', 'yes')
     subject = str(request.form.get('subject') or request.args.get('subject') or 'english_essay').strip()
     task_id = str(request.form.get('task_id') or request.args.get('task_id') or '').strip()
+    teacher_note = str(request.form.get('teacher_note') or request.args.get('teacher_note')
+                       or '').strip()[:300]
     max_score = request.form.get('max_score') or request.args.get('max_score')
     if auto and not auto_pipeline_supports(subject):
         return jsonify({'error': auto_pipeline_reject_message(subject)}), 400
@@ -6392,7 +6493,7 @@ def station_import():
     resp = {'ok': True, 'added': added, 'count': len(added), 'auto': auto}
     if auto and added:
         b = _start_auto_batch([it['id'] for it in added], subject=subject, task_id=task_id,
-                              max_score=max_score)
+                              max_score=max_score, teacher_note=teacher_note)
         resp['batch'] = {'id': b['id'], 'job': b.get('job'), 'max_score': b.get('max_score')}
     return jsonify(resp)
 
@@ -7228,6 +7329,9 @@ comment 要求：先肯定亮点，再指出 1-2 处最值得改的地方（对�
 
 题目要求（若此处为空，说明这是本批第一份，请从图片中的题干自行提取并写入 task.requirements）：
 {requirements}
+
+教师批改备注（老师对本批的额外要求；若与上面任何内容冲突，一律以这里为准。为空表示没有额外要求）：
+{teacher_note}
 '''
 
 CORPUS_PROMPT = '''你是高中英语写作教研员。下面是一道英语写作任务的题干与要点。
@@ -8088,7 +8192,7 @@ def _read_header(page, quality=None, img_max_size=None, rotation=0):
 
 
 def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=None,
-                        quality=None, img_max_size=None, rotation=0):
+                        quality=None, img_max_size=None, rotation=0, note=''):
     """批阅一页英语作文：一次调用同时读表头（学号/班级/姓名）与全文。返回 (dict, 错误信息)。
 
     model        显式指定视觉模型；为空时按 `.env` 的精度档位决定，
@@ -8096,6 +8200,9 @@ def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=
     quality      image_quality_metrics() 的返回，可为 None。
     img_max_size 送图长边上限；为空时普通卷 2400、难卷 IMG_MAX_HARD（3300）。
     rotation     手动旋转角度（顺时针）；自动转正在入库时已把图转正，这里只需处理老师手动转的。
+    note         老师在扫描端写的「批改备注」，原样拼进提示词并声明优先级最高。
+                 老师偶尔有卷面之外的额外要求（只批某一段、按中考标准、这次不扣书写分），
+                 写一句就够，别为它单开一套配置。
     """
     if not minimax_api_key:
         return None, '未配置 LLM_API_KEY，请在 .env 中设置'
@@ -8119,6 +8226,7 @@ def _vision_grade_essay(page, requirements='', max_score=ESSAY_MAX_SCORE, model=
             pass
         prompt = ESSAY_PROMPT_TEMPLATE.replace('{max_score}', _fmt_num(max_score))
         prompt = prompt.replace('{requirements}', requirements or '（本批第一份，请自行提取）')
+        prompt = prompt.replace('{teacher_note}', (note or '').strip() or '（无）')
         parts.append({'type': 'text', 'text': prompt})
 
         client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=600.0)
@@ -8548,7 +8656,7 @@ def _code_stale_info():
     return {'stale': False}
 
 
-def _new_batch(item_ids, subject='english_essay', task_id='', note='', max_score=None):
+def _new_batch(item_ids, subject='english_essay', task_id='', teacher_note='', max_score=None):
     b = {
         'id': uuid.uuid4().hex[:16],
         'created_at': _now_str(),
@@ -8556,7 +8664,8 @@ def _new_batch(item_ids, subject='english_essay', task_id='', note='', max_score
         # 满分随批次走：重试、补批都沿用同一套口径，不会中途变成默认 25
         'max_score': _coerce_max_score(max_score, subject),
         'task_id': task_id or '',
-        'note': note or '',
+        # 老师写的批改备注：拼进批阅提示词，整批生效；重试、补批也照用
+        'teacher_note': teacher_note or '',
         'item_ids': list(item_ids or []),
         'topic': {},
         'corpus': {},
@@ -8674,13 +8783,24 @@ def _auto_pipeline(batch_id):
                         it['student_name'] = h['name']
                 save_staging(cur)
 
-        # ---------------- 批阅：预热 1 张拿题干 → 其余并行 → 失败补跑 ----------------
-        # 题干是本批共享的（第一份产出、其余复用），所以不能一上来全并行：
-        # 先串行预热 1 张（只等一张），拿到 requirements 再并行剩下的。
+        # ---------------- 批阅：题干已定就直接并行，否则预热 1 张读题干 ----------------
+        # 题干是本批共享的：第一份产出、其余复用。所以正常要串行预热 1 张（只等一张），
+        # 拿到 requirements 再并行剩下的；老师指定了题目就跳过预热，整批一起上。
         # 进度写盘只发生在主线程：_save_batch 是「读-改-写」，多线程一起写会丢更新。
         n = len(pages)
         results = [None] * n
         requirements_text = ''
+        teacher_note = str(b.get('teacher_note') or '').strip()
+        # 题干来源的优先级：绑定的阅卷任务 > 从卷面读（预热第一张）。
+        # 老师在扫描端指定了题目，题干当场就确定，不用再串行等第一张——整批直接并行。
+        bound_task = find_task(b.get('task_id'))
+        task_reqs = task_requirement_lines(bound_task)
+        if task_reqs:
+            requirements_text = '\n'.join('· ' + str(x) for x in task_reqs)
+            if not b.get('topic'):
+                b['topic'] = {'title': str(bound_task.get('title') or '').strip(),
+                              'requirements': list(task_reqs)}
+                b['topic']['key'] = _topic_key(b['topic'])
         # 断点续批：进程被重启/换手后，上次已经批完的这几份直接复用，不再烧一遍额度。
         # 2026-10-26 那批是连续三次跑到一半被换进程，每次都从第 1 张重来。
         prev = _load_partials(b['id'])
@@ -8705,7 +8825,8 @@ def _auto_pipeline(batch_id):
             t0 = time.time()
             res, err = _vision_grade_essay(path, requirements_text, batch_max,
                                            quality=it.get('quality'),
-                                           rotation=int(it.get('rotation') or 0))
+                                           rotation=int(it.get('rotation') or 0),
+                                           note=teacher_note)
             sec = round(time.time() - t0, 1)
             if err:
                 r = {'item_id': it['id'], 'error': err,
@@ -8729,31 +8850,41 @@ def _auto_pipeline(batch_id):
                     b['topic'] = {'title': _task.get('title', ''), 'requirements': _reqs}
                     b['topic']['key'] = _topic_key(b['topic'])
                     break
-        for idx in range(min(3, n)):
-            if results[idx] is not None:
-                continue        # 已经批过（断点复用），别再花钱
-            bump(message='正在预热第 %d 张（先确定本批题干）…' % (idx + 1))
-            _, r = _grade_one(idx)
-            results[idx] = r
-            state['done'] += 1
-            if r.get('essay') and not b.get('topic'):
-                task = (r['essay'].get('task') or {})
-                reqs = task.get('requirements') or []
-                if reqs or task.get('title'):
-                    b['topic'] = {'title': task.get('title', ''), 'requirements': reqs}
-                    b['topic']['key'] = _topic_key(b['topic'])
-            bump(done=state['done'])
-            if b.get('topic'):
-                break
+        if not requirements_text:
+            requirements_text = '\n'.join(
+                '· ' + str(x) for x in ((b.get('topic') or {}).get('requirements') or []))
+        # 题干已经知道（任务给的 / 复用结果带的）就不用预热，整批直接并行——
+        # 这一步省下的是老师站在扫描仪前干等的那一两分钟。
+        if requirements_text:
+            _tname = str(((b.get('topic') or {}).get('title')) or '').strip()
+            bump(message=('本批题目：%s，开始并行批阅…' % _tname) if _tname
+                 else '题干已确定，开始并行批阅…')
+        else:
+            for idx in range(min(3, n)):
+                if results[idx] is not None:
+                    continue        # 已经批过（断点复用），别再花钱
+                bump(message='正在预热第 %d 张（先确定本批题干）…' % (idx + 1))
+                _, r = _grade_one(idx)
+                results[idx] = r
+                state['done'] += 1
+                if r.get('essay') and not b.get('topic'):
+                    task = (r['essay'].get('task') or {})
+                    reqs = task.get('requirements') or []
+                    if reqs or task.get('title'):
+                        b['topic'] = {'title': task.get('title', ''), 'requirements': reqs}
+                        b['topic']['key'] = _topic_key(b['topic'])
+                bump(done=state['done'])
+                if b.get('topic'):
+                    break
+            requirements_text = '\n'.join(
+                '· ' + str(x) for x in ((b.get('topic') or {}).get('requirements') or []))
 
-        requirements_text = '\n'.join(
-            '· ' + str(x) for x in ((b.get('topic') or {}).get('requirements') or []))
-
-        # ② 其余并行
+        # ② 并行批（没预热过就别叫「剩余」，老师会以为漏了几张）
         rest = [i for i in range(n) if results[i] is None]
         if rest:
             workers = max(1, min(LLM_BATCH_WORKERS, len(rest)))
-            bump(message='正在并行批阅剩余 %d 份（%d 路并行）…' % (len(rest), workers))
+            bump(message=('正在并行批阅剩余 %d 份（%d 路并行）…' if state['done'] else
+                          '正在并行批阅 %d 份（%d 路并行）…') % (len(rest), workers))
             with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='grade') as ex:
                 futs = {ex.submit(_grade_one, i): i for i in rest}
                 for fut in as_completed(futs):
@@ -8900,6 +9031,8 @@ def _auto_pipeline(batch_id):
                 'needs_review': ((not sid or bool(sid_note) or bool(dup_note)) and bool(essay)),
                 'sid_note': dup_note or sid_note,
                 'student_id_seen': sid_seen,
+                # 本批老师写的批改备注跟着档案走：事后回看「为什么这么判」有据可查
+                'teacher_note': teacher_note,
             }
             okc, rec = _commit_staging_item(
                 it, sid, cls, b.get('task_id') or '', '自动批阅', None, 0,
@@ -8970,7 +9103,8 @@ def _auto_pipeline(batch_id):
         bump(status='error', stage='error', message=str(e))
 
 
-def _start_auto_batch(item_ids, subject='english_essay', task_id='', max_score=None):
+def _start_auto_batch(item_ids, subject='english_essay', task_id='', max_score=None,
+                      teacher_note=''):
     """建批 + 起后台线程。返回 batch（job 已在写盘）。
 
     最后一道闸：调用方（station_scan / station_import）已经在动手前校验过，
@@ -8987,7 +9121,8 @@ def _start_auto_batch(item_ids, subject='english_essay', task_id='', max_score=N
         overlap = _find_running_batch(item_ids)
         if overlap:
             return overlap
-        b = _new_batch(item_ids, subject=subject, task_id=task_id, max_score=max_score)
+        b = _new_batch(item_ids, subject=subject, task_id=task_id, max_score=max_score,
+                       teacher_note=teacher_note)
         t = threading.Thread(target=_auto_pipeline, args=(b['id'],), daemon=True)
         t.start()
     return b

@@ -875,3 +875,57 @@ if _task:
 ```
 这样「按指定题目精批」就不再是另一条流程，而是自动批阅的一个开关：
 建好任务 → 扫描时选上它 → 后面全自动。旧版那三个页面退化成任务管理，可以彻底隐藏。
+
+## 29. 2026-10-27 14:0x：旧流程真正并进自动批阅（task_id 参与评分 + 批改备注）
+
+按 §28.4 的建议落地。核心变化：**「按指定题目精批」不再是一条独立流程，而是自动批阅
+的一个输入**——老师在扫描端选个题目、写一句备注，点扫描后仍然一路自动到最终结果。
+
+### 29.1 题干来源的优先级
+`_auto_pipeline` 里 `requirements_text` 不再是「卷面推断」一条路：
+
+1. **绑定任务的题干**（`task_id` → `find_task` → `task_requirement_lines`）：最高优先，
+   同时把任务的 title/requirements 写进 `b['topic']`，话题语料也按它缓存；
+2. **断点复用的旧结果**里带的 `essay.task`；
+3. 以上都没有才走老办法：串行预热第 1 张，读它的 `task.requirements`，其余复用。
+
+附带效果：**题干已知时跳过预热，整批直接并行**。以前每批都要先等一张读完才知道题干，
+现在选了题目就省掉这段等待。
+
+### 29.2 老师批改备注（`teacher_note`）
+- 批次字段 `teacher_note`（`_new_batch` 新参数），由 `station_scan` / `station_import` 的
+  请求体带进来，长度上限 300 字；
+- 拼进 `ESSAY_PROMPT_TEMPLATE` 末尾新增的一段 `{teacher_note}`，并**在提示词里声明优先级
+  高于卷面上的印刷要求**（老师会写「只看第 2 段」「按中考标准，不扣书写分」这类话）；
+- 归档时写进记录的 `teacher_note`，事后能追溯「这批为什么这么判」；
+- 重试沿用同一个批次，所以备注不会丢。
+
+### 29.3 轻量任务 `POST /api/tasks/quick`
+旧「组卷布置」对英语老师无用（他们在别的平台组卷），但「这次批哪道题、要点有哪些」
+仍然需要。所以给了一个只有两个输入框的入口：
+- body `{title, requirements（多行文本或数组）, subject?}`，`class_names` 允许为空
+  （扫描端按学号自动分班，班级不在这里定）；
+- 带 `id` 就是改已有的那张（只改 title / requirements）；
+- 生成的 task 带 `kind:'prompt'`、`requirements: [...]`；`/api/station/context` 里
+  额外给出 `has_reqs`，扫描端只列**有要点**的任务（没要点的选了也帮不上批阅）。
+
+### 29.4 前端
+- `templates/station.html`：新增 `<details id="promptBox">`「📝 本批题目与批改备注」，
+  **默认收起**，扫卷主按钮位置不变。内含题目下拉（含「＋新建题目」内嵌表单：名称 + 一行一条
+  的评分要点）和备注 textarea；选过题目/填过备注就自动展开、标题旁显示「已设置」。
+  题目选择与备注都记在 `localStorage`（同一次作业连续扫多批不用重复填）。
+- 导入本地图片改成与扫描同一条链路（`auto=1` + 题目 + 备注 + 满分），成功后同样盯进度；
+  勾了「先只扫描」才退回只进临时区。
+- `templates/index.html`：侧栏删掉「组卷布置」入口（页面 `#tab-assign` 仍在，可
+  `switchTab('assign')` 打开）；三处空状态文案改指向扫描端的新入口。
+
+### 29.5 验证
+用 mock 掉 `_vision_grade_essay` 的方式跑完整 `_auto_pipeline`：3 张 → 3 次调用全部带
+`requirements='· 说明推荐理由\n· 提到时间地点'`、`note='只批第二段'`、`max_score=15`；
+`b['topic']` 是任务标题；3 条记录的 `teacher_note` 都在。`/api/tasks/quick` 新建 + 修改
+均 200，`/api/station/context` 的 `has_reqs` 为 true。前后端脚本 `node --check` 通过。
+
+### 29.6 还没做
+- 记录里的 `teacher_note` 目前只在 JSON 里，用户端界面没展示（`_public_record` 未透出）；
+  老师若想在报告里看到「本批按什么口径批的」，需要再补一行展示；
+- 阅卷管理「创建阅卷任务」向导对 `class_names` 为空的任务表现未验证。
