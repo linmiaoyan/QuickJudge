@@ -6102,6 +6102,9 @@ def _commit_staging_item(item, student_id, class_name, task_id, note, crop, rota
     dest_path = os.path.join(RECORDS_IMAGES_DIR, dest_name)
     try:
         img = _open_image(src)
+        # 注意：这里把 rotation 和 crop **烘进像素**存下来，所以下面记录里两个字段必须归零。
+        # 以前记录仍存 rotation=rotation，而门户取图还会再转一次 —— 只要有人传了非 0 角度，
+        # 卷子就会被转两遍（180° 转两次正好又倒回去，最难查）。目前自动批阅固定传 0 才没暴露。
         _transform_image(img, rotation=rotation, crop=effective_crop).save(dest_path)
     except Exception as e:
         return False, '图片保存失败：%s' % e
@@ -6134,9 +6137,11 @@ def _commit_staging_item(item, student_id, class_name, task_id, note, crop, rota
         'subject': subj_key,
         'subject_name': subj.get('name', ''),
         'max_score': subj.get('max_score'),
-        'crop': effective_crop,
+        'crop': None,
         'regions': clean_regions,
-        'rotation': int(rotation or 0) % 360,
+        # 角度和裁剪已经烘进上面的 dest_path 了，这里必须是 0/None：
+        # 存成原值会让取图时再转一次（见上面 _transform_image 那段注释）。
+        'rotation': 0,
         'note': note or '',
         'source': item.get('source', 'scan'),
         'created_at': item.get('created_at') or _now_str(),
@@ -6747,14 +6752,32 @@ def _filter_records_for_session(records, class_name='', student_id='', task_id='
     return records
 
 
+def _record_image_version(rec):
+    """取图地址上的版本号 = 图片 mtime + 角度/裁剪状态。
+
+    图片换过、角度改过，地址就变，浏览器不会拿旧缓存糊弄人。
+    2026-10-27「预览还是倒的」有一半就是缓存：同一个 `?processed=1` 地址在
+    `rotation` 还是 0 的时候就返回过倒图，那批字节被浏览器存下来，
+    后来把 rotation 改成 180，地址没变，于是怎么改都还是看到旧的倒图。
+    """
+    path = _records_image_path(rec)
+    try:
+        mt = int(os.path.getmtime(path)) if path else 0
+    except OSError:
+        mt = 0
+    return '%d-%s-%s' % (mt, int(rec.get('rotation') or 0) % 360,
+                         'c' if rec.get('crop') else 'f')
+
+
 def _public_record(rec):
     out = dict(rec)
     # 姓名以当前名单为准，若记录里没有则实时补全（名单更新后可自愈）
     sid = str(out.get('student_id') or '')
     if sid and not out.get('student_name'):
         out['student_name'] = get_student_names_map().get(sid, '')
-    out['image_url'] = '/api/portal/records/%s/image' % rec.get('id')
-    out['essay_image_url'] = '/api/portal/records/%s/image?processed=1' % rec.get('id')
+    _v = _record_image_version(rec)
+    out['image_url'] = '/api/portal/records/%s/image?v=%s' % (rec.get('id'), _v)
+    out['essay_image_url'] = '/api/portal/records/%s/image?processed=1&v=%s' % (rec.get('id'), _v)
 
     grading = out.get('grading') if isinstance(out.get('grading'), dict) else None
     items = (grading or {}).get('items') or []
@@ -6775,7 +6798,8 @@ def _public_record(rec):
                 'text': it.get('text', ''),
                 'strengths': it.get('strengths') or [],
                 'issues': it.get('issues') or [],
-                'image_url': '/api/portal/records/%s/image?region=%s' % (rec.get('id'), r['id']),
+                'image_url': '/api/portal/records/%s/image?region=%s&v=%s'
+                             % (rec.get('id'), r['id'], _v),
             })
         out['pieces'] = pieces
     else:
@@ -9316,19 +9340,28 @@ def portal_record_image(rec_id):
             img = _transform_image(_open_image(path), rec.get('rotation', 0), region)
             buf = io.BytesIO()
             img.save(buf, format='PNG')
-            return Response(buf.getvalue(), mimetype='image/png')
+            return Response(buf.getvalue(), mimetype='image/png',
+                            headers={'Cache-Control': 'private, no-cache'})
         except Exception as e:
             return jsonify({'error': '区域取图失败：%s' % e}), 500
     if request.args.get('processed'):
-        try:
-            crop = None if _clean_regions(rec.get('regions')) else rec.get('crop')
-            img = _transform_image(_open_image(path), rec.get('rotation', 0), crop)
-            buf = io.BytesIO()
-            img.save(buf, format='PNG')
-            return Response(buf.getvalue(), mimetype='image/png')
-        except Exception:
-            pass
-    return send_from_directory(RECORDS_IMAGES_DIR, os.path.basename(path))
+        # 归档时角度和裁剪已经烘进图片了（见 _commit_staging_item），正常情况下这里无事可做。
+        # 以前不管有没有变换都会把 2MB 的 PNG 重编码一遍，预览一多就白烧 CPU；
+        # 现在没有可变换的东西就直接发原文件，只有历史遗留的 rotation/crop 才走旋转。
+        crop = None if _clean_regions(rec.get('regions')) else rec.get('crop')
+        rot = int(rec.get('rotation') or 0) % 360
+        if rot in (90, 180, 270) or crop:
+            try:
+                img = _transform_image(_open_image(path), rot, crop)
+                buf = io.BytesIO()
+                img.save(buf, format='PNG')
+                return Response(buf.getvalue(), mimetype='image/png',
+                                headers={'Cache-Control': 'private, no-cache'})
+            except Exception:
+                pass
+    resp = send_from_directory(RECORDS_IMAGES_DIR, os.path.basename(path))
+    resp.headers['Cache-Control'] = 'private, no-cache, must-revalidate'
+    return resp
 
 
 @app.route('/api/portal/records/<rec_id>/grade', methods=['POST'])
@@ -9386,12 +9419,32 @@ def portal_record_comment(rec_id):
         elif cno:
             rec['class_name'] = cno
     if 'rotation' in data:
-        # 老师肉眼看出卷子倒了，可以直接把这张转正（只改显示与后续使用的角度，不动原图）
+        # 老师肉眼看出卷子倒了，就在这张图本身上转正——不只是改个显示角度。
+        # 只改字段的话，预览（processed=1）是正的，「看原图」/ 导出 / 重新批阅拿到的还是倒的，
+        # 2026-10-27 反馈的「预览还是逆向」就有这个成分。
+        cur = int(rec.get('rotation') or 0) % 360
         try:
             deg = int(data.get('rotation')) % 360
         except (TypeError, ValueError):
-            deg = int(rec.get('rotation') or 0) % 360
-        rec['rotation'] = deg if deg in (0, 90, 180, 270) else int(rec.get('rotation') or 0) % 360
+            deg = cur
+        if deg not in (0, 90, 180, 270):
+            deg = cur
+        delta = (deg - cur) % 360        # 相对当前显示角度还要再转多少
+        if delta and not (rec.get('crop') or _clean_regions(rec.get('regions'))):
+            # 有区域框时不烧角度：框的坐标是在当前画面上量的，转图会让它错位
+            path = _records_image_path(rec)
+            try:
+                img = _transform_image(_open_image(path), rotation=delta, crop=None)
+                tmp = path + '.tmp'
+                img.save(tmp, format=os.path.splitext(path)[1].lstrip('.').upper() or 'PNG')
+                os.replace(tmp, path)
+                rec['rotation'] = 0
+                rec['rotation_baked'] = (int(rec.get('rotation_baked') or 0) + delta) % 360
+            except Exception as e:
+                print('卷面转正失败，退回只改角度: %s' % e)
+                rec['rotation'] = deg
+        else:
+            rec['rotation'] = deg
     if 'ai_comment' in data:
         rec['ai_comment'] = str(data.get('ai_comment') or '')
         rec['status'] = 'graded' if rec['ai_comment'].strip() else 'pending'
