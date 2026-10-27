@@ -1293,9 +1293,34 @@ _quality_cache_ttl = 60  # 缓存60秒
 
 # TIF和PDF转换功能已移除 - 扫描仪现在直接生成PNG格式
 
+def _home_invite_hint():
+    """登录页给老师看的「教师注册邀请码」。
+
+    这个码印在首页是为了方便转发给同事注册；但管理员本来就知道、也有「配置 → 邀请码管理」
+    可以查，印在首页只是噪音，所以管理员登录态下直接返回空。
+    只挑还有名额的码：用完的码印出来只会让人注册失败。
+    """
+    try:
+        if session.get('user_role') == 'admin':
+            return ''
+    except Exception:
+        pass
+    for e in load_invite_codes():
+        code = str((e or {}).get('code') or '').strip()
+        if not code:
+            continue
+        try:
+            left = int(e.get('max_uses') or 1) - int(e.get('used_count') or 0)
+        except (TypeError, ValueError):
+            left = 1
+        if left > 0:
+            return code
+    return ''
+
+
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', invite_hint=_home_invite_hint())
 
 @app.route('/api/classes')
 def get_classes():
