@@ -137,6 +137,10 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .rec .nm{font-size:13px;color:var(--text2);}
 .rec .tm{font-size:11.5px;color:var(--muted);margin-left:auto;}
 .rec .task{font-size:12px;color:var(--text2);}
+/* 本批批改备注：只在教师/管理员视角出现，用琥珀色和题目行区分开，
+   让人一眼看出「这条不是卷面上的要求，是老师当批加的口径」 */
+.rec .tnote{font-size:12px;color:#8a5300;background:#fff8ec;border:1px dashed #f0d9ad;
+  border-radius:7px;padding:5px 9px;line-height:1.55;margin-top:2px;white-space:pre-wrap;}
 .comment{font-size:13.5px;line-height:1.75;white-space:pre-wrap;background:#f9fafb;border-left:3px solid var(--primary);border-radius:8px;padding:11px 13px;max-height:230px;overflow:auto;}
 .comment.empty{color:var(--muted);border-left-color:var(--line);font-style:normal;}
 .rec .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;}
@@ -291,15 +295,18 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
 .pagebar select,.pagebar input[type=text]{width:auto;padding:7px 11px;font-size:13px;}
 /* 记录一律单列整宽：报告块多，两列会挤成一团 */
 .records.full{grid-template-columns:1fr;gap:18px;}
-.rec.wide{display:grid;grid-template-columns:minmax(250px,330px) 1fr;align-items:start;}
+/* overflow 必须放出来：.rec 默认 overflow:hidden 会让里面的 sticky 完全失效，
+   卷面图就跟着页面一起滚走了。裁圆角交给 .pic 自己。 */
+.rec.wide{display:grid;grid-template-columns:minmax(250px,330px) 1fr;align-items:start;overflow:visible;}
 .rec.wide>.pic{height:auto;max-height:560px;align-self:start;position:sticky;top:calc(var(--tb) + 64px);
-  border-right:1px solid var(--line-soft);border-bottom:none;}
+  border-right:1px solid var(--line-soft);border-bottom:none;border-radius:var(--radius) 0 0 var(--radius);}
 .rec.wide>.pic img{max-height:556px;}
 .rec.wide>.bd{padding:16px 20px 20px;min-width:0;}
 .rec.wide .essaybody{font-size:14px;line-height:2.15;}
 @media (max-width:900px){
   .rec.wide{grid-template-columns:1fr;}
-  .rec.wide>.pic{position:static;max-height:340px;border-right:none;border-bottom:1px solid var(--line-soft);}
+  .rec.wide>.pic{position:static;max-height:340px;border-right:none;border-bottom:1px solid var(--line-soft);
+    border-radius:var(--radius) var(--radius) 0 0;}
   .rec.wide>.pic img{max-height:336px;}
   .rec.wide>.bd{padding:14px 15px 18px;}
   .pagebar{position:static;padding:10px 0 6px;}
@@ -984,6 +991,10 @@ function recCardHtml(r, o) {
     + '<span class="tm">' + esc(fmt(r.submitted_at)) + '</span>'
     + '</div>'
     + (r.task_title ? '<div class="task">📝 ' + esc(r.task_title) + '</div>' : '')
+    + (r.teacher_note && !o.hideNote
+      ? '<div class="tnote" title="这批卷子批阅时，老师额外给的口径（优先于卷面印刷要求）">'
+        + '🗒 本批批改备注：' + esc(r.teacher_note) + '</div>'
+      : '')
     + scoreLine(r)
     + (hasPieces
       ? piecesHtml(r)
@@ -1366,8 +1377,16 @@ async function loadTeacherRecords() {
     return;
   }
   const statsHtml = errStats(RECORDS);
+  // 批改备注是「整批」的属性：同一批几十份卷子只在该批第一张卡上写一次，
+  // 否则老师要往下滚几十个一模一样的琥珀色框。
+  const noteSeen = new Set();
   box.innerHTML = (statsHtml ? '<div style="grid-column:1/-1;">' + statsHtml + '</div>' : '')
-    + RECORDS.map(r => recCardHtml(r, { showClass: !!VIEW.all, actions: true })).join('');
+    + RECORDS.map(r => {
+      const bk = r.batch_id || r.task_id || r.id;
+      const first = !noteSeen.has(bk);
+      noteSeen.add(bk);
+      return recCardHtml(r, { showClass: !!VIEW.all, actions: true, hideNote: !first });
+    }).join('');
   bindCommon();
   $$('[data-edit]').forEach(b => b.onclick = () => openEdit(b.dataset.edit));
   $$('[data-zoombtn]').forEach(b => b.onclick = () => showZoom(b.dataset.zoombtn, '原图'));
@@ -1504,6 +1523,7 @@ $('#sBackBtn').onclick = () => {
 /* 一批一张报告：按 batch_id 优先、退化到 task_id，服务端再按当前登录学生兜底过滤 */
 $('#sExportBtn').onclick = () => {
   const g = SGROUPS.find(x => x.key === SBATCH);
+  if (g && !g.graded) { toast('这一批还没有批阅结果，暂时导不出报告', 'err'); return; }
   const qs = new URLSearchParams();
   if (g && g.batch_id) qs.set('batch_id', g.batch_id);
   else if (g && g.task_id) qs.set('task_id', g.task_id);

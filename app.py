@@ -6897,6 +6897,10 @@ def _record_image_version(rec):
 
 def _public_record(rec):
     out = dict(rec)
+    # 批改备注是老师当批写的口径（可能带班级学情的判断），学生端不下发；
+    # 注意 out 是 rec 的浅拷贝，所以非教师必须显式 pop，不能只靠模板不渲染。
+    if session.get('user_role') not in ('teacher', 'admin'):
+        out.pop('teacher_note', None)
     # 姓名以当前名单为准，若记录里没有则实时补全（名单更新后可自愈）
     sid = str(out.get('student_id') or '')
     if sid and not out.get('student_name'):
