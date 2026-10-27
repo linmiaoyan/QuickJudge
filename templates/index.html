@@ -192,24 +192,7 @@
                 </a>
             </div>
 
-            <!-- ② 阅卷主流程（按 1→4 顺序排列） -->
-            <div class="sidebar-group sidebar-teacher">
-                <div class="sidebar-group-title">阅卷流程</div>
-                <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="assign" onclick="switchTab('assign', event)" title="第 1 步：选作文题、布置练习任务">
-                    <i class="bi bi-journal-plus"></i><span class="sidebar-label">组卷布置</span><span class="sidebar-step">1</span>
-                </a>
-                <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="grading" onclick="switchTab('grading', event)" title="第 2 步：上传试卷并归类、管理阅卷任务">
-                    <i class="bi bi-inboxes"></i><span class="sidebar-label">阅卷管理</span><span class="sidebar-step">2</span>
-                </a>
-                <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="ocr" onclick="switchTab('ocr', event)" title="第 3 步：识别手写内容并自动批阅">
-                    <i class="bi bi-magic"></i><span class="sidebar-label">智能阅卷</span><span class="sidebar-step">3</span>
-                </a>
-                <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="center" onclick="switchTab('center', event)" title="第 4 步：查看班级成绩与批阅报告">
-                    <i class="bi bi-people"></i><span class="sidebar-label">班级中心</span><span class="sidebar-step">4</span>
-                </a>
-            </div>
-
-            <!-- ③ 文件与扫描 -->
+            <!-- ② 日常：扫描 → 批阅 → 看结果，就是这三步 -->
             <div class="sidebar-group sidebar-teacher">
                 <div class="sidebar-group-title">文件与扫描</div>
                 <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="files" onclick="switchTab('files', event)" title="按班级查看扫描文件夹、归档与批量管理">
@@ -218,6 +201,32 @@
                 <a href="/station" target="_blank" rel="noopener" class="sidebar-item sidebar-teacher" title="打开扫描工作站（本机专用，新标签页）">
                     <i class="bi bi-printer"></i><span class="sidebar-label">扫描工作站</span><i class="bi bi-box-arrow-up-right sidebar-ext"></i>
                 </a>
+            </div>
+
+            <!-- ③ 旧版阅卷流程（备用）
+                 日常是「扫描工作站 → 自动批阅 → 试卷门户」，这一组只在要按
+                 「指定题目 + 评分细则」精批时才用，所以默认收起、排在日常之后。
+                 组卷布置不能单独砍：阅卷管理的「创建阅卷任务」是从组卷发布的任务里选题的
+                 （`/api/tasks` 里那些），砍了第一步整条旧链就断了。所以整链一起收进来。 -->
+            <div class="sidebar-group sidebar-teacher">
+                <div class="sidebar-group-title" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+                    <span>旧版阅卷 <span style="font-size: 10px; font-weight: 500; padding: 1px 5px; border-radius: 4px; background: rgba(128,128,128,0.25);">备用</span></span>
+                    <button type="button" id="legacyToggle" onclick="toggleLegacyFlow()" title="展开 / 收起旧版阅卷流程" style="border: 1px solid rgba(128,128,128,0.45); background: transparent; color: inherit; font-size: 11px; line-height: 1; padding: 3px 8px; border-radius: 6px; cursor: pointer;">展开</button>
+                </div>
+                <div id="legacyFlowGroup" style="display: none;">
+                    <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="assign" onclick="switchTab('assign', event)" title="选作文题、发布练习任务（题干与评分细则的来源；已在别的平台组卷可跳过）">
+                        <i class="bi bi-journal-plus"></i><span class="sidebar-label">组卷布置</span><span class="sidebar-step">1</span>
+                    </a>
+                    <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="grading" onclick="switchTab('grading', event)" title="上传试卷并归类、管理阅卷任务">
+                        <i class="bi bi-inboxes"></i><span class="sidebar-label">阅卷管理</span><span class="sidebar-step">2</span>
+                    </a>
+                    <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="ocr" onclick="switchTab('ocr', event)" title="识别手写内容并自动批阅">
+                        <i class="bi bi-magic"></i><span class="sidebar-label">智能阅卷</span><span class="sidebar-step">3</span>
+                    </a>
+                    <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="center" onclick="switchTab('center', event)" title="查看班级成绩与批阅报告">
+                        <i class="bi bi-people"></i><span class="sidebar-label">班级中心</span><span class="sidebar-step">4</span>
+                    </a>
+                </div>
             </div>
 
             <!-- ④ 其他入口 -->
@@ -250,7 +259,12 @@
                     <!-- 老师/管理员：最新试卷 + 改卷情况报表 -->
                     <div id="homeTeacherBlock" class="home-teacher-only">
                         <div style="margin-bottom: 1.5rem; padding: 12px 16px; background: var(--bg-white); border: 1px solid var(--border-color); border-radius: 10px; font-size: 13px; color: var(--text-secondary);">
-                            <strong style="color: var(--text-primary);">📌 使用流程：</strong> 在「组卷布置」选题并发布任务 → 在「阅卷管理」导出答题卡、上传试卷（可扫码归类）→ 在「智能阅卷」中识别并批阅 → 在「班级中心」查看报告与好词好句。
+                            <div><strong style="color: var(--text-primary);">📌 日常就三步：</strong>在「扫描工作站」扫卷（扫完自动批阅）→ 在「试卷门户」看成绩与评语 → 在「文件管理」整理档案。</div>
+                            <div style="margin-top: 9px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                <span style="font-size: 12.5px;">要按<b>指定题目和评分细则</b>精批？</span>
+                                <button type="button" class="btn" onclick="openLegacyFlow()" style="padding: 6px 12px; font-size: 12.5px;">旧版阅卷流程 →</button>
+                                <span style="font-size: 12px; color: var(--text-muted);">多数情况用不上，自动批阅会自己从卷面读题干</span>
+                            </div>
                         </div>
                         <div style="margin-bottom: 1.5rem; padding: 12px 16px; background: var(--bg-white); border: 1px solid var(--border-color); border-radius: 10px; font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
                             <span><strong style="color: var(--text-primary);">📘 第一次使用？</strong>教程里写了扫描、批阅、导出报告的完整步骤和常见问题，五分钟能看完。</span>
@@ -1337,6 +1351,34 @@
             if (configBtn) configBtn.style.display = (role === 'student') ? 'none' : '';
             if (role === 'student') switchTab('home', null);
         }
+        /* ---------- 旧版阅卷流程：默认收起，按需展开 ----------
+           日常是「扫描工作站 → 自动批阅 → 试卷门户」，旧版那套（阅卷管理 / 智能阅卷 /
+           班级中心）只在要按指定题目和评分细则精批时才用得上，摊在侧边栏里是噪音。
+           展开状态记在 localStorage，老师用过一次下次还在。 */
+        function setLegacyFlow(open, persist) {
+            var g = document.getElementById('legacyFlowGroup');
+            var b = document.getElementById('legacyToggle');
+            if (!g) return;
+            g.style.display = open ? '' : 'none';
+            if (b) b.textContent = open ? '收起' : '展开';
+            if (persist !== false) {
+                try { localStorage.setItem('qj_legacy_open', open ? '1' : '0'); } catch (e) {}
+            }
+        }
+        function toggleLegacyFlow() {
+            var g = document.getElementById('legacyFlowGroup');
+            if (!g) return;
+            setLegacyFlow(g.style.display === 'none');
+        }
+        function openLegacyFlow() {
+            setLegacyFlow(true);
+            switchTab('grading', null);
+        }
+        document.addEventListener('DOMContentLoaded', function() {
+            var saved = null;
+            try { saved = localStorage.getItem('qj_legacy_open'); } catch (e) {}
+            setLegacyFlow(saved === '1', false);
+        });
         function doLogin(e) {
             e.preventDefault();
             var idEl = document.getElementById('loginId');
@@ -1659,6 +1701,11 @@
             document.querySelectorAll('.admin-sidebar .sidebar-item').forEach(item => {
                 item.classList.toggle('active', item.getAttribute('data-tab') === tabName);
             });
+            // 切到旧版流程的页时把折叠组展开，否则侧边栏里看不出自己在哪
+            if (['assign', 'grading', 'ocr', 'center'].indexOf(tabName) >= 0) {
+                var lg = document.getElementById('legacyFlowGroup');
+                if (lg && lg.style.display === 'none') setLegacyFlow(true, false);
+            }
             if (tabName !== 'files') {
                 stopFileCheckIntervals();
             }
@@ -2499,7 +2546,7 @@
             fetch('/api/tasks').then(function(r) { return r.json(); }).then(function(data) {
                 gradingTasksFromApi = data.tasks || [];
                 if (gradingTasksFromApi.length === 0) {
-                    el.innerHTML = '<p style="color: var(--text-muted);">暂无已发布任务，请先在「组卷布置」中选题并发布。</p>';
+                    el.innerHTML = '<p style="color: var(--text-muted);">暂无阅卷任务，点右上角「创建阅卷任务」新建。</p>';
                     return;
                 }
                 el.innerHTML = gradingTasksFromApi.map(function(t) {
@@ -2553,7 +2600,7 @@
                 var tasks = data.tasks || [];
                 gradingTasksFromApi = tasks;
                 if (tasks.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">暂无任务，请先在「组卷布置」中发布任务。</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">暂无任务。点右上角「创建阅卷任务」新建一个。</td></tr>';
                     return;
                 }
                 tbody.innerHTML = tasks.map(function(t) {
@@ -2630,7 +2677,7 @@
             const listEl = document.getElementById('createGradingExerciseList');
             if (!listEl) return;
             if (gradingWizardTaskList.length === 0) {
-                listEl.innerHTML = '<p style="color: var(--text-muted);">暂无已发布任务，请先在「组卷布置」中选题并发布。</p>';
+                listEl.innerHTML = '<p style="color: var(--text-muted);">暂无已发布任务。请先在「旧版阅卷 → 组卷布置」里选题并发布。</p>';
                 return;
             }
             listEl.innerHTML = gradingWizardTaskList.map(function(e) {
