@@ -131,7 +131,8 @@
                 教师注册邀请码：<code style="background: rgba(0,0,0,0.05); padding: 1px 7px; border-radius: 5px; font-weight: 600; letter-spacing: 1.5px;">{{ invite_hint }}</code>
             </p>
             {% endif %}
-            <p style="margin-top: 8px; font-size: 13px;"><a href="/guide" target="_blank" rel="noopener">📘 第一次使用？打开教师新手教程</a></p>
+            <!-- 教师新手教程入口已移到登录后的教师端首页，登录页不再放 -->
+
         </div>
         <div id="teacherRegisterBox" class="login-box" style="display: none;">
             <h1 style="margin-bottom: 8px;">👩‍🏫 教师注册</h1>
@@ -225,7 +226,7 @@
                 <a href="/portal" target="_blank" rel="noopener" class="sidebar-item" title="打开试卷门户（任意设备可访问，新标签页）">
                     <i class="bi bi-globe2"></i><span class="sidebar-label">试卷门户</span><i class="bi bi-box-arrow-up-right sidebar-ext"></i>
                 </a>
-                <a href="/guide" target="_blank" rel="noopener" class="sidebar-item" title="打开教师新手教程（新标签页）">
+                <a href="/guide" target="_blank" rel="noopener" class="sidebar-item sidebar-teacher" title="打开教师新手教程（新标签页）">
                     <i class="bi bi-book"></i><span class="sidebar-label">使用教程</span><i class="bi bi-box-arrow-up-right sidebar-ext"></i>
                 </a>
             </div>
@@ -250,6 +251,10 @@
                     <div id="homeTeacherBlock" class="home-teacher-only">
                         <div style="margin-bottom: 1.5rem; padding: 12px 16px; background: var(--bg-white); border: 1px solid var(--border-color); border-radius: 10px; font-size: 13px; color: var(--text-secondary);">
                             <strong style="color: var(--text-primary);">📌 使用流程：</strong> 在「组卷布置」选题并发布任务 → 在「阅卷管理」导出答题卡、上传试卷（可扫码归类）→ 在「智能阅卷」中识别并批阅 → 在「班级中心」查看报告与好词好句。
+                        </div>
+                        <div style="margin-bottom: 1.5rem; padding: 12px 16px; background: var(--bg-white); border: 1px solid var(--border-color); border-radius: 10px; font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                            <span><strong style="color: var(--text-primary);">📘 第一次使用？</strong>教程里写了扫描、批阅、导出报告的完整步骤和常见问题，五分钟能看完。</span>
+                            <a href="/guide" target="_blank" rel="noopener" class="btn btn-primary" style="white-space: nowrap;">打开教师新手教程 ↗</a>
                         </div>
                         <div class="home-dashboard-section" style="margin-bottom: 2rem;">
                             <h3 style="margin: 0 0 12px 0; color: var(--text-primary);">📄 最新试卷</h3>
