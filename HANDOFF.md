@@ -929,3 +929,36 @@ if _task:
 - 记录里的 `teacher_note` 目前只在 JSON 里，用户端界面没展示（`_public_record` 未透出）；
   老师若想在报告里看到「本批按什么口径批的」，需要再补一行展示；
 - 阅卷管理「创建阅卷任务」向导对 `class_names` 为空的任务表现未验证。
+
+## 30. 2026-10-27 16:35：批改备注在试卷门户里露出来（教师视角）
+
+§29.6 那条遗留补掉了。备注以前只躺在记录的 JSON 里，老师扫完根本看不到自己写的口径
+到底被用上了没有。
+
+### 30.1 后端：按角色下发
+`_public_record` 开头新增一句：
+```python
+if session.get('user_role') not in ('teacher', 'admin'):
+    out.pop('teacher_note', None)
+```
+**必须 pop 而不是靠模板不渲染**：`out = dict(rec)` 是浅拷贝，字段本来就会随
+`/api/portal/records` 一起发给学生端，只是界面上没画。老师写的备注可能带班级学情判断
+（"这个班普遍差"），不该出现在学生手机上。
+
+### 30.2 前端：一行琥珀色说明
+`templates/portal.html`
+- `.rec .tnote`：12px、`#8a5300` 字色 + `#fff8ec` 底 + 虚线边框，和 `.task`（题目行）区分开；
+- `recCardHtml()` 在题目行下面插一行 `🗒 本批批改备注：…`，带 title 提示说明它的优先级；
+- 教师端列表里**同一批只在该批第一张卡上出现**（`noteSeen` 按 `batch_id || task_id || id`
+  去重）。整批 40 份卷子刷 40 个一样的框没有意义。
+
+学生端 `renderStudentBatchPage` 走同一个 `recCardHtml`，但后端已把字段剥掉，条件自然为假。
+
+### 30.3 验证
+`_public_record` 三种角色：student → 无该键，teacher/admin → 有值；`/portal` 渲染出的
+HTML 里 `.rec .tnote`、`本批批改备注`、`r.teacher_note` 均在。脚本 `node --check` 通过，
+服务已重启（`stale: false`）。
+
+### 30.4 注意
+- 老批次没有这个字段，卡片上就不显示，不会有空行；
+- 记录编辑弹窗里还改不了这个备注（改了要重新批），要改只能重扫一批或改批次 JSON。
