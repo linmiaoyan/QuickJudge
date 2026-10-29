@@ -8645,6 +8645,11 @@ def _code_stale_info():
     newest, name = 0, ''
     try:
         cands = [os.path.abspath(__file__)]
+        # secretbox.py 也要盯：它决定"能不能读到 token"，进程里跑着旧版本时
+        # 表现是"密钥突然读不到"，比改坏页面更难查。
+        _sb = os.path.join(base, 'secretbox.py')
+        if os.path.exists(_sb):
+            cands.append(_sb)
         u = os.path.join(base, 'utils')
         if os.path.isdir(u):
             cands += [os.path.join(u, f) for f in os.listdir(u) if f.endswith('.py')]
