@@ -20,8 +20,12 @@ try:
 except ImportError:
     pass  # dotenv是可选的
 
+# 密钥保险箱：API token 与会话签名密钥优先从加密文件读（Windows DPAPI，绑定本机本账户）。
+# 没加密过就退回 .env 明文，并在启动时提示迁移——见 secretbox.py 与 tools/seal_secrets.py。
+import secretbox
+
 # 大模型接口：优先使用 LLM_*（支持 CodingPlan 等 OpenAI 兼容），未设置时回退到 MINIMAX_*
-_llm_key = os.getenv("LLM_API_KEY", "").strip() or os.getenv("MINIMAX_API_KEY", "").strip()
+_llm_key = secretbox.get_secret("LLM_API_KEY") or secretbox.get_secret("MINIMAX_API_KEY")
 _llm_base = os.getenv("LLM_BASE_URL", "").strip() or os.getenv("MINIMAX_BASE_URL", "https://api.minimaxi.com/v1").strip()
 _llm_model = os.getenv("LLM_MODEL", "").strip() or os.getenv("MINIMAX_MODEL", "MiniMax-M2.5").strip()
 minimax_api_key = _llm_key
@@ -112,7 +116,8 @@ import hmac
 from urllib.parse import urlencode
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'scan-biyue-dev-secret-key-change-in-production')
+app.secret_key = (secretbox.get_secret('FLASK_SECRET_KEY')
+                  or 'scan-biyue-dev-secret-key-change-in-production')
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 # 上传上限：扫描图/答题卡通常 1–3MB，留足余量即可；不设会被超大文件打满内存与磁盘。
 app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('QJ_MAX_UPLOAD_MB', '64') or 64) * 1024 * 1024
@@ -9785,6 +9790,9 @@ if __name__ == '__main__':
     print("  本机访问：  http://127.0.0.1:%d/" % PORTAL_PORT)
     for _u in _lan_portal_urls():
         print("  局域网访问：" + _u)
+    # 密钥保险箱体检：加密了没、解不解得开、.env 里还留没留明文。
+    # 放在启动横幅里，是因为"换了 Windows 账户导致解不开"只能在启动这一刻暴露出来。
+    print(secretbox.startup_report())
     if debug_mode:
         print("  ⚠ 调试模式已开启（QJ_DEBUG=1），请勿在公共网络下使用。")
     app.run(host='0.0.0.0', port=PORTAL_PORT, debug=debug_mode, use_reloader=debug_mode)
