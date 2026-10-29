@@ -962,3 +962,80 @@ HTML 里 `.rec .tnote`、`本批批改备注`、`r.teacher_note` 均在。脚本
 ### 30.4 注意
 - 老批次没有这个字段，卡片上就不显示，不会有空行；
 - 记录编辑弹窗里还改不了这个备注（改了要重新批），要改只能重扫一批或改批次 JSON。
+
+## 31. 2026-10-29 10:35：API token 加密（设备移交不泄漏）
+
+### 31.1 要解决的具体问题
+`.env` 里两个值是明文：`LLM_API_KEY`（学校的模型额度）和 `FLASK_SECRET_KEY`（会话签名密钥）。
+后者泄漏比前者更糟——拿到它就能自己签一个 `user_role=admin` 的 Cookie 直接进后台。
+设备以后可能交给第三方厂家，一个能读文件的人一个 grep 就全拿走了。
+
+### 31.2 方案：Windows DPAPI（本机 + 本账户 + 应用熵）
+新增 `secretbox.py`，用系统自带的 `CryptProtectData`（ctypes 调用，**零第三方依赖**，
+装不了 `cryptography`/`pywin32` 也能用）：
+
+```
+python tools/seal_secrets.py --set LLM_API_KEY     # 交互录入（不回显、不进 shell 历史）
+        ↓
+data/config/secrets.dpapi.json                      # {items:{LLM_API_KEY:"dpapi-user:AQAA…"}}
+        ↓ 服务启动时
+secretbox.get_secret('LLM_API_KEY')                 # 自动解密，无需人输口令
+```
+
+- 加密密钥不在项目里：是当前 Windows 用户在 LSA 里的主密钥，由账户口令保护；
+- 密文绑定 **本机 + 本账户 + 应用熵** `QuickJudge/secrets/v1`。把 `data/` 整个拷到别的机器、
+  或换个 Windows 账户登录，`CryptUnprotectData` 直接返回错误（实测 `GetLastError=13`）；
+- `LSA` 那层平时是透明的，所以服务仍然可以无人值守启动（`启动服务.bat` 双击即跑）。
+
+### 31.3 代码改动
+- `app.py`：`_llm_key` / `app.secret_key` 改走 `secretbox.get_secret()`；
+  取值顺序 **密文 → 明文环境变量 → 默认值**（密文优先，避免"以为加密了其实一直读明文"）；
+  启动横幅多打一行体检：
+  `密钥保险箱：已加密 2 项（LLM_API_KEY、FLASK_SECRET_KEY）`。
+- `secretbox.py`：`encrypt_text` / `decrypt_text` / `get_secret` / `set_secret` / `status` /
+  `startup_report` / `fingerprint`。解不开时**不崩**：记 warn、回退明文、`--status` 里能看见原因。
+- `tools/seal_secrets.py`：
+  | 命令 | 用途 |
+  |---|---|
+  | `--status`（默认） | 加密了哪些、解不解得开、`.env` 里还剩没剩明文 |
+  | `--apply` | 把 `.env` 明文搬进保险箱，并把那几行换成注释（其余配置一字不动） |
+  | `--set NAME` | 录入/更换（getpass，不回显） |
+  | `--unseal NAME` | 打印明文，换机器时导出用 |
+  | `--verify` | 密文 vs `.env` 明文比对**指纹**（sha256 前 8 位，不打印明文） |
+  | `--list-plaintext` | 找出磁盘上还含明文密钥的文件 |
+  | `--shred-backups` | 删 `.env.bak*` 等副本（默认预演，`--yes` 才删；删前把旧值存成 `<名字>_OLD`） |
+
+### 31.4 已完成迁移（2026-10-29 10:32）
+- `LLM_API_KEY` 51 字符 → 密文，指纹 `392c1d59`；`FLASK_SECRET_KEY` 64 字符 → 密文，指纹 `81f6e426`；
+- `.env` 里两行已换成注释，其余 11 项配置与顺序未变；
+- 服务重启后启动横幅显示"已加密 2 项"，`--verify` 全绿；
+- **实测**：用解出来的 token 真调了一次 `chat/completions`（max_tokens=1），返回 200，
+  说明不是"能解开但值坏了"。
+
+### 31.5 威胁模型（必须跟接手方讲清楚）
+| 场景 | 是否防住 |
+|---|---|
+| 拷走项目目录（含 `data/`） | ✅ 拿到的是密文，没有本机主密钥解不开 |
+| 同一台机器、**换一个 Windows 账户**登录 | ✅ DPAPI 用户作用域不同，解不开 |
+| 拿到硬盘/备份镜像，换机器挂载 | ✅ 主密钥在 LSA，不在磁盘明文里 |
+| 用**同一个** Windows 账户登录（账户连同设备一起交出去） | ❌ 能解开——DPAPI 保护的是账户，不是人 |
+| 进程运行中读内存 | ❌ 明文在内存里（调模型必须如此） |
+| 有本机管理员权限、能 dump LSA 主密钥 | ❌ 有这权限基本等于拿到账户 |
+
+最后两条**无法靠代码消除**，只能靠流程。所以交接时必须做下面这套动作。
+
+### 31.6 设备移交清单（交给第三方厂家前）
+1. `python tools/seal_secrets.py --list-plaintext` —— 确认没有残留明文（现在只剩一个旧 `.env.bak`，见 §31.7）；
+2. 到服务商后台**吊销并重发** token（这一步才是"让旧密钥失效"，本地删文件做不到）；
+3. 新账户/新机器上 `--set LLM_API_KEY` 重新灌入，或干脆删掉 `data/config/secrets.dpapi.json`
+   让对方用他们自己的 token；
+4. 删掉 `data/config/users.json` 里的账号，或至少改掉所有管理员口令；
+5. 交接前把 `QuickJudge-BACKUP*` 目录一并清掉（那里是 `data/` 的完整镜像，密文虽解不开，
+   学生信息却是明文）。
+
+### 31.7 遗留
+- `.env.bak-20261016_113150` 仍含一个**更早的** token（指纹 `d4c62caf`，与当前不同）。
+  若它还有效，请先在服务商后台吊销；确认无效后跑
+  `python tools/seal_secrets.py --shred-backups --yes` 删掉。
+- 换 Windows 账户/机器后 `--status` 会明确报"解不开"，此时的修复动作是 `--set` 重灌，
+  不是去找回旧密文（旧密文在新账户下永远打不开）。
