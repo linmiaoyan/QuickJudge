@@ -207,7 +207,7 @@
                  日常是「扫描工作站 → 自动批阅 → 试卷门户」，这一组只在要按
                  「指定题目 + 评分细则」精批时才用，所以默认收起、排在日常之后。
                  组卷布置不在这一组里：英语老师在别的平台组卷，选题/排版/答题卡对他没用，
-                 要指定题干就用扫描端的「本批题目与批改备注」（/api/tasks/quick 建轻量任务）。 -->
+                 要指定题干就用扫描端的「✍️ 批改备注」（/api/tasks/quick 建轻量任务）。 -->
             <div class="sidebar-group sidebar-teacher">
                 <div class="sidebar-group-title" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
                     <span>旧版阅卷 <span style="font-size: 10px; font-weight: 500; padding: 1px 5px; border-radius: 4px; background: rgba(128,128,128,0.25);">备用</span></span>
@@ -215,7 +215,7 @@
                 </div>
                 <div id="legacyFlowGroup" style="display: none;">
                     <!-- 组卷布置已从这里隐去：英语老师在别的平台组卷，这套选题/排版/答题卡对他没用。
-                         现在要指定题目和要点，在扫描端「📝 本批题目与批改备注」里两个输入框就能建。
+                         现在要指定题目和要点，在扫描端「✍️ 批改备注」里两个输入框就能建。
                          页面本身还在（data-tab="assign"），需要时仍可从代码里 switchTab 打开。 -->
                     <a href="javascript:void(0)" class="sidebar-item sidebar-teacher" data-tab="grading" onclick="switchTab('grading', event)" title="上传试卷并归类、管理阅卷任务">
                         <i class="bi bi-inboxes"></i><span class="sidebar-label">阅卷管理</span><span class="sidebar-step">1</span>
@@ -2697,7 +2697,7 @@
             const listEl = document.getElementById('createGradingExerciseList');
             if (!listEl) return;
             if (gradingWizardTaskList.length === 0) {
-                listEl.innerHTML = '<p style="color: var(--text-muted);">暂无已发布任务。到扫描工作站「📝 本批题目与批改备注」里点「新建题目」即可建一张；不建也能直接扫卷，批阅会自动从卷面读题干。</p>';
+                listEl.innerHTML = '<p style="color: var(--text-muted);">暂无已发布任务。到扫描工作站「✍️ 批改备注」里点「新建题目」即可建一张；不建也能直接扫卷，批阅会自动从卷面读题干。</p>';
                 return;
             }
             listEl.innerHTML = gradingWizardTaskList.map(function(e) {
@@ -2887,7 +2887,7 @@
                 if (classes.length === 0 && tasks.length === 0) {
                     reportsHtml = '<p style="color: var(--text-muted); font-size: 13px;">暂无班级与阅卷任务。先到「<a href="javascript:void(0)" onclick="switchTab(\'center\', event)">班级中心</a>」创建班级，再到扫描工作站扫一次卷——批阅会自动建批次并按学号分班。</p>';
                 } else if (tasks.length === 0) {
-                    reportsHtml += '<p style="color: var(--text-muted); font-size: 13px;">暂无阅卷任务。到扫描工作站「📝 本批题目与批改备注」里新建一张，或直接扫卷让系统从卷面读题干。</p>';
+                    reportsHtml += '<p style="color: var(--text-muted); font-size: 13px;">暂无阅卷任务。到扫描工作站「✍️ 批改备注」里新建一张，或直接扫卷让系统从卷面读题干。</p>';
                 }
                 reportsEl.innerHTML = reportsHtml;
             } catch (e) {

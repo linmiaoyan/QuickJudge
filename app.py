@@ -160,7 +160,7 @@ def _local_auto_login():
     if request.path in ('/api/logout', '/api/local_login'):
         return None
     try:
-        if not _is_local_request():
+        if not _is_own_machine():
             return None
     except Exception:
         return None
@@ -406,7 +406,7 @@ def login():
 @app.route('/api/local_login', methods=['POST'])
 def local_login():
     """本机一键进入（仅本机）：退出登录后想恢复自动登录时用。"""
-    if not _is_local_request():
+    if not _is_own_machine():
         return jsonify({'error': '仅限本机操作'}), 403
     u = _local_admin_user()
     if not u:
@@ -430,7 +430,7 @@ def logout():
     """
     was_local = False
     try:
-        was_local = _is_local_request()
+        was_local = _is_own_machine()
     except Exception:
         pass
     session.clear()
@@ -1663,16 +1663,16 @@ def grading_subject_options():
     cfg = load_grading_config()
     out = []
     for key, val in (cfg.get('subjects') or {}).items():
-        kind = str(val.get('kind') or 'generic').strip() or 'generic'
+        # 暴露的是**实际走的流水线**，不是配置里写的原始 kind：
+        # 英语作文之外全部走通用批阅，前端据此切换界面（作文要「题目」，其余要备注/答案要点）
+        kind = subject_kind(key)
         out.append({'key': key, 'name': val.get('name') or key,
                     'max_score': val.get('max_score') or 100,
-                    # 批阅契约：essay=作文（整篇打等级）/ points=要点判分 / generic=手动单份批
-                    # 前端据此切换「本批题目」还是「本批练习」，不必硬编码学科名
                     'kind': kind,
                     # 能不能走「扫完即批」：扫描端据此只列可用方案
                     'auto_ok': auto_pipeline_supports(key),
-                    # points 学科必须先选/建一份练习，否则无从判分
-                    'need_exercise': kind == PIPELINE_KIND_POINTS})
+                    # 答案要点表已经改成可选（没选就按学科标准整体给分），这里恒为 False
+                    'need_exercise': False})
     return {'current': cfg.get('current') or 'general', 'subjects': out}
 
 # PNG压缩质量配置存储
@@ -2567,8 +2567,9 @@ def save_exercise_api():
     body = str(data.get('body') or '')
     if not subject:
         return jsonify({'error': '请先选学科'}), 400
-    if subject_kind(subject) != PIPELINE_KIND_POINTS:
-        return jsonify({'error': '「%s」不用要点判分，这里只收要点判分学科的练习'
+    if subject_kind(subject) == PIPELINE_KIND_ESSAY:
+        # 英语作文的"评分要求"走「题目」（requirements），不是这里的要点表
+        return jsonify({'error': '「%s」用不着答案要点表：作文的评分要求写进「题目」里'
                                  % _subject_display_name(subject)}), 400
     parsed = parse_exercise_body(body, subject)
     ai_note = ''
@@ -6781,6 +6782,15 @@ def _is_local_request():
     """扫描端写操作闸门：判断请求是否来自本机。"""
     if STATION_ALLOW_REMOTE:
         return True
+    return _is_own_machine()
+
+
+def _is_own_machine():
+    """请求是不是从这台电脑本身发起的（不受 STATION_ALLOW_REMOTE 影响）。
+
+    免登录只能认这个判据：STATION_ALLOW_REMOTE=1 是「允许远程操作扫描端」的调试开关，
+    若拿它来判免登录，等于给整个局域网发了管理员账号。
+    """
     addr = (request.remote_addr or '').strip()
     return addr in _LOCAL_ADDRS
 
@@ -8434,16 +8444,26 @@ SUBJECT_AUTO = 'auto'
 
 
 def subject_kind(subject):
-    """某学科走哪套批阅契约。未知学科按 generic 处理（不能随手当作文批）。"""
+    """这个学科走哪套批阅流水线。
+
+    **只有英语作文有专用契约**（整篇读全文 → 逐句改错 → 等级 + 范文）；其余学科一律走
+    「通用批阅」：老师给了批改备注/答案要点就按那个口径判，没给就按学科标准整体给分。
+
+    以前给数学、默写、语文作文留了 generic（只能逐份手动批），实测下来老师们要的是
+    "扫进去就有分"——那个「暂不开放」的门槛除了让人困惑、逼人回头手动批，没有别的用。
+    配置里压根没有的学科仍按 generic 处理（不能拿个不存在的 key 去批卷）。
+    """
     key = str(subject or '').strip()
     if key in ('', SUBJECT_AUTO):
         return PIPELINE_KIND_GENERIC
     try:
         cfg = load_grading_config()
-        val = (cfg.get('subjects') or {}).get(key) or {}
-        kind = str(val.get('kind') or '').strip()
-        return kind if kind in (PIPELINE_KIND_ESSAY, PIPELINE_KIND_POINTS, PIPELINE_KIND_GENERIC) \
-            else PIPELINE_KIND_GENERIC
+        val = (cfg.get('subjects') or {}).get(key)
+        if not val:
+            return PIPELINE_KIND_GENERIC
+        return (PIPELINE_KIND_ESSAY
+                if str(val.get('kind') or '').strip() == PIPELINE_KIND_ESSAY
+                else PIPELINE_KIND_POINTS)
     except Exception:
         return PIPELINE_KIND_GENERIC
 
@@ -8456,11 +8476,10 @@ def auto_pipeline_supports(subject):
 def auto_pipeline_reject_message(subject):
     """不能走自动流水线时给老师看的话：说清原因和替代做法，而不是一句「不支持」。"""
     name = _subject_display_name(subject)
-    return ('「%s」暂时不能扫完自动批阅：它没有对应的自动评阅契约'
-            '（目前接了「作文」与「要点判分」两类）。\n\n'
+    return ('「%s」在批阅方案里还没有配置，扫进来只会归档、不会自动批。\n\n'
             '两个办法：\n'
-            '· 先按能自动批的学科扫进来（只归档、不自动批）；\n'
-            '· 需要批这门课时，在用户端点「评语 / 批阅」逐份手动批。' % name)
+            '· 到「配置 → 批阅方案」把它加上（英语作文之外都走通用批阅）；\n'
+            '· 或者先扫进来，在用户端点「评语 / 批阅」逐份手动批。' % name)
 
 
 def _subject_max_score(subject):
@@ -10455,7 +10474,7 @@ def _auto_pipeline(batch_id):
         # 这一步省下的是老师站在扫描仪前干等的那一两分钟。
         if requirements_text:
             _tname = str(((b.get('topic') or {}).get('title')) or '').strip()
-            bump(message=('本批题目：%s，开始并行批阅…' % _tname) if _tname
+            bump(message=('题目：%s，开始并行批阅…' % _tname) if _tname
                  else '题干已确定，开始并行批阅…')
         else:
             for idx in range(min(3, n)):
@@ -10825,8 +10844,8 @@ def _points_pipeline(batch_id):
         # 选了练习但那份练习没了：不能悄悄降级成整体判分——那会让老师以为还在按要点给分
         b.setdefault('job', {}).update({
             'status': 'error', 'stage': 'error', 'updated_at': _now_str(),
-            'message': ('本批绑定的练习已不存在（可能被删了），判分依据丢了。\n'
-                        '到扫描端「本批练习」重新选一份后点「重试本批」；'
+            'message': ('这批用的那份答案要点已经被删了，判分依据丢了。\n'
+                        '到扫描端「批改备注」下面的答案要点里重新选一份，再点「重试本批」；'
                         '或者到用户端「评语 / 批阅」逐份手动批。')})
         _save_batch(b)
         return
@@ -11100,7 +11119,8 @@ def _run_pipeline(batch_id):
     kind = subject_kind(subject)
     if kind == PIPELINE_KIND_ESSAY:
         return _auto_pipeline(batch_id)
-    if kind == PIPELINE_KIND_POINTS:
+    if kind in AUTO_PIPELINE_KINDS:
+        # 英语作文之外的一切都走通用批阅：有答案要点就逐点给分，没有就按学科标准整体给分
         return _points_pipeline(batch_id)
     b.setdefault('job', {}).update({
         'status': 'error', 'stage': 'error', 'updated_at': _now_str(),

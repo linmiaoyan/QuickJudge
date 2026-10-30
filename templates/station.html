@@ -269,6 +269,22 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
           <button class="btn" style="flex:1;justify-content:center;" id="importBtn">📁 导入本地图片</button>
           <input type="file" id="importInput" accept="image/*" multiple style="display:none;">
         </div>
+
+        <!-- 答案：纸质直接扫，拍照就上传。答案不是学生卷子，走自己的暂存区，
+             识别结果只当草稿，改完再存，绝不直接落盘。
+             放在扫描按钮下面而不是收起的「题目」面板里——老师要扫答案时不该先展开一个面板。 -->
+        <div id="ocrWrap" style="margin-top:10px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;background:#fcfdfe;">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn tiny primary" type="button" id="ocrScanBtn">📠 扫描答案</button>
+            <button class="btn tiny" type="button" id="ocrBtn">📷 上传答案图片</button>
+            <span id="ocrHint" style="font-size:11.5px;color:var(--text3,#999);line-height:1.5;">
+              纸质答案点「扫描答案」，扫完在页面上框出要用的区域（一页可框多块）；拍照的走上传统一上传，一次最多 8 张
+            </span>
+            <input type="file" id="ocrInput" accept="image/*" multiple style="display:none;">
+          </div>
+          <div id="answerPages" style="display:none;margin-top:9px;"></div>
+          <div id="ocrResult" style="display:none;margin-top:8px;"></div>
+        </div>
         <div style="margin-top:14px;">
           <div style="font-size:12.5px;color:var(--text2);margin-bottom:5px;">自动批阅方案（扫完直接批，无需再点）</div>
           <select id="subjectSel" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;background:#fff;"></select>
@@ -276,7 +292,7 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
           <!-- 满分：常见分值直接点一下，特殊分值再手填。
                数字输入必须自带默认值（Carbon/Spectrum 的硬规矩），所以这里永远是
                「当前学科默认值」打底，老师不碰也不会空着；改过的值按学科记住。 -->
-          <div style="margin-top:9px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <div id="maxRow" style="margin-top:9px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <span style="font-size:12.5px;color:var(--text2);flex:0 0 auto;">本次满分</span>
             <div id="maxChips" style="display:flex;gap:6px;flex-wrap:wrap;flex:1 1 auto;"></div>
             <label for="maxScore" title="这一批卷子的满分；不选就用方案默认值"
@@ -288,22 +304,21 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
             </label>
           </div>
           <div id="maxHint" style="font-size:11.5px;margin-top:6px;line-height:1.5;color:var(--text3,#999);"></div>
-          <div style="font-size:11.5px;color:var(--text3,#999);margin-top:3px;line-height:1.45;">
-            常见分值点一下就行，不是这些分值再改右边数字；本批全部按它算，改过的值按学科记住。
-            要点判分的学科（政治 / 地理）由练习里的要点分值合计决定，选了练习会自动锁住。
-          </div>
           <div id="subjNote" style="font-size:11.5px;color:#8a5300;background:#fff8ec;border:1px solid #f5d9a8;border-radius:8px;padding:6px 9px;margin-top:7px;line-height:1.5;display:none;"></div>
         </div>
 
-        <!-- 本批题目/评分标准 + 批改备注：默认收起。不填也能扫（作文按卷面识别题干），
-             但政治/地理这类"要点判分"学科必须选一份练习，扫之前会被拦下来。
-             用 <details> 而不是弹窗：不想看的时候它只占一行，扫卷的主按钮位置不变。 -->
-        <details id="promptBox" style="margin-top:12px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;background:#fbfcfd;">
+        <!-- 批改备注默认展开：老师每次来几乎都要写一句口径，藏在折叠层里等于让他多点一次。
+             题目/练习是选配，放在备注下面——不写备注也能扫，不选题目/练习也能扫。
+             用 <details> 而不是弹窗：不想看的时候它能收起来，扫卷的主按钮位置不变。 -->
+        <details id="promptBox" open style="margin-top:12px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;background:#fbfcfd;">
           <summary style="cursor:pointer;font-size:12.5px;color:var(--text2);outline:none;">
-            📝 本批<span id="promptMode">题目</span>与批改备注<span style="color:var(--text3,#999);" id="promptHint">（可选，不填就按卷面识别）</span>
+            ✍️ 批改备注<span style="color:var(--text3,#999);" id="promptHint">（写一句这次怎么给分；不写就按学科标准）</span>
             <span id="promptBadge" style="display:none;margin-left:6px;padding:1px 6px;border-radius:9px;background:#e7f6ec;color:#1a7f37;border:1px solid #b7e0c4;font-size:11px;">已设置</span>
           </summary>
           <div style="margin-top:9px;">
+            <textarea id="teacherNote" rows="3" maxlength="300"
+                      placeholder="例：这次只看第 2 段的建议部分；按中考标准评分，不扣书写分；答案要点见下，缺一条扣 2 分"
+                      style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;line-height:1.6;resize:vertical;"></textarea>
             <!-- 英语作文：题干（可选） -->
             <div id="essayTaskWrap">
               <div style="display:flex;gap:8px;">
@@ -353,28 +368,6 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
               </div>
             </div>
 
-            <!-- 答案图片识别：老师手里的参考答案常常是纸质的，抄一遍要点又慢又容易抄错分值。
-                 识别结果只是「填进输入框的草稿」，改完再存，绝不直接落盘。 -->
-            <div id="ocrWrap" style="margin-top:9px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;background:#fcfdfe;">
-              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                <button class="btn tiny primary" type="button" id="ocrScanBtn">📠 扫描答案</button>
-                <button class="btn tiny" type="button" id="ocrBtn">📷 上传答案图片识别</button>
-                <span id="ocrHint" style="font-size:11.5px;color:var(--text3,#999);line-height:1.5;">
-                  纸质答案直接点「扫描答案」，扫完可以在页面上框出要用的区域（一页可框多块）；拍照的走右边上传，一次最多 8 张
-                </span>
-                <input type="file" id="ocrInput" accept="image/*" multiple style="display:none;">
-              </div>
-              <!-- 扫进来的答案页：每页一张缩略图 + 已框区域数，可反复改 -->
-              <div id="answerPages" style="display:none;margin-top:9px;"></div>
-              <div id="ocrResult" style="display:none;margin-top:8px;"></div>
-            </div>
-
-            <label for="teacherNote" style="display:block;margin-top:9px;font-size:12px;color:var(--text2);">批改备注</label>
-            <textarea id="teacherNote" rows="2" maxlength="300" placeholder="写一句话给批阅参考，例：这次只看第 2 段的建议部分；按中考标准评分，不扣书写分"
-                      style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;resize:vertical;"></textarea>
-            <div style="font-size:11.5px;color:var(--text3,#999);margin-top:4px;line-height:1.45;">
-              题目/评分标准与备注跟着这一批卷子一起送去批阅，优先级高于卷面上印的要求。
-            </div>
           </div>
         </details>
 
@@ -588,19 +581,15 @@ async function loadContext() {
   // 批阅方案下拉：只列能走「扫完即批」的方案。作文与要点判分是两套契约，
   // 其余（数学、默写这类要逐份看过程/字形的）先不放开，免得扫完一叠纸才发现批出来不是想要的。
   const gsAll = (CTX.grading && CTX.grading.subjects) || [];
+  // 只列能「扫完即批」的方案。英语作文之外都走通用批阅，所以这里现在基本是全量；
+  // 配置里没登记的学科不列（批不了，列出来只会让人选了才发现没反应）。
   const gs = gsAll.filter(s => s.auto_ok !== false);
-  const skipped = gsAll.filter(s => s.auto_ok === false).map(s => s.name);
+  // 以前这里会挂一条「暂不开放：数学、默写…」的说明。现在没有"暂不开放"这回事了，
+  // 数学/默写/语文作文都走通用批阅，这条提示连同它的存在理由一起删掉。
   const noteEl = $('#subjNote');
   if (noteEl) {
-    if (skipped.length) {
-      noteEl.style.display = '';
-      noteEl.innerHTML = '<b>暂不开放：</b>' + skipped.map(esc).join('、')
-        + '。自动批阅目前接了作文（整篇按要点打等级）和要点判分（政治、地理这类逐点给分）两套规则，'
-        + '其他学科接好之前先不放出来；要批这些科目的卷子，请扫进来后在用户端点「评语 / 批阅」逐份手动批。';
-    } else {
-      noteEl.style.display = 'none';
-      noteEl.innerHTML = '';
-    }
+    noteEl.style.display = 'none';
+    noteEl.innerHTML = '';
   }
   const sel = $('#subjectSel');
   if (sel) {
@@ -611,7 +600,7 @@ async function loadContext() {
     sel.onchange = () => {
       localStorage.setItem('qj_station_subject', sel.value);
       syncMaxScore();
-      syncSubjectUi();     // 作文 ↔ 要点判分：切换「本批题目」和「本批练习」两块
+      syncSubjectUi();     // 作文 ↔ 通用批阅：切换「题目（作文）」和「答案要点」两块
     };
     syncMaxScore();
   }
@@ -624,7 +613,7 @@ async function loadContext() {
     navigator.clipboard.writeText(b.dataset.copy).then(() => toast('已复制', 'ok'), () => toast('复制失败', 'err'));
   });
   renderTaskOptions();
-  syncSubjectUi();   // 按学科 kind 决定显示「本批题目」还是「本批练习」，并把练习下拉填好
+  syncSubjectUi();   // 按学科 kind 决定显示「题目（作文）」还是「答案要点」，并把下拉填好
   renderQueue();
 }
 function row(k, v) { return '<div class="row"><span>' + esc(k) + '</span><span>' + esc(v) + '</span></div>'; }
@@ -756,7 +745,7 @@ if ($('#maxScore')) {
   syncMaxScore();   // 先给个默认值，别让输入框空着；loadContext 拿到方案后会再校准
 }
 
-/* ---------------- 本批题目与批改备注 ---------------- */
+/* ---------------- 批改备注 / 题目 / 答案要点 ---------------- */
 // 题干来源按优先级：扫描端选的题目 → 卷面自动识别。
 // 选了题目，批阅就不用等第一张卷子读完才知道题干，整批直接并行，扫完更快出结果。
 function taskStore() {
@@ -935,41 +924,49 @@ function renderExerciseOptions() {
   syncExerciseMaxScore();
 }
 
-// 学科方案一换，「本批题目（作文）」和「本批练习（要点判分）」跟着换，标题文案也不用老师猜
+// 学科方案一换，「题目（作文）」和「答案要点（通用批阅）」跟着换
 function syncSubjectUi() {
   const pts = isPointsSubject();
   const ew = $('#essayTaskWrap'), xw = $('#exerciseWrap');
   if (ew) ew.style.display = pts ? 'none' : '';
   if (xw) xw.style.display = pts ? '' : 'none';
-  const pm = $('#promptMode'), ph = $('#promptHint');
-  if (pm) pm.textContent = pts ? '练习' : '题目';
-  if (ph) ph.textContent = pts ? '（可选：选了按要点逐条判，不选就整体判分）' : '（可选，不填就按卷面识别题干）';
+  // 标题就是「批改备注」，不再随学科改成「本批题目 / 本批练习」——
+  // 老师要的是"写一句怎么判"，不是先弄懂我们内部管这叫什么
+  const ph = $('#promptHint');
+  if (ph) {
+    ph.textContent = pts
+      ? '（写一句这次怎么给分；不写就按学科标准整体给分）'
+      : '（写一句这次怎么判；不写就按卷面识别题干）';
+  }
   renderExerciseOptions();
   syncPromptBadge();
   syncMaxEnabled();
 }
 
 function syncMaxEnabled() {
-  // 要点判分学科（政治/地理）的满分来自练习里各要点分值的合计，扫描端填了也不作数。
-  // 与其让老师填一个「填了没用」的数，不如直接把控件收起说明白——说谎的输入框最伤信任。
-  const pts = (typeof isPointsSubject === 'function') && isPointsSubject();
+  // 什么时候不让改满分：只有「选了答案要点表」时——那时满分必须等于要点分值合计，
+  // 老师填了也不作数。没选要点表就是通用批阅（按学科标准整体给分），满分该由老师说了算，
+  // 所以这里不能再按学科一刀切成禁用（那会让"不选练习"的批次永远只能用默认满分）。
+  const locked = isPointsSubject() && !!currentExerciseSummary();
   const el = $('#maxScore');
   if (el) {
-    el.disabled = !!pts;
-    el.style.opacity = pts ? '.45' : '';
+    el.disabled = locked;
+    el.style.opacity = locked ? '.45' : '';
   }
   $$('#maxChips .maxchip').forEach(b => {
-    b.disabled = !!pts;
-    b.style.opacity = pts ? '.45' : '';
-    b.style.cursor = pts ? 'not-allowed' : 'pointer';
+    b.disabled = locked;
+    b.style.opacity = locked ? '.45' : '';
+    b.style.cursor = locked ? 'not-allowed' : 'pointer';
   });
+  // 选了要点表：满分由练习总分决定，整行收起。
+  const row = $('#maxRow');
+  if (row) row.style.display = locked ? 'none' : '';
   const hint = $('#maxHint');
-  if (pts && hint) {
-    hint.style.color = '';
-    hint.innerHTML = '本学科按<b>练习里的要点分值合计</b>给分，这里不用填；选好练习后以练习总分为准。';
-  } else {
-    updateMaxHint();
+  if (hint) {
+    hint.style.display = locked ? 'none' : '';
+    if (locked) hint.innerHTML = '';
   }
+  if (!locked) updateMaxHint();
 }
 
 function renderExSubjectOptions() {
@@ -1204,6 +1201,7 @@ if ($('#exerciseSel')) {
     try { localStorage.setItem('qj_station_exercise', selectedExerciseId()); } catch (e) {}
     renderExerciseMeta();
     syncExerciseMaxScore();
+    syncMaxEnabled();      // 换练习会改变满分是否可填（选了要点表就锁住）
     syncPromptBadge();
   };
 }
@@ -1484,9 +1482,9 @@ function renderJob(j) {
       ? '<div style="margin-top:4px;color:var(--text3,#999);">判分依据：《' + esc(j.exercise.title || '练习')
         + '》' + (j.exercise.point_count || 0) + ' 个要点 / 满分 ' + esc(j.exercise.max_score) + '</div>'
       : (j.mode === 'free'
-        // 没选练习 → 没说清"为什么只有总分"，老师会以为是明细没加载出来
-        ? '<div style="margin-top:4px;color:var(--text3,#999);">判分依据：按学科标准整体判分（本批没选要点表，'
-          + '所以只有总分和评语）</div>'
+        // 没给答案要点 → 说清楚"为什么只有总分"，老师会以为是明细没加载出来
+        ? '<div style="margin-top:4px;color:var(--text3,#999);">通用批阅：按学科标准整体给分'
+          + '（没给答案要点，所以只有总分和评语）</div>'
         : '');
     foot.style.display = 'block';
     foot.innerHTML = `已归档 <b>${n}</b> 份 · <a href="/portal" target="_blank" rel="noopener">去用户端查看 →</a>` + byEx;

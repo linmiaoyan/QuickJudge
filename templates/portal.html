@@ -1033,8 +1033,8 @@ function batchHtml(r, anon) {
    o.showClass 显示班级徽标（管理员跨班列表用）
    o.actions  显示评语 / 看原图 / 删除按钮（仅教师）
 */
-/* ---------- 要点判分结果（政治 / 地理 / 后续同类学科） ---------- */
-// 作文批完是"一个等级 + 逐句改错"；要点判分批完是"哪几条要点拿到了分"。
+/* ---------- 通用批阅结果（给过答案要点的卷子：政治 / 地理 / 数学 …） ---------- */
+// 作文批完是"一个等级 + 逐句改错"；通用批阅批完是"哪几条要点拿到了分"。
 // 学生最想知道的是"我哪条没写、为什么没写"，所以按题逐点摊开，不折叠。
 function num(v) {
   const n = Number(v);
@@ -1043,11 +1043,11 @@ function num(v) {
   return String(r);
 }
 
-/* 科目小标签：要点判分类（政治/地理）用橙色，整篇作文等用蓝色 */
+/* 科目小标签：通用批阅（给过/没给答案要点都算）用橙色，整篇作文用蓝色 */
 function subjectBadge(r) {
   const name = r.subject_name || '';
   if (!name) return '';
-  const pts = !!(r.points && r.points.length);
+  const pts = !!(r.points && r.points.length) || ((r.grading || {}).mode === 'free');
   return '<span class="subjchip' + (pts ? ' pts' : '') + '">' + esc(name) + '</span>';
 }
 
@@ -1060,7 +1060,7 @@ function pointsHtml(r) {
   const scoreTxt = r.score_text || (r.score != null && r.max_total != null ? (num(r.score) + '/' + num(r.max_total)) : '');
   const warns = meta.align_warnings || [];
 
-  let h = '<div class="eblk"><div class="eh">📌 要点判分明细'
+  let h = '<div class="eblk"><div class="eh">📌 通用批阅 · 逐点得分'
     + '<span class="cnt">' + (meta.exercise_title ? esc(meta.exercise_title) + ' · ' : '')
     + '命中 ' + hitN + '/' + allN + ' 个要点' + (scoreTxt ? ' · ' + esc(scoreTxt) : '')
     + '</span></div><div class="eb">';
@@ -1133,8 +1133,8 @@ function recCardHtml(r, o) {
     // 整体判分（本批没给要点表）：说清楚"为什么只有总分和评语、没有逐点明细"，
     // 否则老师会以为是明细没加载出来
     + ((r.grading && r.grading.mode === 'free')
-      ? '<div class="freebar">按' + esc(r.subject_name || '学科') + '标准整体判分'
-        + (o.anon ? '' : '（本批未使用要点表，所以只有总分与评语）') + '</div>'
+      ? '<div class="freebar">通用批阅：按《' + esc(r.subject_name || '学科') + '》标准整体给分'
+        + (o.anon ? '' : '（本批没给答案要点，所以只有总分与评语）') + '</div>'
       : '')
     + (hasPieces
       ? piecesHtml(r)
