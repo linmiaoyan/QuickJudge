@@ -269,38 +269,68 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
           </div>
           <div style="font-size:11.5px;color:var(--text3,#999);margin-top:5px;line-height:1.45;">
             默认按方案分值（英语作文 25）；这次卷子不是这个分值，直接改右边数字，本批全部按它算。
+            要点判分的学科（政治 / 地理）由练习里的要点分值合计决定，不用填，选了练习会自动锁住。
           </div>
           <div id="subjNote" style="font-size:11.5px;color:#8a5300;background:#fff8ec;border:1px solid #f5d9a8;border-radius:8px;padding:6px 9px;margin-top:7px;line-height:1.5;display:none;"></div>
         </div>
 
-        <!-- 本批题目与批改备注：默认收起。不填就按卷面自动识别题干（多数情况够用）；
-             老师要精批、或这次的口径跟卷面印的不一样，才展开填一下。
+        <!-- 本批题目/评分标准 + 批改备注：默认收起。不填也能扫（作文按卷面识别题干），
+             但政治/地理这类"要点判分"学科必须选一份练习，扫之前会被拦下来。
              用 <details> 而不是弹窗：不想看的时候它只占一行，扫卷的主按钮位置不变。 -->
         <details id="promptBox" style="margin-top:12px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;background:#fbfcfd;">
           <summary style="cursor:pointer;font-size:12.5px;color:var(--text2);outline:none;">
-            📝 本批题目与批改备注<span style="color:var(--text3,#999);">（可选，不填就按卷面识别）</span>
+            📝 本批<span id="promptMode">题目</span>与批改备注<span style="color:var(--text3,#999);" id="promptHint">（可选，不填就按卷面识别）</span>
             <span id="promptBadge" style="display:none;margin-left:6px;padding:1px 6px;border-radius:9px;background:#e7f6ec;color:#1a7f37;border:1px solid #b7e0c4;font-size:11px;">已设置</span>
           </summary>
           <div style="margin-top:9px;">
-            <div style="display:flex;gap:8px;">
-              <select id="taskSel" style="flex:1 1 auto;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;"></select>
-              <button class="btn tiny" type="button" id="taskNewBtn">＋ 新建题目</button>
-            </div>
-            <div id="taskNewBox" style="display:none;margin-top:8px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#fff;">
-              <input id="taskNewTitle" type="text" maxlength="60" placeholder="题目名称，如：Unit 3 建议信（80 词）"
-                     style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12.5px;">
-              <textarea id="taskNewReqs" rows="4" placeholder="评分要点，一行一条，例如：&#10;1. 说明推荐的理由（至少两条）&#10;2. 提到活动的时间和地点&#10;3. 表达祝愿"
-                        style="width:100%;box-sizing:border-box;margin-top:6px;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12.5px;resize:vertical;"></textarea>
-              <div style="display:flex;gap:6px;margin-top:6px;">
-                <button class="btn tiny primary" type="button" id="taskNewSave">保存并使用</button>
-                <button class="btn tiny ghost" type="button" id="taskNewCancel">取消</button>
+            <!-- 英语作文：题干（可选） -->
+            <div id="essayTaskWrap">
+              <div style="display:flex;gap:8px;">
+                <select id="taskSel" style="flex:1 1 auto;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;"></select>
+                <button class="btn tiny" type="button" id="taskNewBtn">＋ 新建题目</button>
+              </div>
+              <div id="taskNewBox" style="display:none;margin-top:8px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#fff;">
+                <input id="taskNewTitle" type="text" maxlength="60" placeholder="题目名称，如：Unit 3 建议信（80 词）"
+                       style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12.5px;">
+                <textarea id="taskNewReqs" rows="4" placeholder="评分要点，一行一条，例如：&#10;1. 说明推荐的理由（至少两条）&#10;2. 提到活动的时间和地点&#10;3. 表达祝愿"
+                          style="width:100%;box-sizing:border-box;margin-top:6px;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12.5px;resize:vertical;"></textarea>
+                <div style="display:flex;gap:6px;margin-top:6px;">
+                  <button class="btn tiny primary" type="button" id="taskNewSave">保存并使用</button>
+                  <button class="btn tiny ghost" type="button" id="taskNewCancel">取消</button>
+                </div>
               </div>
             </div>
+
+            <!-- 政治/地理：练习＝参考答案 + 每题要点 + 每点分值（必填） -->
+            <div id="exerciseWrap" style="display:none;">
+              <div style="display:flex;gap:8px;">
+                <select id="exerciseSel" style="flex:1 1 auto;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;"></select>
+                <button class="btn tiny" type="button" id="exerciseNewBtn">＋ 新建练习</button>
+              </div>
+              <div id="exerciseMeta" style="font-size:11.5px;color:var(--text3,#999);margin-top:5px;line-height:1.5;"></div>
+
+              <div id="exerciseNewBox" style="display:none;margin-top:8px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#fff;">
+                <div style="display:flex;gap:6px;">
+                  <select id="exNewSubject" style="flex:0 0 132px;padding:7px 6px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12.5px;background:#fff;"></select>
+                  <input id="exNewTitle" type="text" maxlength="60" placeholder="练习名称，如：第 3 课 主观题（选必一）"
+                         style="flex:1 1 auto;min-width:0;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12.5px;">
+                </div>
+                <textarea id="exNewBody" rows="9" placeholder="把参考答案和要点粘进来，一行一条要点，分值写在行尾：&#10;&#10;1. 结合材料，说明我国人民代表大会制度的优势。（6分）&#10;答：人民代表大会制度是我国的根本政治制度……&#10;- 保障人民当家作主（2分）&#10;- 动员人民依法参与国家管理 2分&#10;- 保证国家机关协调高效运转 | 2"
+                          style="width:100%;box-sizing:border-box;margin-top:6px;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.7;resize:vertical;"></textarea>
+                <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+                  <button class="btn tiny" type="button" id="exPreviewBtn">解析预览</button>
+                  <button class="btn tiny primary" type="button" id="exSaveBtn">保存并使用</button>
+                  <button class="btn tiny ghost" type="button" id="exCancelBtn">取消</button>
+                </div>
+                <div id="exPreview" style="margin-top:8px;"></div>
+              </div>
+            </div>
+
             <label for="teacherNote" style="display:block;margin-top:9px;font-size:12px;color:var(--text2);">批改备注</label>
             <textarea id="teacherNote" rows="2" maxlength="300" placeholder="写一句话给批阅参考，例：这次只看第 2 段的建议部分；按中考标准评分，不扣书写分"
                       style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;resize:vertical;"></textarea>
             <div style="font-size:11.5px;color:var(--text3,#999);margin-top:4px;line-height:1.45;">
-              题目与备注跟着这一批卷子一起送去批阅，优先级高于卷面上印的要求；不填就完全按卷面判。
+              题目/评分标准与备注跟着这一批卷子一起送去批阅，优先级高于卷面上印的要求。
             </div>
           </div>
         </details>
@@ -508,8 +538,8 @@ async function loadContext() {
     }
   }
 
-  // 批阅方案下拉：自动批阅目前只接了英语作文这一套评阅契约，其余方案从下拉里拿掉并说明原因，
-  // 免得老师选了数学、扫完一叠纸才发现批出来是作文那套结构。
+  // 批阅方案下拉：只列能走「扫完即批」的方案。作文与要点判分是两套契约，
+  // 其余（数学、默写这类要逐份看过程/字形的）先不放开，免得扫完一叠纸才发现批出来不是想要的。
   const gsAll = (CTX.grading && CTX.grading.subjects) || [];
   const gs = gsAll.filter(s => s.auto_ok !== false);
   const skipped = gsAll.filter(s => s.auto_ok === false).map(s => s.name);
@@ -518,8 +548,8 @@ async function loadContext() {
     if (skipped.length) {
       noteEl.style.display = '';
       noteEl.innerHTML = '<b>暂不开放：</b>' + skipped.map(esc).join('、')
-        + '。自动批阅目前只接了英语作文的评阅规则，其他学科接好之前先不放出来；'
-        + '要批这些科目的卷子，请扫进来后在用户端点「评语 / 批阅」逐份手动批。';
+        + '。自动批阅目前接了作文（整篇按要点打等级）和要点判分（政治、地理这类逐点给分）两套规则，'
+        + '其他学科接好之前先不放出来；要批这些科目的卷子，请扫进来后在用户端点「评语 / 批阅」逐份手动批。';
     } else {
       noteEl.style.display = 'none';
       noteEl.innerHTML = '';
@@ -531,7 +561,11 @@ async function loadContext() {
     sel.innerHTML = gs.map(s => '<option value="' + esc(s.key) + '">' + esc(s.name) + '（满分 ' + esc(s.max_score) + '）</option>').join('')
       || '<option value="english_essay">英语作文（满分 25）</option>';
     sel.value = gs.some(s => s.key === saved) ? saved : (gs[0] ? gs[0].key : 'english_essay');
-    sel.onchange = () => { localStorage.setItem('qj_station_subject', sel.value); syncMaxScore(); };
+    sel.onchange = () => {
+      localStorage.setItem('qj_station_subject', sel.value);
+      syncMaxScore();
+      syncSubjectUi();     // 作文 ↔ 要点判分：切换「本批题目」和「本批练习」两块
+    };
     syncMaxScore();
   }
 
@@ -543,6 +577,7 @@ async function loadContext() {
     navigator.clipboard.writeText(b.dataset.copy).then(() => toast('已复制', 'ok'), () => toast('复制失败', 'err'));
   });
   renderTaskOptions();
+  syncSubjectUi();   // 按学科 kind 决定显示「本批题目」还是「本批练习」，并把练习下拉填好
   renderQueue();
 }
 function row(k, v) { return '<div class="row"><span>' + esc(k) + '</span><span>' + esc(v) + '</span></div>'; }
@@ -612,7 +647,7 @@ function readTeacherNote() {
 function syncPromptBadge() {
   const b = $('#promptBadge');
   if (!b) return;
-  b.style.display = (selectedTaskId() || readTeacherNote()) ? '' : 'none';
+  b.style.display = (selectedTaskId() || readTeacherNote() || selectedExerciseId()) ? '' : 'none';
 }
 function renderTaskOptions() {
   const sel = $('#taskSel');
@@ -642,8 +677,8 @@ if ($('#teacherNote')) {
   };
   syncPromptBadge();
 }
-// 上次填过题目或备注就自动展开，别让老师以为自己的设置丢了
-if ($('#promptBox') && (taskStore() || readTeacherNote())) $('#promptBox').open = true;
+// 上次填过题目/练习或备注就自动展开，别让老师以为自己的设置丢了
+if ($('#promptBox') && (taskStore() || exerciseStore() || readTeacherNote())) $('#promptBox').open = true;
 
 if ($('#taskNewBtn')) {
   $('#taskNewBtn').onclick = () => {
@@ -690,6 +725,263 @@ if ($('#taskNewSave')) {
   };
 }
 
+/* ---------------- 练习（要点判分学科：政治 / 地理 …） ---------------- */
+// 和英语作文的「题目」是两种东西，不能混：
+//   作文的题目 = 题干 + 评分要点，批出来是一个等级；
+//   练习       = 每道题的参考答案 + 一条条要点，每条要点有自己的分值，批出来是逐点累加分。
+// 所以这里不复用 #taskSel，单独一份数据、单独一个下拉。选哪一套由学科方案的 kind 决定，
+// 后续加历史/生物只要在方案里标 kind='points'，前端不用再改。
+let EX_EDIT_ID = '';
+
+function exerciseStore() {
+  try { return localStorage.getItem('qj_station_exercise') || ''; } catch (e) { return ''; }
+}
+function selectedExerciseId() {
+  const sel = $('#exerciseSel');
+  return (sel && sel.value) || '';
+}
+function currentSubjectMeta() {
+  const gs = (CTX.grading && CTX.grading.subjects) || [];
+  return gs.find(s => s.key === currentSubjectKey()) || {};
+}
+function isPointsSubject() {
+  return String(currentSubjectMeta().kind || '') === 'points';
+}
+function currentExerciseSummary() {
+  const id = selectedExerciseId();
+  if (!id) return null;
+  return (CTX.exercises || []).find(e => e && e.id === id) || null;
+}
+
+// 满分在要点判分类学科里不是老师填的，是练习里各要点分值加出来的总数。
+// 后端也会强制用练习总分覆盖，这里让输入框跟着显示并锁住，避免「填了满分却不生效」。
+function syncExerciseMaxScore() {
+  const el = $('#maxScore');
+  if (!el) return;
+  const ex = currentExerciseSummary();
+  if (isPointsSubject() && ex) {
+    el.value = ex.max_score;
+    el.readOnly = true;
+    el.title = '满分 = 练习里各要点分值合计（' + ex.max_score + ' 分）；要改请改练习里的分值';
+  } else {
+    el.readOnly = false;
+    el.title = '这一批卷子的满分；默认跟着上面的方案走，改了就按你填的算';
+  }
+}
+
+function renderExerciseMeta() {
+  const el = $('#exerciseMeta');
+  if (!el) return;
+  const ex = currentExerciseSummary();
+  if (!ex) {
+    const any = (CTX.exercises || []).filter(e => e && e.subject === currentSubjectKey()).length;
+    el.innerHTML = any
+      ? '必须选一份练习：这批卷子按练习里的要点逐条判分，达到要点得分，写错别字不得分。'
+      : '这个学科还没有练习。点右边「＋ 新建练习」，把参考答案和每题要点粘进来（分值写在行尾）。';
+    return;
+  }
+  el.innerHTML = '📋 ' + esc(ex.title || '未命名练习') + ' · ' + (ex.question_count || 0) + ' 题 / '
+    + (ex.point_count || 0) + ' 个要点 · 总分 ' + ex.max_score
+    + ' · <a href="#" id="exEditLink" style="color:#2f6fd0;">查看 / 修改</a>';
+  const lk = $('#exEditLink');
+  if (lk) lk.onclick = (ev) => { ev.preventDefault(); openExerciseForEdit(ex.id); };
+}
+
+function renderExerciseOptions() {
+  const sel = $('#exerciseSel');
+  if (!sel) return;
+  const subj = currentSubjectKey();
+  const usable = (CTX.exercises || [])
+    .filter(e => e && e.id && (!e.subject || e.subject === subj))
+    .sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')));
+  const keep = usable.some(e => e.id === sel.value) ? sel.value : exerciseStore();
+  sel.innerHTML = '<option value="">— 选择本批练习（必选）—</option>'
+    + usable.map(e => '<option value="' + esc(e.id) + '">' + esc(e.title || '未命名练习')
+        + '（' + esc(e.max_score) + ' 分）</option>').join('');
+  sel.value = usable.some(e => e.id === keep) ? keep : '';
+  renderExerciseMeta();
+  syncExerciseMaxScore();
+}
+
+// 学科方案一换，「本批题目（作文）」和「本批练习（要点判分）」跟着换，标题文案也不用老师猜
+function syncSubjectUi() {
+  const pts = isPointsSubject();
+  const ew = $('#essayTaskWrap'), xw = $('#exerciseWrap');
+  if (ew) ew.style.display = pts ? 'none' : '';
+  if (xw) xw.style.display = pts ? '' : 'none';
+  const pm = $('#promptMode'), ph = $('#promptHint');
+  if (pm) pm.textContent = pts ? '练习' : '题目';
+  if (ph) ph.textContent = pts ? '（必选，按要点逐条判分）' : '（可选，不填就按卷面识别题干）';
+  renderExerciseOptions();
+  syncPromptBadge();
+}
+
+function renderExSubjectOptions() {
+  const sel = $('#exNewSubject');
+  if (!sel) return;
+  const pts = ((CTX.grading && CTX.grading.subjects) || []).filter(s => s.kind === 'points');
+  const keep = sel.value || (isPointsSubject() ? currentSubjectKey() : (pts[0] ? pts[0].key : ''));
+  sel.innerHTML = pts.map(s => '<option value="' + esc(s.key) + '">' + esc(s.name) + '</option>').join('');
+  sel.value = pts.some(s => s.key === keep) ? keep : (pts[0] ? pts[0].key : '');
+}
+
+function showExerciseBox(on) {
+  const box = $('#exerciseNewBox');
+  if (!box) return;
+  box.style.display = on ? '' : 'none';
+  if (on) {
+    renderExSubjectOptions();
+    if ($('#exNewTitle')) $('#exNewTitle').focus();
+  } else {
+    EX_EDIT_ID = '';
+    if ($('#exNewTitle')) $('#exNewTitle').value = '';
+    if ($('#exNewBody')) $('#exNewBody').value = '';
+    const pv = $('#exPreview');
+    if (pv) pv.innerHTML = '';
+  }
+}
+
+async function openExerciseForEdit(id) {
+  try {
+    const r = await api('/api/exercises/' + encodeURIComponent(id));
+    const e = r.exercise || {};
+    showExerciseBox(true);
+    EX_EDIT_ID = e.id || '';
+    renderExSubjectOptions();
+    if ($('#exNewSubject')) $('#exNewSubject').value = e.subject || '';
+    if ($('#exNewTitle')) $('#exNewTitle').value = e.title || '';
+    if ($('#exNewBody')) $('#exNewBody').value = e.body || '';
+    if ($('#exSaveBtn')) $('#exSaveBtn').textContent = '保存修改';
+    const pv = $('#exPreview');
+    if (pv) pv.innerHTML = '';
+  } catch (e) {
+    toast('读取练习失败：' + e.message, 'err');
+  }
+}
+
+// 解析结果必须让老师自己过一眼：分值写在行尾、同一条要点用分号拆开这类写法，
+// 机器猜错了老师一眼能看出来，改一行再存就行。
+function renderExPreview(p) {
+  const el = $('#exPreview');
+  if (!el) return;
+  const qs = p.questions || [], ws = p.warnings || [];
+  let html = '<div style="padding:8px 10px;border:1px solid #cfe6d6;background:#f4fbf6;border-radius:8px;font-size:12.5px;">'
+    + '解析出 <b>' + qs.length + '</b> 题 · <b>' + (p.point_count || 0) + '</b> 个要点 · 总分 <b>'
+    + (p.max_score || 0) + '</b> 分</div>';
+  if (ws.length) {
+    html += '<div style="margin-top:6px;padding:7px 10px;border:1px solid #f5d9a8;background:#fff8ec;'
+      + 'border-radius:8px;color:#8a5300;font-size:12px;line-height:1.6;">'
+      + ws.map(x => '· ' + esc(x)).join('<br>') + '</div>';
+  }
+  html += '<div style="margin-top:6px;max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff;">'
+    + qs.map(q => '<div style="padding:7px 10px;border-bottom:1px solid #f2f2f2;">'
+        + '<div style="font-weight:600;font-size:12.5px;">第 ' + esc(q.no) + ' 题（' + esc(q.max) + ' 分）</div>'
+        + (q.stem ? '<div style="font-size:12px;color:var(--text2,#666);margin-top:2px;line-height:1.55;">'
+            + esc(q.stem).replace(/\n/g, '<br>') + '</div>' : '')
+        + (q.answer ? '<div style="font-size:12px;color:#3a6b4a;margin-top:3px;line-height:1.55;">参考答案：'
+            + esc(q.answer).replace(/\n/g, '<br>') + '</div>' : '')
+        + (q.points || []).map(pt => '<div style="font-size:12px;color:var(--text2,#666);margin-top:2px;">'
+            + '· ' + esc(pt.text) + ' <span style="color:#b26a00;">' + esc(pt.score) + ' 分</span></div>').join('')
+        + '</div>').join('')
+    + '</div>';
+  el.innerHTML = html;
+}
+
+function exercisePayload(extra) {
+  const subjEl = $('#exNewSubject');
+  const subject = (subjEl && subjEl.value) || currentSubjectKey();
+  const body = {
+    subject: subject,
+    title: String(($('#exNewTitle') || {}).value || '').trim(),
+    body: String(($('#exNewBody') || {}).value || '')
+  };
+  if (EX_EDIT_ID) body.id = EX_EDIT_ID;
+  if (extra) Object.keys(extra).forEach(k => { body[k] = extra[k]; });
+  return body;
+}
+
+if ($('#exerciseNewBtn')) {
+  $('#exerciseNewBtn').onclick = () => {
+    const box = $('#exerciseNewBox');
+    const show = !box || box.style.display === 'none';
+    if (show && $('#exSaveBtn')) $('#exSaveBtn').textContent = '保存并使用';
+    showExerciseBox(show);
+    if (show) renderExSubjectOptions();
+  };
+}
+if ($('#exCancelBtn')) $('#exCancelBtn').onclick = () => showExerciseBox(false);
+
+if ($('#exPreviewBtn')) {
+  $('#exPreviewBtn').onclick = async () => {
+    const btn = $('#exPreviewBtn');
+    const body = exercisePayload({ dry_run: true });
+    if (!body.body.trim()) { toast('先把参考答案和要点粘进来', 'err'); return; }
+    btn.disabled = true;
+    try {
+      const r = await api('/api/exercises', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      });
+      renderExPreview(r.parsed || {});
+    } catch (e) {
+      const pv = $('#exPreview');
+      if (pv) {
+        pv.innerHTML = '<div style="padding:8px 10px;border:1px solid #f3c2c2;background:#fdf4f4;'
+          + 'border-radius:8px;color:#a33;font-size:12px;line-height:1.6;">' + esc(e.message)
+          + ((e.warnings || []).length ? '<br>' + e.warnings.map(esc).join('<br>') : '') + '</div>';
+      } else {
+        toast(e.message, 'err');
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  };
+}
+
+if ($('#exSaveBtn')) {
+  $('#exSaveBtn').onclick = async () => {
+    const btn = $('#exSaveBtn');
+    const isEdit = !!EX_EDIT_ID;   // showExerciseBox(false) 会清掉 EX_EDIT_ID，先存一份
+    const body = exercisePayload();
+    if (!body.body.trim()) { toast('先把参考答案和要点粘进来', 'err'); return; }
+    btn.disabled = true;
+    try {
+      const r = await api('/api/exercises', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      });
+      const ex = r.exercise || {};
+      const sum = r.summary || {};
+      CTX.exercises = (CTX.exercises || []).filter(e => e && e.id !== sum.id).concat([sum]);
+      showExerciseBox(false);
+      renderExerciseOptions();
+      const sel = $('#exerciseSel');
+      if (sel) {
+        sel.value = sum.id;
+        try { localStorage.setItem('qj_station_exercise', sum.id); } catch (e) {}
+      }
+      renderExerciseMeta();
+      syncExerciseMaxScore();
+      syncPromptBadge();
+      if ($('#promptBox')) $('#promptBox').open = true;
+      toast((isEdit ? '已更新' : '已建好') + '「' + (ex.title || '练习') + '」：'
+        + (sum.question_count || 0) + ' 题 / ' + (sum.point_count || 0) + ' 个要点 / 总分 ' + (sum.max_score || 0)
+        + '，本批按它判分', 'ok');
+    } catch (e) {
+      toast('保存失败：' + e.message, 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  };
+}
+
+if ($('#exerciseSel')) {
+  $('#exerciseSel').onchange = () => {
+    try { localStorage.setItem('qj_station_exercise', selectedExerciseId()); } catch (e) {}
+    renderExerciseMeta();
+    syncExerciseMaxScore();
+    syncPromptBadge();
+  };
+}
+
 /* ---------------- 扫描 / 导入 ---------------- */
 let JOB_TIMER = null;
 
@@ -707,7 +999,10 @@ function renderJob(j) {
   panel.classList.toggle('err', err);
   const total = job.total || 0, dn = job.done || 0;
   const pct = done ? 100 : (total ? Math.round(dn / total * 100) : 0);
-  $('#jobStage').textContent = job.message || STAGE_TEXT[job.stage] || '处理中…';
+  // 要点判分批次读的是「学号 + 作答」，不是作文正文；文案要跟着换，否则老师会以为批错了
+  const stx = Object.assign({}, STAGE_TEXT);
+  if (j.exercise) { stx.reading = '识别学号与作答'; stx.grading = '逐点判分'; }
+  $('#jobStage').textContent = job.message || stx[job.stage] || '处理中…';
   $('#jobPct').textContent = pct + '%';
   $('#jobBar').style.width = pct + '%';
 
@@ -719,14 +1014,21 @@ function renderJob(j) {
     const warn = r.sid_note
       ? `<span title="${esc(r.sid_note)}" style="margin-left:6px;padding:1px 6px;border-radius:9px;background:#fff4e5;color:#b26a00;border:1px solid #ffd8a8;font-size:11px;">待确认</span>`
       : '';
-    return `<div class="jobitem ok"><span class="dot"></span><span class="nm">${esc(r.student_id || '—')} ${esc(r.name || '')}${warn}</span><span>${esc(r.score == null ? '' : r.score)}${esc(r.level ? ' · ' + r.level : '')}</span></div>`;
+    // 要点判分直接给"得分/满分"，作文还是只给等级——两种卷子的分数含义不一样
+    const sc = r.score == null ? '' : (r.max_total ? (r.score + '/' + r.max_total) : String(r.score));
+    const lv = (!r.max_total && r.level) ? ' · ' + r.level : '';
+    return `<div class="jobitem ok"><span class="dot"></span><span class="nm">${esc(r.student_id || '—')} ${esc(r.name || '')}${warn}</span><span>${esc(sc)}${esc(lv)}</span></div>`;
   }).join('');
 
   const foot = $('#jobFoot');
   if (done) {
     const n = (j.record_ids || []).length;
+    const byEx = j.exercise
+      ? '<div style="margin-top:4px;color:var(--text3,#999);">判分依据：《' + esc(j.exercise.title || '练习')
+        + '》' + (j.exercise.point_count || 0) + ' 个要点 / 满分 ' + esc(j.exercise.max_score) + '</div>'
+      : '';
     foot.style.display = 'block';
-    foot.innerHTML = `已归档 <b>${n}</b> 份 · <a href="/portal" target="_blank" rel="noopener">去用户端查看 →</a>`;
+    foot.innerHTML = `已归档 <b>${n}</b> 份 · <a href="/portal" target="_blank" rel="noopener">去用户端查看 →</a>` + byEx;
   } else if (err) {
     foot.style.display = 'block';
     foot.innerHTML = '批阅中断：' + esc(job.message || '未知原因') +
@@ -734,7 +1036,12 @@ function renderJob(j) {
     const rb = $('#jobRetry');
     if (rb) rb.onclick = async (ev) => {
       ev.preventDefault();
-      await api('/api/station/jobs/' + j.id + '/retry', { method: 'POST' });
+      // 把当前选中的练习一起带上：要点判分的批次报「没选练习」时，
+      // 老师补选完点重试就能直接判，不用把纸重新放回扫描仪。
+      await api('/api/station/jobs/' + j.id + '/retry', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exercise_id: isPointsSubject() ? selectedExerciseId() : '' })
+      });
       foot.style.display = 'none';
       pollJob(j.id);
       if (!JOB_TIMER) JOB_TIMER = setInterval(() => pollJob(j.id), 2500);
@@ -779,7 +1086,8 @@ $('#scanBtn').onclick = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         subject: currentSubjectKey(), max_score: readMaxScore(), auto: !manual,
-        task_id: selectedTaskId(), teacher_note: readTeacherNote()
+        task_id: selectedTaskId(), exercise_id: isPointsSubject() ? selectedExerciseId() : '',
+        teacher_note: readTeacherNote()
       })
     });
     if (r.batch && r.batch.id) {
@@ -930,6 +1238,7 @@ $('#importInput').onchange = async (ev) => {
   fd.append('subject', currentSubjectKey());
   fd.append('max_score', String(readMaxScore()));
   if (selectedTaskId()) fd.append('task_id', selectedTaskId());
+  if (isPointsSubject() && selectedExerciseId()) fd.append('exercise_id', selectedExerciseId());
   if (readTeacherNote()) fd.append('teacher_note', readTeacherNote());
   try {
     const r = await api('/api/station/import', { method: 'POST', body: fd });

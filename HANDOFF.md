@@ -1039,3 +1039,144 @@ secretbox.get_secret('LLM_API_KEY')                 # 自动解密，无需人�
   `python tools/seal_secrets.py --shred-backups --yes` 删掉。
 - 换 Windows 账户/机器后 `--status` 会明确报"解不开"，此时的修复动作是 `--set` 重灌，
   不是去找回旧密文（旧密文在新账户下永远打不开）。
+
+## 32. 2026-10-30 08:35：政治 / 地理「要点判分」模块（学科路由 + 逐点给分）
+
+### 32.1 需求原文与拆解
+> 1. 教师会给每一个练习输入简单的参考答案和答题要点。
+> 2. 我传入卷子，教师输入改卷要点。
+> 3. 达到要点则得分，不达到或者要点中有错别字不得分。
+> 后续还会有很多学科，所以每张卷子进来的时候你要区分好具体是哪个学科，做好简单的路由。
+
+拆成四件事：**练习（评分标准）** → **学科识别** → **按 kind 路由** → **逐点判分与归档**。
+关键是第 3 句：判分不是"整体印象给分"，而是"逐条要点命中 → 分值累加"，
+这与英语作文那套（整篇打等级）在数据结构、提示词、归档字段上全都不一样，
+所以用**批阅契约 kind** 区分，而不是在代码里写 `if subject == 'politics'`。
+
+### 32.2 批阅契约 kind（路由的唯一依据）
+| kind | 含义 | 学科 | 流水线 |
+|---|---|---|---|
+| `essay` | 整篇作文，按要点打等级 | 英语作文 | `_auto_pipeline` |
+| `points` | 逐条要点判命中，按要点分值累加 | 政治/道法、地理（后续历史、生物…） | `_points_pipeline` |
+| `generic` | 只能手动逐份批 | 数学、默写、语文作文、通用 | 不开放自动批 |
+
+- 定义在 `DEFAULT_GRADING_CONFIG` 每个方案里，`load_grading_config()` 对老配置
+  `setdefault('kind', 'generic')`，所以**老 data/config/grading_config.json 不用迁移**；
+- `subject_kind(key)` / `auto_pipeline_supports(key)` 取代了原来的
+  `AUTO_PIPELINE_SUBJECTS = ('english_essay',)` 元组；
+- `grading_subject_options()` 把 `kind` / `need_exercise` / `auto_ok` 下发前端，
+  前端按 kind 切 UI，**不再硬编码学科名**。
+
+**新增一门要点判分学科 = 在 `DEFAULT_GRADING_CONFIG` 加一项 `kind='points'` + 写提示词**，
+前端（扫描端「本批练习」、门户「要点判分明细」）自动生效，不用改代码。
+
+### 32.3 练习（评分标准）数据层
+- 文件：`data/config/exercises.json`（`EXERCISES_FILE`，原子写）；
+- 结构：`{id, subject, title, body(老师粘的原文), questions[], max_score, point_count, created_at, updated_at}`；
+- 一题：`{no, stem, answer, points:[{text, score}], max}`；`max` = 该题要点分值合计；
+- 接口：`GET/POST /api/exercises`（POST 支持 `dry_run`）、`GET/DELETE /api/exercises/<id>`；
+- POST 只收 `kind='points'` 的学科，其余 400；解析不出题目也 400（带 `warnings`）。
+
+**解析器 `parse_exercise_body()`**（老师手写的东西必须宽容）：
+| 认得出 | 例子 |
+|---|---|
+| 题号 | `1.` `1、` `（1）` `第1题` `一、` |
+| 参考答案 | `答：` `答案：` `参考答案:` |
+| 要点 | `要点：`、行首 `- － — · • * +`、或题号后的普通行 |
+| 分值 | `（2分）` `2分` `| 2` `: 2` ` 2`（空格结尾，最后才试） |
+| 多要点同行 | `要点A（1分）；要点B（1分）` |
+
+分值优先级：**要点分值合计** > 题中标称分（不一致时报警告并以后者为准）。
+只有参考答案没有要点 → 退化成"对照答案整体判"并警告；两者都没有 → 跳过该题并警告。
+`dry_run` 就是给老师看这份解析结果（几题/几点/总分/警告）用的——分值写在行尾这种写法，
+机器猜错了必须让他一眼看见。
+
+### 32.4 判分：分数由服务端算，绝不信模型算术
+`_norm_points_result(data, exercise)`：
+- 按**老师的要点表**逐条遍历（不是按模型返回的顺序），模型只负责判 `hit/typo/evidence`；
+- `points` 数组按下标一一对应；数量不一致 → 记 `align_warnings`；
+- **错别字规则落到代码里**：`hit && typo` → 强制 `hit=False`、该要点 0 分，并记警告。
+  不这样做模型会"两头讨好"（说命中又报错字），而老师的要求是"要点中有错别字不得分"；
+- 每题得分 `min(各命中要点分值之和, 题满分)`，总分 `min(Σ, 卷满分)`，全部 `round(x, 2)`；
+- 输出：`{questions[{no,stem,answer,max,score,points[],hit_count,point_count,note,comment,missing}],
+  total, max_total, level, comment, strengths, issues, illegible, text, student, align_warnings}`。
+
+`POINTS_PROMPT_TEMPLATE` 里把三件事写死：要点表原样喂进去、`points` 顺序/数量必须与标准一致、
+`hit` 只填 true/false（分数不让它算）。老师的批改备注 `{teacher_note}` 拼接在末尾、优先级最高。
+
+### 32.5 流水线与路由
+`_run_pipeline(batch_id)` 是**唯一入口**（扫描/导入/重试/崩溃恢复都从这里进）：
+```
+subject == 'auto' → _resolve_auto_subject() 定成具体学科
+kind = subject_kind(subject)
+  essay  → _auto_pipeline
+  points → _points_pipeline
+  其他   → 落盘 error（附 auto_pipeline_reject_message）
+```
+`_points_pipeline`：
+1. 取练习（没有 → 报错，见 32.8）；`batch_max = exercise_total_max(exercise)`；
+2. `_read_headers_and_assign()`（与作文共用，读学号/姓名/班级）；
+3. 并行 `_vision_grade_points()`，**每判一份 `_save_partial` 落盘**，重启/中断可续批；
+4. 失败补跑一次（并发下多为限流/超时）；
+5. 归档：`points`、`points_meta{exercise_title,point_count,hit_count,align_warnings}`、
+   `max_score=练习总分`、`essay=None`、`grading{items,total,max_total,level,exercise_id}`；
+6. 幂等：`_records_by_staging_item()` 命中就复用原档案，不建第二份。
+
+### 32.6 学科自动识别（`SUBJECT_AUTO`）
+- 扫描端方案下拉里多一项「自动识别学科」（`subject='auto'`）；
+- `_detect_subject()`：只认**第一张非空白页**（同一批几乎必然同科，逐页识别等于成本翻倍），
+  长边 1400、`max_tokens=300`、temperature=0，返回 `(key, confidence, evidence)`；
+- 别名表 `_DETECT_ALIAS` 兜住模型爱写的同义词；认不出/认错学科 → 记 `subject_detect_error`，
+  `confidence < 0.5` 时**仍然采信**但把"可能认错"挂到批次上，扫描端和门户都能看到；
+- 结果写回 `b['subject']` / `b['subject_detected']`，之后一切照常。
+
+### 32.7 扫描端交互（`templates/station.html`）
+- 「📝 本批X与批改备注」块按 kind 一分为二：
+  `#essayTaskWrap`（作文选题干）/ `#exerciseWrap`（要点判分选练习）；`syncSubjectUi()` 切换；
+- `#exerciseSel` 只列当前学科的练习；`#exerciseMeta` 显示「N 题 / M 个要点 / 总分 X」+ 查看修改；
+- 「＋新建练习」：学科 + 名称 + 正文（`解析预览` 走 `dry_run`，`保存并使用` 落盘并选中）；
+- **满分输入框在要点判分学科里自动上锁**并显示练习总分——后端会用练习总分覆盖，
+  不锁住就会重演"填了满分却不生效"的困惑（§29 同类问题）；
+- 请求体带 `exercise_id`；`_precheck_auto_batch()` 在**驱动扫描仪之前**就挡掉"没选练习"。
+- 任务列表里要点判分显示 `得分/满分`，完成文案带「判分依据：《练习名》N 个要点 / 满分 X」。
+
+### 32.8 出问题时的两条可操作路径
+| 情形 | 提示 |
+|---|---|
+| 自动认成政治但没选练习 | 「这批卷子认成「政治 / 道法」，按要点判分需要先选一份练习…选完点**重试本批**——不用重新扫」 |
+| 绑定的练习被删了 | 「本批绑定的练习已不存在（可能被删了）…重新选一份后点重试」 |
+
+为此 `POST /api/station/jobs/<id>/retry` 接受可选 `exercise_id`：补选练习后直接换绑重试，
+**不要求老师把纸重新放回扫描仪**（卷子已经扫进来了，重扫纯属折腾）。
+
+### 32.9 门户展示（`templates/portal.html`）
+- `pointsHtml(r)`：按题逐点摊开，`✓ 得分 / ✗ 未得分`、每条要点右侧 `得/满分`、
+  错别字要点带红色 `错别字 当家做主 → 当家作主` 标签、`依据：`显示卷面原文；
+  末尾附「识别到的作答」供对照；
+- 学生端/教师端都渲染（老师要核对，学生要知道自己哪条没写）；
+- `errStats()` 扩到要点判分：平均分 + **要点命中率** + **「未得分最多的要点」Top5**
+  （某条要点 30 份里 28 份没写，多半是没讲到，讲评比逐个学生看更有用）。
+
+### 32.10 验证记录（2026-10-30）
+隔离环境（把 `app.py` 复制到 `temp/pttest/`，`DATA_DIR` 因此落在临时目录，不碰真实档案）跑
+`temp/pttest_test.py`，30 项全绿：
+- 解析：2 题 / 5 要点 / 10 分；每要点 2 分；提示词含题号、参考答案、`—— 2 分`；
+- 算分：模型报 `total=99` → 服务端算成 **8**；错别字那份 `hit` 被压成 0 分 → 该题 2 分、
+  总分 **6**，并产生「已按不得分处理」警告；
+- 归档：2 份记录、`score_text` `8/10` 与 `6/10`、`max_score=10`、`essay=None`、
+  `points` 两题、`points_meta.exercise_title`、`grading.items`、`teacher_note` 均正确；
+- 路由：`subject='auto'` → 识别 `politics` → 走要点流水线 → done；
+- 缺练习：状态 error，提示含「练习」「重试」；
+- 真实服务（`temp/smoke_live.py`，只读）：`/api/station/context` 里政治/地理 `kind=points`、
+  `need_exercise=true`，作文仍 `kind=essay`；`dry_run` 解析不落盘；作文学科 POST 被拒 400；
+  `/portal`、`/station` 均含新渲染代码；`_code_stale_info()` 不再报陈旧。
+
+### 32.11 遗留与注意
+- **要点分值写错不会自动纠正**：`max_score` 完全由老师给的要点分值决定，
+  这也是为什么 `dry_run` 预览必须让老师确认一眼；
+- `points_meta.hit_count` 只统计"这份卷子命中几点"，用于门户顶部与共性分析，
+  不是分数依据（分数看 `total`）；
+- 「要点中有错别字不得分」只对**该条要点**生效，不影响同题其他要点；
+  若老师的本意是"整题作废"，应该在要点里把该点写成独立要点再判；
+- 同一份练习被多批共用时，`max_score` 随之固定——改练习分值会让新旧批次口径不同，
+  门户按记录里的 `max_score` 各自显示，不会串。
