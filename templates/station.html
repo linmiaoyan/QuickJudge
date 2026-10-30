@@ -584,8 +584,8 @@ async function loadContext() {
   // 只列能「扫完即批」的方案。英语作文之外都走通用批阅，所以这里现在基本是全量；
   // 配置里没登记的学科不列（批不了，列出来只会让人选了才发现没反应）。
   const gs = gsAll.filter(s => s.auto_ok !== false);
-  // 以前这里会挂一条「暂不开放：数学、默写…」的说明。现在没有"暂不开放"这回事了，
-  // 数学/默写/语文作文都走通用批阅，这条提示连同它的存在理由一起删掉。
+  // 这里原本会挂一条"数学、默写等学科未开放自动批阅"的橙色提示。
+  // 现在英语作文之外都走通用批阅，没有未开放的学科了，提示连同它的存在理由一起删掉。
   const noteEl = $('#subjNote');
   if (noteEl) {
     noteEl.style.display = 'none';
@@ -930,8 +930,8 @@ function syncSubjectUi() {
   const ew = $('#essayTaskWrap'), xw = $('#exerciseWrap');
   if (ew) ew.style.display = pts ? 'none' : '';
   if (xw) xw.style.display = pts ? '' : 'none';
-  // 标题就是「批改备注」，不再随学科改成「本批题目 / 本批练习」——
-  // 老师要的是"写一句怎么判"，不是先弄懂我们内部管这叫什么
+  // summary 只有「批改备注」一个标题，不再随学科改名——老师要的是"写一句怎么判"，
+  // 不是先弄懂我们内部把这块叫什么名字
   const ph = $('#promptHint');
   if (ph) {
     ph.textContent = pts
