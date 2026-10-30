@@ -12,7 +12,7 @@ import string
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timedelta
 
 try:
     from dotenv import load_dotenv
@@ -119,9 +119,64 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 app.secret_key = (secretbox.get_secret('FLASK_SECRET_KEY')
                   or 'scan-biyue-dev-secret-key-change-in-production')
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# 会话别再随手过期：扫描工作站天天用，隔一夜就要重新登录纯属添堵。
+# 真正的安全边界不是「多久没登录」，而是「谁坐在这台机器前」——设备本身由老师保管。
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=365)
 # 上传上限：扫描图/答题卡通常 1–3MB，留足余量即可；不设会被超大文件打满内存与磁盘。
 app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('QJ_MAX_UPLOAD_MB', '64') or 64) * 1024 * 1024
 CORS(app, supports_credentials=True)
+
+# ===== 本机免登录 =====
+# 扫描端只在这台电脑上用，登录一次之后不该再拦人：老师半夜改完卷子、第二天早上
+# 打开还要输一遍密码，只会逼着大家把密码写在显示器上。
+# 做法不是「关掉鉴权」（局域网里别的设备照样要登录），而是：**请求来自本机**时
+# 自动套上管理员身份；远程设备一律照旧。
+# 显式点过「退出登录」的，用 session 里的 local_no_auto 记住，不再自动登录——否则
+# 退出按钮按下去立刻又被登回来，比不退出更让人困惑。
+_LOCAL_AUTO_KEY = 'local_no_auto'
+
+
+def _local_admin_user():
+    """本机自动登录时用哪个账号：优先 admin 角色，其次 id 为 admin 的账号。"""
+    try:
+        users = load_users()
+    except Exception:
+        return None
+    admins = [u for u in users if str(u.get('role') or '') == 'admin']
+    if admins:
+        return admins[0]
+    for u in users:
+        if str(u.get('id') or '').lower() == 'admin':
+            return u
+    return None
+
+
+@app.before_request
+def _local_auto_login():
+    """本机请求未登录时自动以管理员身份进入（见上方说明）。"""
+    if session.get('user_id') or session.get(_LOCAL_AUTO_KEY):
+        return None
+    # 退出/本地一键进入这两个动作自己就是「登录态变更」，别先自动登录再被清掉
+    if request.path in ('/api/logout', '/api/local_login'):
+        return None
+    try:
+        if not _is_local_request():
+            return None
+    except Exception:
+        return None
+    u = _local_admin_user()
+    if not u:
+        return None
+    session.permanent = True
+    session['user_id'] = u.get('id')
+    session['user_name'] = u.get('name') or u.get('id')
+    session['user_role'] = 'admin'
+    session['local_auto'] = True
+    try:
+        print('本机自动登录：%s（%s）' % (u.get('id'), request.path))
+    except Exception:
+        pass
+    return None
 
 # ===== 统一鉴权：旧版接口兜底 =====
 # 历史遗留的 /api/image、/api/file(DELETE)、/api/vision_grade、/api/class_center 等接口
@@ -130,6 +185,8 @@ CORS(app, supports_credentials=True)
 # 这里统一兜底：除登录相关、扫描端（自带「仅本机」闸门）、用户端（逐条校验角色）之外，
 # 其余 /api/* 一律要求已登录。
 _PUBLIC_API = {'/api/login', '/api/logout', '/api/me',
+               # 本机一键进入：只在请求来自本机时生效，远程照旧要账号密码
+               '/api/local_login',
                '/api/register_teacher', '/api/invite_code/validate',
                # 强制解锁是卡纸后的应急出口：扫描工作站可能未登录也要能用，
                # 所以放进白名单，但函数内部仍会对"非本机且非教师"的请求返回 403。
@@ -332,6 +389,8 @@ def login():
     users = load_users()
     for u in users:
         if str(u.get('id', '')) == uid and str(u.get('password', '')) == password:
+            session.permanent = True          # 别再跟着浏览器一起过期
+            session.pop(_LOCAL_AUTO_KEY, None)  # 手动登录＝重新授权，本机自动登录恢复
             session['user_id'] = u.get('id')
             session['user_name'] = u.get('name', uid)
             session['user_role'] = u.get('role', 'teacher')
@@ -344,11 +403,41 @@ def login():
             })
     return jsonify({'error': '账号或密码错误'}), 401
 
+@app.route('/api/local_login', methods=['POST'])
+def local_login():
+    """本机一键进入（仅本机）：退出登录后想恢复自动登录时用。"""
+    if not _is_local_request():
+        return jsonify({'error': '仅限本机操作'}), 403
+    u = _local_admin_user()
+    if not u:
+        return jsonify({'error': '没有管理员账号，请用账号密码登录'}), 404
+    session.clear()
+    session.permanent = True
+    session['user_id'] = u.get('id')
+    session['user_name'] = u.get('name') or u.get('id')
+    session['user_role'] = 'admin'
+    session['local_auto'] = True
+    return jsonify({'user': {'id': u.get('id'), 'name': u.get('name') or u.get('id'),
+                             'role': 'admin'}})
+
+
 @app.route('/api/logout', methods=['POST'])
 def logout():
-    """退出登录"""
+    """退出登录。
+
+    本机会自动登录（见 _local_auto_login），所以退出后必须留个「这次是主动退的」标记，
+    否则下一次请求又被自动登回来，退出等于没退。
+    """
+    was_local = False
+    try:
+        was_local = _is_local_request()
+    except Exception:
+        pass
     session.clear()
-    return jsonify({'msg': '已退出'})
+    if was_local:
+        session[_LOCAL_AUTO_KEY] = True
+        session.permanent = True
+    return jsonify({'msg': '已退出', 'local_auto_suppressed': was_local})
 
 
 @app.route('/api/change_password', methods=['POST'])
@@ -751,13 +840,19 @@ def task_requirement_lines(task):
 #   一道题 → 参考答案（给模型理解题意）+ 若干要点（每点带分值）
 # 判分时逐点判 hit/partial/miss，按点累加，不问文采、不给同情分。
 #
-# 格式故意做得"贴着老师原来的写法"，不需要学新工具（一行一条要点，分值写在行尾）：
+# 格式故意做得"贴着老师原来的写法"，不需要学新工具：
 #   1. 结合材料，说明我国人民代表大会制度的优势。（6分）
 #   答：人民代表大会制度是我国的根本政治制度……
 #   - 保障人民当家作主（2分）
 #   - 动员人民依法参与国家管理 2分
 #   - 保证国家机关协调高效运转 | 2
 # 分值三种写法都认：括号、行尾「N分」、竖线/冒号后跟数字；不写默认 1 分。
+#
+# 更省事的一条路：**直接粘答案原文**。老师手上多是这种文本——
+#   16表格内填空题 答案【答案】①坚持以人民为中心  ②坚持全面深化改革  ③坚持全面依法治国
+# 没有「- 」、没有分值，但 ①②③ 一条就是一个要点，解析器认这个写法，
+# 每点按 1 分计（老师想改分值再在行尾补数字）。要求老师"写严谨的要点"是把成本
+# 转嫁给最忙的人，不该这样。
 
 def load_exercises():
     """读练习列表。文件不存在＝还没有人建过，返回空列表（不是错误）。"""
@@ -816,12 +911,54 @@ def exercise_summary(exercise):
 
 _CN_DIGITS = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
               '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
-# 题号行：1.  1、  1)  第1题  一、  （1）
+
+
+def _cn_to_int(s):
+    """「十一」「二十」→ 11 / 20。只处理 1-99，题号够用了。"""
+    s = str(s or '').strip()
+    if not s:
+        return 0
+    if s.isdigit():
+        return int(s)
+    if '十' in s:
+        head, _, tail = s.partition('十')
+        tens = (_CN_DIGITS.get(head, 1) if head else 1)
+        ones = _CN_DIGITS.get(tail, 0) if tail else 0
+        return tens * 10 + ones
+    return _CN_DIGITS.get(s, 0)
+
+
+def _norm_qno(no):
+    """题号统一成阿拉伯数字：「第一问」「第1题」「（1）」「一、」都变成 1。
+
+    AI 整理时经常把题号写成「第一问 / 第二小题」，直接落进数据会出现两道
+    "第一问"的题，门户上也没法排序——所以入口处就归一化。
+    """
+    s = str(no or '').strip()
+    m = re.match(r'^第?\s*[（(]?\s*([0-9]{1,3}|[一二三四五六七八九十]{1,3})\s*[)）]?\s*'
+                 r'(?:小?[题问空条])?\s*[.、．,，:：)）]?$', s)
+    if m:
+        n = _cn_to_int(m.group(1))
+        if n:
+            return str(n)
+    return s
+
+
+# 题号行：1.  1、  1)  第1题  一、  （1）  第一问  第二小题
 _Q_NUM_RE = re.compile(
-    r'^\s*(?:第\s*)?[（(]?\s*([0-9]{1,2}|[一二三四五六七八九十]{1,2})\s*[)）]?\s*(?:题)?\s*[.、．,，:：)）]\s*(.*)$')
+    r'^\s*(?:第\s*)?[（(]?\s*([0-9]{1,2}|[一二三四五六七八九十]{1,2})\s*[)）]?\s*'
+    r'(?:小?[题问空条])?\s*[.、．,，:：)）]\s*(.*)$')
+# 题号只有「第一问」这种、后面没有标点：「第一问（4分）」
+_Q_NUM_UNIT_RE = re.compile(
+    r'^\s*(?:第\s*)?([0-9]{1,2}|[一二三四五六七八九十]{1,2})\s*小?[题问空条]\s*(.*)$')
 _ANS_RE = re.compile(r'^\s*(?:参考)?答\s*案?\s*[：:]\s*(.*)$')
 _POINTS_HEAD_RE = re.compile(r'^\s*(?:答题)?要点\s*[：:]\s*(.*)$')
 _BULLET_RE = re.compile(r'^\s*[-－—–·•*+＋]\s*(.+)$')
+# 圈码：①②③…⑴⑵…——答案文档里最常见的一条一点写法，一条线里可能带好几个
+_CIRCLED_RE = re.compile(r'[\u2460-\u2493]')
+_CIRCLED_SPLIT_RE = re.compile(r'[\u2460-\u2493]')
+# 题号紧贴文字：「16表格内填空题 答案【答案】…」这种，题号后面没有标点
+_Q_NUM_TIGHT_RE = re.compile(r'^\s*(\d{1,3})\s*(?![\d.．])')
 _SCORE_BRACKET_RE = re.compile(r'[（(\[【]\s*(\d+(?:\.\d+)?)\s*分?\s*[)）\]】]\s*$')
 _SCORE_SUFFIX_RE = re.compile(r'(?<![0-9.])(\d+(?:\.\d+)?)\s*分\s*$')
 _SCORE_SEP_RE = re.compile(r'[|｜:：]\s*(\d+(?:\.\d+)?)\s*$')
@@ -834,6 +971,13 @@ _SCORE_BARE_RE = re.compile(r'\s+(\d+(?:\.\d+)?)\s*$')
 def _split_trailing_score(text):
     """把行尾的分值抠出来。返回 (正文, 分值或None)。认不出就整行当正文。"""
     s = str(text or '').strip()
+    # 整行就是一个分值「（4分）」：题头行「1.（4分）」的常见样子，正文留空
+    m = _SCORE_BRACKET_RE.fullmatch(s)
+    if m:
+        try:
+            return '', float(m.group(1))
+        except ValueError:
+            pass
     for rx in (_SCORE_BRACKET_RE, _SCORE_SUFFIX_RE, _SCORE_SEP_RE, _SCORE_BARE_RE):
         m = rx.search(s)
         if m:
@@ -856,9 +1000,39 @@ def _add_point(question, payload, warnings):
             continue
         if score is None:
             score = 1.0
-            warnings.append('第 %s 题要点「%s」没写分值，按 1 分计'
-                            % (question.get('no'), text[:14]))
+            # 先记着，等这题解析完再统一出一条提示：一题 4 个要点就刷 4 行警告，
+            # 老师只会学会"无视警告"
+            question.setdefault('_noscore', []).append(text)
         question['points'].append({'text': text, 'score': score})
+
+
+def _strip_answer_mark(text):
+    """去掉答案文档里的「答案 / 【答案】/ 参考答案：」这类标记，留下真正的题干。"""
+    s = str(text or '')
+    s = re.sub(r'[【\[（(]\s*(?:参考)?答案\s*[】\]）)]', ' ', s)
+    s = re.sub(r'(?:参考)?答案\s*[：:]?', ' ', s)
+    return re.sub(r'[\s　:：,，、]+$', '', re.sub(r'^[\s　:：,，、]+', '', s)).strip()
+
+
+def _question_from_header(head, warnings):
+    """「16表格内填空题 答案」→ 题号 16 + 题干。认不出题号就返回 None。"""
+    raw = str(head or '').strip()
+    m = _Q_NUM_TIGHT_RE.match(raw)
+    if not m:
+        return None
+    no = m.group(1)
+    rest = raw[m.end():].strip()
+    # 题号后面紧跟正文才算题头：正文里既没有"答案/题/分"也不是空的，多半是普通数字，
+    # 比如「3个方面：」这种续行，不能当新题
+    if rest and not (('答案' in rest) or ('题' in rest) or re.search(r'\d+(?:\.\d+)?\s*分', rest)):
+        return None
+    stem = _strip_answer_mark(rest)
+    # 「16表格内填空题（4分）」这种把分值写在题头：拿它当本题标称分值，
+    # 后面与要点合计对不上会出警告，对得上就静默采用
+    stem, explicit = _split_trailing_score(stem)
+    stem = _strip_answer_mark(stem)
+    return {'no': _norm_qno(no), 'stem': stem, 'answer': '',
+            'points': [], 'max': float(explicit or 0)}
 
 
 def parse_exercise_body(body, subject=''):
@@ -885,6 +1059,30 @@ def parse_exercise_body(body, subject=''):
         if not line.strip() or line.strip().startswith('#'):
             continue
 
+        # 圈码要点（①②③…）：老师从答案文档里直接粘过来的一整行。
+        # 例：「16表格内填空题 答案【答案】①坚持以人民为中心 ②坚持全面深化改革」
+        # 没有「- 」也没有分值，但它就是答案原文，一条圈码就是一个要点。
+        if _CIRCLED_RE.search(line):
+            segs = _CIRCLED_SPLIT_RE.split(line)
+            head = (segs[0] if segs else '').strip()
+            items = [x for x in segs[1:] if x.strip()]
+            if head:
+                nq = _question_from_header(head, warnings)
+                if nq:
+                    cur = nq
+                    questions.append(cur)
+                else:
+                    q = ensure_cur()
+                    piece = _strip_answer_mark(head)
+                    if piece:
+                        q['answer'] = ((q['answer'] + '\n' + piece).strip()
+                                       if q['answer'] else piece)
+            q = cur if cur is not None else ensure_cur()
+            for it in items:
+                _add_point(q, it, warnings)
+            mode = 'point'
+            continue
+
         m = _BULLET_RE.match(line)
         if m:
             _add_point(ensure_cur(), m.group(1), warnings)
@@ -893,11 +1091,21 @@ def parse_exercise_body(body, subject=''):
 
         m = _Q_NUM_RE.match(line)
         if m:
-            no = m.group(1)
-            no = str(_CN_DIGITS.get(no, no))
+            no = _norm_qno(m.group(1))
             stem, explicit = _split_trailing_score(m.group(2))
             cur = {'no': no, 'stem': stem, 'answer': '', 'points': [],
                    'max': float(explicit or 0)}
+            questions.append(cur)
+            mode = 'answer'
+            continue
+
+        # 「第一问（4分）」：题号带单位词但后面没标点。
+        # 没有这一条的话，"第一问" 会被当成上一题的要点续行（AI 整理时就是这么坏的）
+        m = _Q_NUM_UNIT_RE.match(line)
+        if m:
+            stem, explicit = _split_trailing_score(m.group(2))
+            cur = {'no': _norm_qno(m.group(1)), 'stem': _strip_answer_mark(stem),
+                   'answer': '', 'points': [], 'max': float(explicit or 0)}
             questions.append(cur)
             mode = 'answer'
             continue
@@ -937,11 +1145,20 @@ def parse_exercise_body(body, subject=''):
         point_count += len(pts)
         sum_pts = round(sum(float(p.get('score') or 0) for p in pts), 2)
         explicit = float(q.get('max') or 0)
+        nos = q.pop('_noscore', None) or []
         if pts:
             if explicit and abs(explicit - sum_pts) > 1e-6:
                 warnings.append('第 %s 题的标称分值 %s 与要点合计 %s 不一致，已按要点合计'
                                 % (q.get('no'), _fmt_num(explicit), _fmt_num(sum_pts)))
             q['max'] = sum_pts
+            if nos:
+                # 一题多个要点都没写分值，合并成一句：4 行警告等于没有警告
+                if len(nos) == 1:
+                    warnings.append('第 %s 题要点「%s」没写分值，按 1 分计'
+                                    % (q.get('no'), nos[0][:14]))
+                else:
+                    warnings.append('第 %s 题有 %d 个要点没写分值，每个按 1 分计（本题合计 %s 分）'
+                                    % (q.get('no'), len(nos), _fmt_num(q['max'])))
         elif explicit:
             # 只给了参考答案没给要点：按参考答案整体判（提示词里会退化成"对照答案给分"）
             warnings.append('第 %s 题只有参考答案、没有要点，将按「对照参考答案」整体判分'
@@ -954,8 +1171,9 @@ def parse_exercise_body(body, subject=''):
 
     questions = [q for q in questions if not q.get('skip')]
     if not questions:
-        warnings.append('没有解析出任何题目。格式示例：\n'
-                        '1. 题目（6分）\n答：参考答案……\n- 要点一（2分）\n- 要点二 2分\n- 要点三 | 2')
+        warnings.append('这段文字没认出题目。直接粘答案原文就行，比如：\n'
+                        '16表格内填空题 答案 ①坚持以人民为中心 ②坚持全面深化改革\n'
+                        '（认不出来时系统会再让 AI 整理一遍，也可以点「AI 整理」）')
     return {'questions': questions, 'max_score': round(total, 2),
             'point_count': point_count, 'warnings': warnings, 'subject': str(subject or '')}
 
@@ -1080,6 +1298,7 @@ def _merge_ocr_questions(pages):
                 continue
             if not (q.get('answer') or q.get('points') or q.get('stem')):
                 continue
+            q['no'] = _norm_qno(q.get('no'))   # 「第一问」先归一化，重号检测才准
             merged.append(q)
     nos = [str(q.get('no') or '').strip() for q in merged]
     if len(set(n for n in nos if n)) != len([n for n in nos if n]):
@@ -1105,7 +1324,7 @@ def _render_exercise_text(questions, title=''):
     """结构化题目 → 老师能直接改的文本（就是 parse_exercise_body 认的格式）。"""
     lines = []
     for i, q in enumerate(questions or [], 1):
-        no = str(q.get('no') or i).strip()
+        no = _norm_qno(q.get('no') or i)
         stem = _strip_score_tail(' '.join(str(q.get('stem') or '').split()))
         pts = [p for p in (q.get('points') or []) if isinstance(p, dict)]
         want = 0.0
@@ -1150,6 +1369,92 @@ def _render_requirements_text(requirements):
             continue
         out.append('%d. %s' % (len(out) + 1, t))
     return '\n'.join(out)
+
+
+# ---------------------- 答案原文 → AI 整理成要点 ----------------------
+# 老师粘进来的东西长什么样，我们管不了：有的带【答案】，有的用 ①②③，有的整段连在一起。
+# 让老师先改写格式再录，等于把整理成本转嫁给他。本地解析器（parse_exercise_body）先试一遍，
+# 认不出来就把原文整段交给模型——结构化这种活儿模型比正则擅长。
+
+ANSWER_TEXT_STRUCTURE_PROMPT = '''你在把老师粘进来的一段「参考答案 / 评分标准」原文，整理成结构化数据。
+学科：{subject}
+
+只输出 JSON，不要 Markdown 代码块，不要解释：
+{
+  "title": "这段答案的标题（如「第 3 课 主观题 参考答案」）；原文没有就留空",
+  "questions": [
+    {
+      "no": "题号，原样保留（原文写 16 就是 16）",
+      "stem": "题目/设问原文；原文没印就留空",
+      "answer": "参考答案正文（可多行，用 \\n 分段）",
+      "points": [{"text": "一条独立、可判定的给分要点", "score": 2}]
+    }
+  ],
+  "notes": ["原文里拿不准、需要老师确认的地方"]
+}
+
+规则（按重要性排序）：
+1. 老师粘的是答案文档原文，可能带「【答案】」「①②③」「(1)(2)」「一是…二是…」这类标记：
+   一条标记就是一个给分要点，把标记本身去掉，只留要点内容。
+2. 分值以原文为准：「（2分）」「2分」「每点 2 分」「本小题 6 分」都要认出来；
+   「每点 N 分」要展开到每条要点上。原文确实没标分值的，score 填 null，
+   **绝对不要自己编一个看起来合理的分值**。
+3. 一条要点 = 一个判分单位，要能单独判断对错（15-30 字）；
+   「结合材料分析」这种无法判定的空话不要当要点。
+4. 题型词（表格内填空题 / 简答题 / 材料分析题）是题干信息，不是要点，不要写进 points。
+5. 原文里的「评分说明」「注意事项」与得分无关，可以放进 notes。
+6. 原文分段乱、没有题号时：按话题/设问自动分题，宁少勿多；实在只有一段就归到第 1 题。
+7. 不要改写原文的话，保留老师的表述。'''
+
+
+def _structure_answer_text(raw_text, subject=''):
+    """老师粘的答案原文 → 模型整理成结构化题目。返回 (dict, 错误信息)。"""
+    if not minimax_api_key:
+        return None, '未配置 LLM_API_KEY，无法用 AI 整理'
+    text = str(raw_text or '').strip()
+    if not text:
+        return None, '没有内容可整理'
+    if len(text) > 20000:
+        # 一份答案超过 2 万字基本是粘错了（整本教材）；截断比超时好
+        text = text[:20000]
+    try:
+        prompt = ANSWER_TEXT_STRUCTURE_PROMPT.replace(
+            '{subject}', _subject_display_name(subject) if subject else '（未指定）')
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=180.0)
+        resp, err = _llm_retry(lambda: _vision_chat(
+            client, model=minimax_model,
+            messages=[{'role': 'system', 'content': '你只做忠实整理与结构化，不评价、不改写内容。'},
+                      {'role': 'user', 'content': prompt + '\n\n【老师粘的原文】\n' + text}],
+            temperature=0, max_tokens=6000), tries=2)
+        if resp is None:
+            return None, 'AI 整理失败：%s' % err
+        out = _loads_lenient(resp.choices[0].message.content or '')
+        if not isinstance(out, dict) or not (out.get('questions') or []):
+            return None, 'AI 没从这段文字里认出题目要点（原文是不是只有题干、没有答案？）'
+        return out, ''
+    except Exception as e:
+        return None, 'AI 整理失败：%s' % e
+
+
+def _ai_structure_exercise(raw_text, subject=''):
+    """原文 → AI → 规范文本（能被 parse_exercise_body 吃下）。返回 (结果, 错误)。"""
+    data, err = _structure_answer_text(raw_text, subject)
+    if not data:
+        return None, err
+    qs = _merge_ocr_questions([data])
+    if not qs:
+        return None, 'AI 没从这段文字里认出题目要点'
+    rendered = _render_exercise_text(qs)
+    parsed = parse_exercise_body(rendered, subject)
+    if not parsed['questions']:
+        # 理论上不会走到这（render 出来的就是解析器认的格式），真走到了得说清楚而不是丢个空结果
+        return None, 'AI 整理出的内容没能解析成功，请缩短原文或分几次加'
+    return {
+        'text': rendered,
+        'parsed': parsed,
+        'title': str(data.get('title') or '').strip()[:60],
+        'warnings': [str(n)[:80] for n in (data.get('notes') or []) if str(n or '').strip()],
+    }, ''
 
 
 def decode_qr_from_image(image_bytes):
@@ -2266,15 +2571,41 @@ def save_exercise_api():
         return jsonify({'error': '「%s」不用要点判分，这里只收要点判分学科的练习'
                                  % _subject_display_name(subject)}), 400
     parsed = parse_exercise_body(body, subject)
+    ai_note = ''
+    if (not parsed['questions']) and body.strip() and minimax_api_key:
+        # 本地认不出来就直接让 AI 整理原文——老师粘的多半是答案文档里的句子，
+        # 不该由他改成我们的格式。整理成功后存的是规范文本，他下次打开还能接着改。
+        out, ai_err = _ai_structure_exercise(body, subject)
+        if out:
+            body = out['text']
+            parsed = out['parsed']
+            title = title or out['title']
+            ai_note = ('已用 AI 整理成要点表：%d 题 / %d 个要点 / 合计 %s 分'
+                       % (len(parsed['questions']), parsed['point_count'],
+                          _fmt_num(parsed['max_score'])))
+            parsed['warnings'] = (parsed.get('warnings') or []) + list(out.get('warnings') or [])
+        else:
+            parsed.setdefault('warnings', []).append(ai_err)
     if not parsed['questions']:
-        return jsonify({'error': '没解析出题目，检查一下格式', 'warnings': parsed['warnings']}), 400
+        # 这句「没解析出题目」本身没用：老师不知道机器想要什么。给他一句能照做的话，
+        # 顺便说清楚"AI 也试过了"，免得他以为系统在偷懒。
+        return jsonify({
+            'error': ('这段文字没认出题目和要点。直接粘答案原文就行，比如：\n'
+                      '16表格内填空题 答案 ①坚持以人民为中心 ②坚持全面深化改革\n'
+                      '（AI 也试过了，没整理出来——原文里如果只有题干、没有答案，就先补上答案）'),
+            'warnings': parsed['warnings']}), 400
 
     if data.get('dry_run'):
-        return jsonify({'ok': True, 'parsed': parsed})
+        return jsonify({'ok': True, 'parsed': parsed, 'text': body, 'ai': ai_note})
 
     items = load_exercises()
     eid = str(data.get('id') or '').strip()
     now = _now_str()
+    if not title:
+        # 老师懒得起名，就按第一题的题干起一个——比「政治练习」这种一堆重名的强
+        q0 = (parsed['questions'] or [{}])[0]
+        title = (str(q0.get('stem') or '').strip().split('\n')[0][:24]
+                 or ('第 %s 题' % q0.get('no') if q0.get('no') else ''))
     record = {
         'id': eid or uuid.uuid4().hex[:12],
         'subject': subject,
@@ -2300,7 +2631,27 @@ def save_exercise_api():
         items.append(record)
     save_exercises(items)
     return jsonify({'ok': True, 'exercise': record, 'summary': exercise_summary(record),
-                    'warnings': parsed['warnings']})
+                    'body': body, 'ai': ai_note, 'warnings': parsed['warnings']})
+
+
+@app.route('/api/exercises/ai_parse', methods=['POST'])
+def ai_parse_exercise_api():
+    """把老师粘的答案原文交给 AI 整理成「题目 + 要点」，只返回不落盘。
+
+    存在的理由：老师手上的答案是「16表格内填空题 答案【答案】①…②…」这种文档原文，
+    让他先改成「- 要点（2分）」再录是把整理成本转嫁给他。这里直接把原文丢给模型。
+    """
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    data = request.get_json(silent=True) or {}
+    subject = str(data.get('subject') or '').strip()
+    text = str(data.get('text') or '')
+    if not text.strip():
+        return jsonify({'error': '先把答案原文粘进来'}), 400
+    out, err = _ai_structure_exercise(text, subject)
+    if not out:
+        return jsonify({'error': err or 'AI 整理失败'}), 400
+    return jsonify(dict(ok=True, **out))
 
 
 @app.route('/api/exercises/<exercise_id>', methods=['DELETE'])
@@ -2328,31 +2679,79 @@ def ocr_answer_key_api():
     """
     if _require_teacher():
         return jsonify({'error': '仅教师或管理员可操作'}), 403
-    files = [f for f in (request.files.getlist('files') or []) if f and f.filename]
-    if not files:
-        return jsonify({'error': '请选择答案图片'}), 400
-    if len(files) > ANSWER_OCR_MAX_PAGES:
-        return jsonify({'error': '一次最多 %d 张，分两次传吧' % ANSWER_OCR_MAX_PAGES}), 400
-    mode = str(request.form.get('mode') or 'exercise').strip().lower()
+
+    # 两种入口，同一套识别逻辑：
+    #   A) 老入口：multipart 上传图片文件；
+    #   B) 新入口：JSON {items:[{id, regions:[{x,y,w,h}…]}], mode, subject}
+    #      —— 扫描端「扫描答案」后框好区域，只把框里的内容送来认。
+    payload = request.get_json(silent=True) if request.is_json else None
+    work = []          # [(说明文字, PIL.Image)]
+    errors = []
+    if payload is not None:
+        mode = str(payload.get('mode') or 'exercise').strip().lower()
+        subject = str(payload.get('subject') or '').strip()
+        items = payload.get('items') or []
+        if not isinstance(items, list) or not items:
+            return jsonify({'error': '没有可识别的答案页，先点「扫描答案」'}), 400
+        index = {str(x.get('id')): x for x in load_answer_staging()}
+        for i, it in enumerate(items, 1):
+            page = index.get(str((it or {}).get('id') or ''))
+            path = _answer_page_path(page) if page else ''
+            if not path:
+                errors.append('第 %d 页的图片已经不在了（可能被清空），重新扫一次' % i)
+                continue
+            try:
+                img = _open_image(path).convert('RGB')
+            except Exception as e:
+                errors.append('第 %d 页读不出来：%s' % (i, e))
+                continue
+            regs = [r for r in (it.get('regions') or []) if isinstance(r, dict)]
+            if not regs:
+                work.append(('第 %d 页' % i, img))
+                continue
+            W, H = img.size
+            for k, r in enumerate(regs, 1):
+                try:
+                    x1 = max(0, int(float(r.get('x') or 0) * W))
+                    y1 = max(0, int(float(r.get('y') or 0) * H))
+                    x2 = min(W, int((float(r.get('x') or 0) + float(r.get('w') or 0)) * W))
+                    y2 = min(H, int((float(r.get('y') or 0) + float(r.get('h') or 0)) * H))
+                except (TypeError, ValueError):
+                    continue
+                # 太小的框多半是手抖点出来的，送去识别只会浪费一次调用
+                if x2 - x1 < 24 or y2 - y1 < 24:
+                    errors.append('第 %d 页的第 %d 块区域太小，已跳过' % (i, k))
+                    continue
+                work.append(('第 %d 页第 %d 块' % (i, k), img.crop((x1, y1, x2, y2))))
+        if len(work) > ANSWER_OCR_MAX_PAGES:
+            return jsonify({'error': '这次框出了 %d 块，超过单次上限 %d 块，分两次识别吧'
+                                     % (len(work), ANSWER_OCR_MAX_PAGES)}), 400
+    else:
+        files = [f for f in (request.files.getlist('files') or []) if f and f.filename]
+        if not files:
+            return jsonify({'error': '请选择答案图片'}), 400
+        if len(files) > ANSWER_OCR_MAX_PAGES:
+            return jsonify({'error': '一次最多 %d 张，分两次传吧' % ANSWER_OCR_MAX_PAGES}), 400
+        mode = str(request.form.get('mode') or 'exercise').strip().lower()
+        subject = str(request.form.get('subject') or '').strip()
+        for idx, f in enumerate(files, 1):
+            try:
+                work.append(('第 %d 张' % idx, _bytes_to_rgb(f.read())))
+            except Exception as e:
+                errors.append('第 %d 张读不出来：%s' % (idx, e))
     if mode not in ('exercise', 'requirements'):
         mode = 'exercise'
-    subject = str(request.form.get('subject') or '').strip()
 
-    pages, warnings, errors = [], [], []
-    for idx, f in enumerate(files, 1):
-        try:
-            img = _bytes_to_rgb(f.read())
-        except Exception as e:
-            errors.append('第 %d 张读不出来：%s' % (idx, e))
-            continue
+    pages, warnings = [], []
+    for idx, (label, img) in enumerate(work, 1):
         data, err = _ocr_answer_page(img, mode=mode)
         if err:
-            errors.append('第 %d 张：%s' % (idx, err))
+            errors.append('%s：%s' % (label, err))
             continue
         pages.append(data)
         warnings.extend([str(n) for n in (data.get('notes') or []) if str(n).strip()])
         if not data.get('questions') and not data.get('requirements'):
-            errors.append('第 %d 张没识别出题目/要点（可能拍糊了或不是答案页）' % idx)
+            errors.append('%s 没识别出题目/要点（可能拍糊了或不是答案页）' % label)
 
     if not pages:
         return jsonify({'error': '一张都没认出来。' + ('；'.join(errors) if errors else '').strip()}), 400
@@ -6318,6 +6717,13 @@ import socket
 STAGING_DIR = os.path.join(DATA_DIR, 'staging')
 STAGING_IMAGES_DIR = os.path.join(STAGING_DIR, 'images')
 STAGING_INDEX_FILE = os.path.join(STAGING_DIR, 'index.json')
+# 答案页单独暂存：答案不是学生卷子，混进临时区会被「全部提交」误当试卷归档，
+# 也会把老师刚扫完的卷子挤到看不见的地方。
+ANSWER_STAGING_DIR = os.path.join(DATA_DIR, 'answer_staging')
+ANSWER_STAGING_IMAGES = os.path.join(ANSWER_STAGING_DIR, 'images')
+ANSWER_STAGING_INDEX = os.path.join(ANSWER_STAGING_DIR, 'index.json')
+for _ad in (ANSWER_STAGING_DIR, ANSWER_STAGING_IMAGES):
+    os.makedirs(_ad, exist_ok=True)
 RECORDS_DIR = os.path.join(DATA_DIR, 'records')
 RECORDS_IMAGES_DIR = os.path.join(RECORDS_DIR, 'images')
 RECORDS_INDEX_FILE = os.path.join(RECORDS_DIR, 'index.json')
@@ -6332,7 +6738,39 @@ for _d in (STAGING_DIR, STAGING_IMAGES_DIR, RECORDS_DIR, RECORDS_IMAGES_DIR):
 
 # 调试开关：设为 1 时允许非本机设备操作扫描端（默认关闭，扫描端仅本机可用）
 STATION_ALLOW_REMOTE = (os.getenv('STATION_ALLOW_REMOTE', '') or '').strip().lower() in ('1', 'true', 'yes', 'on')
-_LOCAL_ADDRS = {'127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1'}
+
+
+def _machine_ip_addrs():
+    """本机自己所有网卡地址。
+
+    老师常常直接用局域网地址（如 http://10.97.203.10:5001/station）打开扫描端，
+    按「只有 127.0.0.1 才算本机」判会把自家机器当成远程、锁掉扫描按钮。
+    这里把本机网卡地址一并算进来——远端的 request.remote_addr 是对方地址，
+    永远不会等于本机地址，所以不会因此放宽给别的设备。
+    """
+    ips = set()
+    try:
+        import socket
+        for info in socket.getaddrinfo(socket.gethostname(), None):
+            ip = info[4][0]
+            if ip:
+                ips.add(ip)
+    except Exception:
+        pass
+    try:
+        # 不发包，只让系统选一次出口地址，用来覆盖 hostname 解析不到的情况
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(('10.255.255.255', 1))
+            ips.add(s.getsockname()[0])
+        finally:
+            s.close()
+    except Exception:
+        pass
+    return ips
+
+
+_LOCAL_ADDRS = {'127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1'} | _machine_ip_addrs()
 PORTAL_PORT = int(os.getenv('PORTAL_PORT', '5001') or '5001')
 IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp')
 
@@ -6965,17 +7403,14 @@ def _precheck_auto_batch(subject, exercise_id=''):
 
     放在这里而不是等流水线跑起来才报错：政治卷扫完一叠才说"没选练习"，
     老师得把纸重新放回扫描仪。
+
+    **练习是可选的**：选了就按要点逐条给分；不选就按学科标准整体给分（有分数和评语）。
+    这里只挡"这个学科压根不能自动批"，不再挡"没选练习"。
     """
     if str(subject or '') == SUBJECT_AUTO:
-        return ''      # 学科待识别；若认成要点学科而没练习，流水线会给出明确提示
+        return ''      # 学科待识别；认成什么就在流水线里按那个学科的契约走
     if not auto_pipeline_supports(subject):
         return auto_pipeline_reject_message(subject)
-    if subject_kind(subject) == PIPELINE_KIND_POINTS:
-        ex = get_exercise(exercise_id)
-        if not ex or not (ex.get('questions') or []):
-            return ('「%s」按要点判分，需要先选一份练习（参考答案 + 各要点分值）再扫。\n'
-                    '在扫描端「本批练习」里选现成的，或点「＋ 新建练习」粘一份——两分钟的事。'
-                    % _subject_display_name(subject))
     return ''
 
 
@@ -7045,6 +7480,13 @@ def station_job(batch_id):
     b = _load_batch(batch_id)
     if not b:
         return jsonify({'error': '批次不存在'}), 404
+    # 批阅口径：free = 没给要点表，按学科标准整体给分（扫描端据此换文案，说明为什么没有逐点明细）
+    # points = 按老师要点表逐条判；essay 等其它学科为空
+    mode = ''
+    if b.get('exercise_id'):
+        mode = PIPELINE_KIND_POINTS
+    elif subject_kind(b.get('subject') or '') == PIPELINE_KIND_POINTS:
+        mode = 'free'
     return jsonify({
         'id': b['id'],
         'job': b.get('job') or {},
@@ -7052,6 +7494,7 @@ def station_job(batch_id):
         # 要点判分批次：把练习摘要带出来，扫描端能直接显示"按哪份标准判的"
         'exercise': (exercise_summary(get_exercise(b.get('exercise_id')))
                      if b.get('exercise_id') else None),
+        'mode': mode,
         'subject_detected': b.get('subject_detected') or None,
         'results': b.get('results') or [],
         'record_ids': b.get('record_ids') or [],
@@ -7503,6 +7946,115 @@ def station_staging_clear():
     return jsonify({'ok': True, 'cleared': len(items)})
 
 
+# ---------------------- 答案扫描：扫答案 → 框区域 → 识别 ----------------------
+# 老师手里的参考答案多数是纸质打印稿。手机拍照再传电脑这一步最容易被跳过，
+# 所以直接把扫描仪用起来：点「扫描答案」→ 扫进答案暂存区 → 在图上框出
+# 与本次批改对应的区域（一页可以框多块，比如「参考答案」一块、「评分标准」一块）
+# → 只把框里的内容送去识别。
+
+def load_answer_staging():
+    return _read_json(ANSWER_STAGING_INDEX, [])
+
+
+def save_answer_staging(items):
+    _write_json(ANSWER_STAGING_INDEX, list(items or []))
+
+
+def _answer_page_path(item):
+    rel = str((item or {}).get('image') or '')
+    if not rel:
+        return ''
+    p = os.path.join(ANSWER_STAGING_DIR, rel.replace('/', os.sep))
+    return p if os.path.isfile(p) else ''
+
+
+def _new_answer_page(image_path, original_name=''):
+    """把一张答案图收进答案暂存区，返回条目（图片会被移动）。"""
+    page_id = uuid.uuid4().hex
+    ext = os.path.splitext(image_path)[1].lower()
+    if ext not in IMAGE_EXTS:
+        ext = '.png'
+    dest = os.path.join(ANSWER_STAGING_IMAGES, page_id + ext)
+    if os.path.abspath(image_path) != os.path.abspath(dest):
+        shutil.move(image_path, dest)
+    return {'id': page_id, 'image': 'images/' + page_id + ext,
+            'original_name': original_name or os.path.basename(image_path),
+            'created_at': _now_str()}
+
+
+@app.route('/api/station/scan_answer', methods=['POST'])
+def station_scan_answer():
+    """扫描答案页（本机）：扫完进答案暂存区，不回临时区、不起批阅。"""
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    req = request.get_json(silent=True) or {}
+    replace = req.get('replace', True) not in (False, 0, '0', 'false', 'False')
+    try:
+        scan_output_dir = get_scan_output_dir()
+        next_filename = get_next_scan_filename(scan_output_dir)
+        ok, msg, pages, scan_meta = _run_scanner(scan_output_dir, next_filename)
+        if not ok:
+            return jsonify({'error': msg,
+                            'jam': (scan_meta or {}).get('diag') == 'jam' or _looks_like_jam(msg),
+                            'diag': (scan_meta or {}).get('diag')}), 500
+        if not pages:
+            return jsonify({'error': msg or '没有扫描到任何页面'}), 500
+        with _STAGING_LOCK:
+            items = [] if replace else load_answer_staging()
+            if replace:
+                for old in load_answer_staging():
+                    p = _answer_page_path(old)
+                    if p:
+                        try:
+                            os.remove(p)
+                        except OSError:
+                            pass
+            for p in pages:
+                items.append(_new_answer_page(p, os.path.basename(p)))
+            save_answer_staging(items)
+        return jsonify({'ok': True, 'items': items, 'count': len(items),
+                        'pages': len(pages)})
+    except Exception as e:
+        import traceback
+        print('答案扫描失败: %s\n%s' % (e, traceback.format_exc()))
+        return jsonify({'error': '扫描失败：%s' % e}), 500
+
+
+@app.route('/api/station/answer_staging', methods=['GET'])
+def station_answer_staging():
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    items = [it for it in load_answer_staging() if _answer_page_path(it)]
+    return jsonify({'items': items, 'count': len(items)})
+
+
+@app.route('/api/station/answer_staging/<page_id>/image')
+def station_answer_image(page_id):
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    item = next((x for x in load_answer_staging() if str(x.get('id')) == page_id), None)
+    path = _answer_page_path(item) if item else ''
+    if not path:
+        return jsonify({'error': '图片不存在'}), 404
+    return send_file(path, mimetype='image/png', max_age=0)
+
+
+@app.route('/api/station/answer_staging/clear', methods=['POST'])
+def station_answer_staging_clear():
+    if not _is_local_request():
+        return jsonify({'error': '扫描端仅限本机设备操作（当前为远程访问）'}), 403
+    items = load_answer_staging()
+    for it in items:
+        p = _answer_page_path(it)
+        if p:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+    save_answer_staging([])
+    return jsonify({'ok': True, 'cleared': len(items)})
+
+
 # ---------------------------- 用户端页面与接口 ----------------------------
 
 def _teacher_visible_classes():
@@ -7781,11 +8333,12 @@ def _parse_grade_json(raw, default_max_score):
     }
 
 
-def _vision_grade_one(image, subject_key=None, max_score=None, extra_prompt=None):
+def _vision_grade_one(image, subject_key=None, max_score=None, extra_prompt=None, note=''):
     """对「一块作答」调用视觉模型，返回 (结果 dict, 错误信息)。
 
     image 可以是 PIL.Image 或图片路径；结果含 text/score/max_score/level/strengths/issues/comment。
-    subject_key 决定用哪个批阅方案（学科×题型），extra_prompt 可临时覆盖方案提示词。
+    subject_key 决定用哪个批阅方案（学科×题型），extra_prompt 可临时覆盖方案提示词，
+    note 是老师当批写的备注（追加在最后、优先级最高，不覆盖学科提示词）。
     """
     if not minimax_api_key:
         return None, '未配置 LLM_API_KEY / MINIMAX_API_KEY，请在 .env 中设置后重试'
@@ -7809,6 +8362,10 @@ def _vision_grade_one(image, subject_key=None, max_score=None, extra_prompt=None
         base_prompt = (extra_prompt or '').strip() or subj.get('prompt') or ''
         base_prompt = base_prompt.replace('{max_score}', _fmt_num(full)).replace('{subject}', subj.get('name', ''))
         user_prompt = base_prompt + '\n\n' + GRADE_JSON_RULES.replace('{max_score}', _fmt_num(full))
+        note = str(note or '').strip()
+        if note:
+            # 备注追加在最后：它是老师对"这一批"的额外口径，不能覆盖学科提示词，只做叠加
+            user_prompt += '\n\n教师批改备注（本批额外要求，与上面冲突时以此为准；为空表示没有）：\n' + note
 
         client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=150.0)
         response = _vision_chat(
@@ -9270,8 +9827,43 @@ def _vision_grade_points(page, exercise, model=None, quality=None, img_max_size=
         return None, '判分失败：%s' % e
 
 
-# ---------------------------- 批次：题干 / 语料 / 佳句 ----------------------------
+def _vision_grade_free(page, subject, max_score, note='', quality=None, rotation=0):
+    """没有要点表的整体判分：按学科标准给一个分数 + 一段评语。
 
+    老师的原话是"我其实只需要添加备注，扫进去就能做"。所以练习不选也要能批——
+    只是这种批法没有"哪条要点拿到了分"，只有总分和评语。
+
+    返回结构与 _vision_grade_points 对齐（questions 为空，total/max_total/level/comment/text 都在），
+    这样断点续批、归档、门户展示都只有一套代码。
+    """
+    try:
+        img = _open_image(page) if isinstance(page, str) else page
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        rot = int(rotation or 0) % 360
+        if rot in (90, 180, 270):
+            img = _transform_image(img, rotation=rot, crop=None)
+    except Exception as e:
+        return None, '打不开图片：%s' % e
+    res, err = _vision_grade_one(img, subject_key=subject, max_score=max_score, note=note)
+    if not res:
+        return None, err or '判分失败'
+    return {
+        'questions': [],
+        'total': res.get('score'),
+        'max_total': res.get('max_score') or max_score,
+        'level': res.get('level', ''),
+        'comment': res.get('comment') or '',
+        'strengths': res.get('strengths') or [],
+        'issues': res.get('issues') or [],
+        'illegible': [],
+        'text': res.get('text') or '',
+        'student': {},
+        'freeform': True,
+    }, ''
+
+
+# ---------------------------- 批次：题干 / 语料 / 佳句 ----------------------------
 def _batch_path(batch_id):
     return os.path.join(BATCHES_DIR, re.sub(r'[^a-zA-Z0-9]', '', str(batch_id or '')) + '.json')
 
@@ -10209,10 +10801,15 @@ def _resolve_auto_subject(b):
 
 
 def _points_pipeline(batch_id):
-    """要点判分流水线：读表头 → 逐份逐点判分 → 累加得分 → 归档。
+    """要点判分流水线：读表头 → 逐份判分 → 累加得分 → 归档。
+
+    两条路子共用这一条流水线（区别只在"怎么判"）：
+      · 有练习（参考答案 + 要点分值）→ 逐点判命中，按要点分值累加（_vision_grade_points）；
+      · 没练习 → 按学科标准整体给分 + 评语（_vision_grade_free），不逐点给分。
+    后者的意义：老师想"扫进去就能做"时，不该被一份要点表挡在扫描仪前面。
 
     与作文流水线（_auto_pipeline）的关系：表头阶段共用，之后的「怎么判」完全不同。
-    这里没有题干推断、没有话题语料、没有佳句——判分依据是老师写死的要点表，
+    这里没有题干推断、没有话题语料、没有佳句——判分依据是老师的要点表或学科标准，
     所以不需要"先批一张看看题目是什么"，整批可以直接并行。
     """
     b = _load_batch(batch_id)
@@ -10221,26 +10818,26 @@ def _points_pipeline(batch_id):
     subject = str(b.get('subject') or '')
     subject_label = _subject_display_name(subject)
     exercise = get_exercise(b.get('exercise_id'))
-    if not exercise or not (exercise.get('questions') or []):
-        # 两种情形要分开说：老师压根没选（多半是自动识别学科认成了政治），
-        # 和选了但练习被删。前者让他"去重扫"是白跑一趟，只要补选再重试就行。
-        if not str(b.get('exercise_id') or '').strip():
-            msg = ('这批卷子认成「%s」，按要点判分需要先选一份练习（参考答案 + 各要点分值）。\n'
-                   '到扫描端「本批练习」里选现成的，或点「＋ 新建练习」粘一份，'
-                   '然后点下面的「重试本批」——不用重新扫。' % subject_label)
-        else:
-            msg = ('本批绑定的练习已不存在（可能被删了），判分依据丢了。\n'
-                   '到扫描端「本批练习」重新选一份后点「重试本批」；'
-                   '或者到用户端「评语 / 批阅」逐份手动批。')
+    if exercise and not (exercise.get('questions') or []):
+        exercise = None
+    freeform = exercise is None
+    if freeform and str(b.get('exercise_id') or '').strip():
+        # 选了练习但那份练习没了：不能悄悄降级成整体判分——那会让老师以为还在按要点给分
         b.setdefault('job', {}).update({
-            'status': 'error', 'stage': 'error', 'updated_at': _now_str(), 'message': msg})
+            'status': 'error', 'stage': 'error', 'updated_at': _now_str(),
+            'message': ('本批绑定的练习已不存在（可能被删了），判分依据丢了。\n'
+                        '到扫描端「本批练习」重新选一份后点「重试本批」；'
+                        '或者到用户端「评语 / 批阅」逐份手动批。')})
         _save_batch(b)
         return
 
-    batch_max = float(exercise_total_max(exercise))
+    if exercise:
+        batch_max = float(exercise_total_max(exercise))
+    else:
+        batch_max = float(_coerce_max_score(b.get('max_score'), subject))
     teacher_note = str(b.get('teacher_note') or '').strip()
-    q_n = len(exercise.get('questions') or [])
-    p_n = int(exercise.get('point_count') or 0)
+    q_n = len(exercise.get('questions') or []) if exercise else 0
+    p_n = int(exercise.get('point_count') or 0) if exercise else 0
 
     def bump(**kw):
         job = b.setdefault('job', {})
@@ -10275,9 +10872,14 @@ def _points_pipeline(batch_id):
         if reused:
             print('批次 %s 复用已有判分结果 %d/%d 份' % (b['id'], reused, n))
         state = {'done': reused}
-        bump(stage='grading', done=reused, total=n,
-             message='正在逐点判分（%d 道题 / %d 个要点，满分 %s）…'
-                     % (q_n, p_n, _fmt_num(batch_max)))
+        if freeform:
+            bump(stage='grading', done=reused, total=n,
+                 message='正在按%s标准整体判分（满分 %s，未用要点表）…'
+                         % (subject_label, _fmt_num(batch_max)))
+        else:
+            bump(stage='grading', done=reused, total=n,
+                 message='正在逐点判分（%d 道题 / %d 个要点，满分 %s）…'
+                         % (q_n, p_n, _fmt_num(batch_max)))
 
         def _grade_one(idx):
             """判一份，异常统一折成 error，返回 (idx, 结果)。"""
@@ -10287,10 +10889,16 @@ def _points_pipeline(batch_id):
                 return idx, {'item_id': it['id'], 'error': '图片文件缺失',
                              'quality': it.get('quality'), 'sec': 0}
             t0 = time.time()
-            res, err = _vision_grade_points(path, exercise,
-                                            quality=it.get('quality'),
-                                            rotation=int(it.get('rotation') or 0),
-                                            note=teacher_note, subject_name=subject_label)
+            if freeform:
+                res, err = _vision_grade_free(path, subject, batch_max,
+                                              quality=it.get('quality'),
+                                              rotation=int(it.get('rotation') or 0),
+                                              note=teacher_note)
+            else:
+                res, err = _vision_grade_points(path, exercise,
+                                                quality=it.get('quality'),
+                                                rotation=int(it.get('rotation') or 0),
+                                                note=teacher_note, subject_name=subject_label)
             sec = round(time.time() - t0, 1)
             if res:
                 r = {'item_id': it['id'], 'points': res, 'quality': it.get('quality'), 'sec': sec}
@@ -10367,6 +10975,8 @@ def _points_pipeline(batch_id):
                 cls = PENDING_CLASS_NAME
             total = pr.get('total')
             max_total = pr.get('max_total') or batch_max
+            ex_id = (exercise or {}).get('id') or ''
+            ex_title = (exercise or {}).get('title') or ''
             extra = {
                 'batch_id': b['id'],
                 'staging_item': it['id'],
@@ -10374,15 +10984,17 @@ def _points_pipeline(batch_id):
                 'subject_name': subject_label,
                 # 满分跟练习走：同一份练习的所有批次口径必须一致
                 'max_score': max_total,
-                'exercise_id': exercise.get('id') or '',
-                'exercise_title': exercise.get('title') or '',
+                'exercise_id': ex_id,
+                'exercise_title': ex_title,
+                # 整体判分（没给要点表）时 points 为空、points_meta 为 None，
+                # 门户据此只显示分数 + 评语，不会画出一片空的要点明细
                 'points': pr.get('questions') or [],
-                'points_meta': {
-                    'exercise_title': exercise.get('title') or '',
+                'points_meta': (None if freeform else {
+                    'exercise_title': ex_title,
                     'point_count': p_n,
                     'hit_count': sum(int(q.get('hit_count') or 0) for q in (pr.get('questions') or [])),
                     'align_warnings': pr.get('align_warnings') or [],
-                },
+                }),
                 'essay': None,
                 'auto': True,
                 'student_name': resolved_name or '',
@@ -10397,7 +11009,9 @@ def _points_pipeline(batch_id):
                     'level': pr.get('level', ''),
                     'subject': subject,
                     'subject_name': subject_label,
-                    'exercise_id': exercise.get('id') or '',
+                    'exercise_id': ex_id,
+                    # free = 没给要点表，按学科标准整体给分；门户据此决定显示哪块明细
+                    'mode': 'free' if freeform else 'points',
                     'graded_at': _now_str(),
                 },
                 'status': 'graded',
@@ -10445,6 +11059,8 @@ def _points_pipeline(batch_id):
             })
         b['failed'] = failed
         done_msg = '已完成 %d 份判分（满分 %s）' % (len(commit_ids), _fmt_num(batch_max))
+        if freeform:
+            done_msg = '已完成 %d 份整体判分（满分 %s，未用要点表）' % (len(commit_ids), _fmt_num(batch_max))
         illeg_n = sum(len((r.get('points') or {}).get('illegible') or []) for r in ok)
         notes = []
         if illeg_n:
@@ -10503,13 +11119,14 @@ def _start_auto_batch(item_ids, subject='english_essay', task_id='', max_score=N
     if subject != SUBJECT_AUTO and kind not in AUTO_PIPELINE_KINDS:
         raise ValueError(auto_pipeline_reject_message(subject))
     exercise = get_exercise(exercise_id) if str(exercise_id or '').strip() else None
-    if kind == PIPELINE_KIND_POINTS:
-        if not exercise or not (exercise.get('questions') or []):
-            raise ValueError('「%s」要先选一份练习（参考答案 + 要点）才能判分'
-                             % _subject_display_name(subject))
-        # 满分跟练习走：老师填的满分只对作文有意义，要点判分的满分只能是各要点分值之和，
-        # 否则会出现"要点全命中却只有 12/20"的口径错乱。
+    if kind == PIPELINE_KIND_POINTS and exercise and (exercise.get('questions') or []):
+        # 有练习：满分跟练习走。老师填的满分只对"整体判分"有意义，要点判分的满分只能是
+        # 各要点分值之和，否则会出现"要点全命中却只有 12/20"的口径错乱。
         max_score = exercise_total_max(exercise)
+    elif kind == PIPELINE_KIND_POINTS:
+        # 没选练习：照样能批——按学科标准整体给分（分数 + 评语），不逐点给分。
+        # 老师的诉求是"扫进去就能做"，为了一份要点表把人挡在扫描仪前面得不偿失。
+        exercise = None
     if max_score in (None, ''):
         # 调用方没带满分时（续跑、恢复后再批、脚本建批），先看这批图片上记着的值：
         # 老师在扫描端填的满分落在临时区条目上，不能因为换了个入口就退回 25 分制。

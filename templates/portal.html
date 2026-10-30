@@ -200,6 +200,8 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .subjchip.pts{background:#fff7ed;color:#9a3412;border-color:#fed7aa;}
 .subjtag{margin-left:8px;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:600;
   background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;}
+.freebar{margin-top:6px;font-size:11.5px;color:var(--text2);background:#f8fafc;
+  border:1px dashed var(--line);border-radius:7px;padding:4px 9px;display:inline-block;}
 
 /* 要点判分（政治 / 地理 …）：逐题列出要点是否拿到分。
    和作文的"逐句改错"视觉上要区分开，老师一眼能认出这是另一种卷子。 */
@@ -385,6 +387,10 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
     <label for="pwd">密码</label>
     <input type="password" id="pwd" autocomplete="current-password" placeholder="请输入密码">
     <button class="btn primary block" id="loginBtn">登 录</button>
+    <button class="btn block hidden" id="localLoginBtn"
+            style="margin-top:8px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;">
+      这台电脑上是我在用，直接进入（管理员）
+    </button>
     <div class="err" id="loginErr"></div>
     <div class="login-help">
       <div class="tt">💡 账号和密码怎么填？</div>
@@ -603,7 +609,34 @@ async function boot() {
   } catch (e) { /* 未登录 */ }
   $('#loginView').classList.remove('hidden');
   $('#appView').classList.add('hidden');
+  showLocalLoginIfLocal();
 }
+
+// 本机（扫描工作站这台电脑）才有的一键进入：退出登录后仍能一键回来，
+// 免得老师在自己机器上被自己的退出按钮锁在门外。远程设备不会出现这个按钮。
+async function showLocalLoginIfLocal() {
+  const btn = $('#localLoginBtn');
+  if (!btn) return;
+  try {
+    const c = await fetch('/api/station/context', { credentials: 'same-origin' }).then(r => r.json());
+    if (c && c.is_local) btn.classList.remove('hidden');
+  } catch (e) { /* 探测失败就当远程处理，不给按钮 */ }
+}
+
+$('#localLoginBtn') && ($('#localLoginBtn').onclick = async () => {
+  const btn = $('#localLoginBtn');
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '进入中…';
+  try {
+    const r = await jpost('/api/local_login', {});
+    ME = r.user;
+    enterApp();
+  } catch (e) {
+    $('#loginErr').textContent = e.message || '无法直接进入，请用账号密码登录';
+  } finally {
+    btn.disabled = false; btn.textContent = old;
+  }
+});
 
 $('#loginBtn').onclick = doLogin;
 $('#pwd').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
@@ -1097,6 +1130,12 @@ function recCardHtml(r, o) {
         + '🗒 本批批改备注：' + esc(r.teacher_note) + '</div>'
       : '')
     + scoreLine(r)
+    // 整体判分（本批没给要点表）：说清楚"为什么只有总分和评语、没有逐点明细"，
+    // 否则老师会以为是明细没加载出来
+    + ((r.grading && r.grading.mode === 'free')
+      ? '<div class="freebar">按' + esc(r.subject_name || '学科') + '标准整体判分'
+        + (o.anon ? '' : '（本批未使用要点表，所以只有总分与评语）') + '</div>'
+      : '')
     + (hasPieces
       ? piecesHtml(r)
       : '<div class="comment ' + (r.ai_comment ? '' : 'empty') + '">'

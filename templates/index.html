@@ -1398,8 +1398,18 @@
                     var mainApp = document.getElementById('mainApp');
                     if (loginScreen) loginScreen.style.display = 'none';
                     if (mainApp) mainApp.style.display = 'block';
+                    // 主页面不再提示管理员用户名（仅对学生/老师显示登录身份）
                     var span = document.getElementById('currentUserSpan');
-                    if (span) span.textContent = res.data.user.name + '（' + (res.data.user.role === 'student' ? '学生' : res.data.user.role === 'admin' ? '管理员' : '老师') + '）';
+                    if (span) {
+                        var role = res.data.user.role || 'teacher';
+                        if (role === 'admin') {
+                            span.textContent = '';
+                            span.style.display = 'none';
+                        } else {
+                            span.textContent = res.data.user.name + '（' + (role === 'student' ? '学生' : '老师') + '）';
+                            span.style.display = '';
+                        }
+                    }
                     window.currentUserRole = res.data.user.role || 'teacher';
                     window.currentUserId = res.data.user.id || '';
                 applyRoleLayout(res.data.user.role || 'teacher');
@@ -1543,8 +1553,18 @@
                 var loginScreen = document.getElementById('loginScreen');
                 if (mainApp) mainApp.style.display = 'block';
                 if (loginScreen) loginScreen.style.display = 'none';
+                // 主页面不再提示管理员用户名（仅对学生/老师显示登录身份）
                 var span = document.getElementById('currentUserSpan');
-                if (span && user) span.textContent = (user.name || user.id) + '（' + (user.role === 'student' ? '学生' : user.role === 'admin' ? '管理员' : '老师') + '）';
+                if (span && user) {
+                    var role = user.role || 'teacher';
+                    if (role === 'admin') {
+                        span.textContent = '';
+                        span.style.display = 'none';
+                    } else {
+                        span.textContent = (user.name || user.id) + '（' + (role === 'student' ? '学生' : '老师') + '）';
+                        span.style.display = '';
+                    }
+                }
                 window.currentUserRole = user.role || 'teacher';
                 window.currentUserId = user.id || '';
                 // 管理员不需要首页的邀请码提示（「配置 → 邀请码管理」里能查到）

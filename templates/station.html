@@ -209,6 +209,19 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
   background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;
   padding:12px 16px;font-size:13px;margin-bottom:16px;
 }
+
+/* 满分快捷分值：常见 2–4 个值直接铺开，一眼可选，比塞进下拉框少两次点击 */
+.maxchip{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:6px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;
+  font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text2);
+  cursor:pointer;line-height:1.2;
+}
+.maxchip:hover{border-color:#c9d4e5;background:#f7f9fc;}
+.maxchip.on{border-color:#2563eb;background:#eff6ff;color:#1d4ed8;}
+.maxchip .tag{font-size:10px;font-weight:500;color:#8a5300;background:#fff8ec;
+  border:1px solid #f5d9a8;border-radius:5px;padding:0 3px;}
+.maxchip.on .tag{color:#1d4ed8;background:#dbeafe;border-color:#bfdbfe;}
 </style>
 </head>
 <body>
@@ -258,18 +271,26 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
         </div>
         <div style="margin-top:14px;">
           <div style="font-size:12.5px;color:var(--text2);margin-bottom:5px;">自动批阅方案（扫完直接批，无需再点）</div>
-          <div style="display:flex;gap:8px;align-items:stretch;">
-            <select id="subjectSel" style="flex:1 1 auto;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;background:#fff;"></select>
-            <label for="maxScore" title="这一批卷子的满分；默认跟着上面的方案走，改了就按你填的算"
-                   style="flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:0 10px;border:1px solid var(--line);border-radius:9px;background:#fff;font-size:12.5px;color:var(--text2);">
-              满分
+          <select id="subjectSel" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;background:#fff;"></select>
+
+          <!-- 满分：常见分值直接点一下，特殊分值再手填。
+               数字输入必须自带默认值（Carbon/Spectrum 的硬规矩），所以这里永远是
+               「当前学科默认值」打底，老师不碰也不会空着；改过的值按学科记住。 -->
+          <div style="margin-top:9px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span style="font-size:12.5px;color:var(--text2);flex:0 0 auto;">本次满分</span>
+            <div id="maxChips" style="display:flex;gap:6px;flex-wrap:wrap;flex:1 1 auto;"></div>
+            <label for="maxScore" title="这一批卷子的满分；不选就用方案默认值"
+                   style="flex:0 0 auto;display:flex;align-items:center;gap:4px;padding:0 8px;border:1px solid var(--line);border-radius:9px;background:#fff;font-size:12.5px;color:var(--text2);">
               <input type="number" id="maxScore" min="1" max="150" step="0.5" inputmode="decimal"
-                     style="width:58px;padding:6px 4px;border:0;border-bottom:1px solid var(--line);font-family:inherit;font-size:13.5px;font-weight:600;text-align:center;color:var(--text);background:transparent;outline:none;">
+                     aria-label="本次满分"
+                     style="width:52px;padding:7px 2px;border:0;font-family:inherit;font-size:14px;font-weight:700;text-align:center;color:var(--text);background:transparent;outline:none;">
+              <span style="font-size:12px;">分</span>
             </label>
           </div>
-          <div style="font-size:11.5px;color:var(--text3,#999);margin-top:5px;line-height:1.45;">
-            默认按方案分值（英语作文 25）；这次卷子不是这个分值，直接改右边数字，本批全部按它算。
-            要点判分的学科（政治 / 地理）由练习里的要点分值合计决定，不用填，选了练习会自动锁住。
+          <div id="maxHint" style="font-size:11.5px;margin-top:6px;line-height:1.5;color:var(--text3,#999);"></div>
+          <div style="font-size:11.5px;color:var(--text3,#999);margin-top:3px;line-height:1.45;">
+            常见分值点一下就行，不是这些分值再改右边数字；本批全部按它算，改过的值按学科记住。
+            要点判分的学科（政治 / 地理）由练习里的要点分值合计决定，选了练习会自动锁住。
           </div>
           <div id="subjNote" style="font-size:11.5px;color:#8a5300;background:#fff8ec;border:1px solid #f5d9a8;border-radius:8px;padding:6px 9px;margin-top:7px;line-height:1.5;display:none;"></div>
         </div>
@@ -301,7 +322,7 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
               </div>
             </div>
 
-            <!-- 政治/地理：练习＝参考答案 + 每题要点 + 每点分值（必填） -->
+            <!-- 政治/地理：练习＝参考答案 + 每题要点 + 每点分值（可选：不选就按学科标准整体判分） -->
             <div id="exerciseWrap" style="display:none;">
               <div style="display:flex;gap:8px;">
                 <select id="exerciseSel" style="flex:1 1 auto;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;"></select>
@@ -315,12 +336,18 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
                   <input id="exNewTitle" type="text" maxlength="60" placeholder="练习名称，如：第 3 课 主观题（选必一）"
                          style="flex:1 1 auto;min-width:0;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12.5px;">
                 </div>
-                <textarea id="exNewBody" rows="9" placeholder="把参考答案和要点粘进来，一行一条要点，分值写在行尾：&#10;&#10;1. 结合材料，说明我国人民代表大会制度的优势。（6分）&#10;答：人民代表大会制度是我国的根本政治制度……&#10;- 保障人民当家作主（2分）&#10;- 动员人民依法参与国家管理 2分&#10;- 保证国家机关协调高效运转 | 2"
+                <textarea id="exNewBody" rows="9" placeholder="答案原文直接粘进来就行，不用改格式：&#10;&#10;16表格内填空题 答案【答案】①坚持以人民为中心  ②坚持全面深化改革  ③坚持全面依法治国  ④坚持推动构建人类命运共同体&#10;&#10;（嫌它认不准就点「AI 整理」，模型会把原文拆成一条条要点）"
                           style="width:100%;box-sizing:border-box;margin-top:6px;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.7;resize:vertical;"></textarea>
                 <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+                  <button class="btn tiny ghost" type="button" id="exSampleBtn" title="不知道粘什么？点一下填段答案原文，再换成你自己的">填个示例</button>
+                  <button class="btn tiny" type="button" id="exAiBtn" title="把原文交给 AI 拆成一条条要点（认不出来时也会自动用它）">AI 整理</button>
                   <button class="btn tiny" type="button" id="exPreviewBtn">解析预览</button>
                   <button class="btn tiny primary" type="button" id="exSaveBtn">保存并使用</button>
                   <button class="btn tiny ghost" type="button" id="exCancelBtn">取消</button>
+                </div>
+                <div style="font-size:11.5px;color:var(--text3,#999);margin-top:5px;line-height:1.5;">
+                  不用改格式：<b>整段答案原文粘进来</b>即可（①②③ 一条一个要点，认不出会自动叫 AI）。
+                  想自己指定分值就写在行尾：（2分）/ 2分 / | 2；写不写都能用，不写每点按 1 分。
                 </div>
                 <div id="exPreview" style="margin-top:8px;"></div>
               </div>
@@ -330,12 +357,15 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
                  识别结果只是「填进输入框的草稿」，改完再存，绝不直接落盘。 -->
             <div id="ocrWrap" style="margin-top:9px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;background:#fcfdfe;">
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button class="btn tiny primary" type="button" id="ocrScanBtn">📠 扫描答案</button>
                 <button class="btn tiny" type="button" id="ocrBtn">📷 上传答案图片识别</button>
                 <span id="ocrHint" style="font-size:11.5px;color:var(--text3,#999);line-height:1.5;">
-                  把参考答案 / 评分标准拍照或截图传上来，识别成文字后可改再用；一次最多 8 张
+                  纸质答案直接点「扫描答案」，扫完可以在页面上框出要用的区域（一页可框多块）；拍照的走右边上传，一次最多 8 张
                 </span>
                 <input type="file" id="ocrInput" accept="image/*" multiple style="display:none;">
               </div>
+              <!-- 扫进来的答案页：每页一张缩略图 + 已框区域数，可反复改 -->
+              <div id="answerPages" style="display:none;margin-top:9px;"></div>
               <div id="ocrResult" style="display:none;margin-top:8px;"></div>
             </div>
 
@@ -531,6 +561,7 @@ async function loadContext() {
   $('#blockedBox').style.display = local ? 'none' : 'block';
   $('#scanBtn').disabled = !local;
   $('#importBtn').disabled = !local;
+  if ($('#ocrScanBtn')) $('#ocrScanBtn').disabled = !local;   // 扫描答案同样只能在本机
 
   $('#cfgBox').innerHTML =
     row('扫描设备', CTX.naps2_path || '未配置') +
@@ -600,27 +631,100 @@ function row(k, v) { return '<div class="row"><span>' + esc(k) + '</span><span>'
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 /* ---------------- 满分选择 ---------------- */
-// 默认跟批阅方案走（作文 25 / 数学 12 / 默写 10），老师手工改过就按学科记住，
-// 下次扫同一学科不用再填；换方案会跟着换回该方案的默认值，避免「改过一次全学科都变」。
+// 设计依据（都是公开规范，不是拍脑袋）：
+//   · Carbon / Spectrum 数字输入规范：**数字输入必须自带默认值，绝不留给用户一个空框**；
+//   · setproduct 表单控件参考：2–5 个有意义的选项应当直接铺开成可见的分段控件，
+//     而不是塞进下拉框——老师看得见才不会选错；
+//   · 关键信息不写 placeholder（输入后即消失），要写成常驻的说明文字。
+// 所以这里：学科默认值打底 → 常见分值一键点 → 特殊分值手填 → 底下一行常驻
+// 「本次按 X 分制批阅」，把生效值摊在明面上，而不是藏在 50px 的小框里。
+const MAX_PRESETS = {
+  english_essay: [15, 20, 25],
+  chinese_essay: [50, 60],
+  politics: [50, 100],
+  geography: [50, 100],
+  math_solution: [10, 12, 15],
+  dictation: [10, 20],
+  general: [100]
+};
+
 function maxScoreStore() {
   try { return JSON.parse(localStorage.getItem('qj_station_max') || '{}') || {}; }
   catch (e) { return {}; }
+}
+function saveMaxScoreStore(store) {
+  try { localStorage.setItem('qj_station_max', JSON.stringify(store)); } catch (e) {}
 }
 function currentSubjectKey() {
   const sel = $('#subjectSel');
   return (sel && sel.value) || 'english_essay';
 }
+function currentSubjectName() {
+  const gs = (CTX.grading && CTX.grading.subjects) || [];
+  const cur = gs.find(s => s.key === currentSubjectKey());
+  return (cur && cur.name) || '当前方案';
+}
 function subjectDefaultMax() {
   const gs = (CTX.grading && CTX.grading.subjects) || [];
   const cur = gs.find(s => s.key === currentSubjectKey());
   const v = Number(cur && cur.max_score);
-  return v > 0 ? v : 25;
+  // 方案没配分值也别回空：一律给个能用的数，界面永远不出现空框
+  return (isFinite(v) && v > 0) ? v : 25;
+}
+function presetList() {
+  const key = currentSubjectKey();
+  const def = subjectDefaultMax();
+  const list = (MAX_PRESETS[key] || []).slice();
+  if (list.indexOf(def) < 0) list.push(def);
+  return list.filter(v => v > 0).sort((a, b) => a - b);
+}
+function renderMaxChips() {
+  const box = $('#maxChips');
+  if (!box) return;
+  const el = $('#maxScore');
+  const cur = Number(el && el.value);
+  const def = subjectDefaultMax();
+  box.innerHTML = presetList().map(v =>
+    '<button type="button" class="maxchip' + (v === cur ? ' on' : '') + '" data-v="' + v + '"'
+    + ' title="' + (v === def ? '方案默认值' : '常用分值') + '">'
+    + v + (v === def ? '<span class="tag">默认</span>' : '') + '</button>'
+  ).join('');
+  $$('#maxChips .maxchip').forEach(b => {
+    b.onclick = () => {
+      const v = Number(b.dataset.v);
+      if ($('#maxScore')) $('#maxScore').value = v;
+      const store = maxScoreStore();
+      if (v === def) delete store[currentSubjectKey()];
+      else store[currentSubjectKey()] = v;
+      saveMaxScoreStore(store);
+      renderMaxChips();
+      updateMaxHint();
+    };
+  });
+}
+function updateMaxHint() {
+  const box = $('#maxHint');
+  if (!box) return;
+  const v = readMaxScore();
+  const def = subjectDefaultMax();
+  const custom = maxScoreStore()[currentSubjectKey()];
+  if (custom > 0 && custom !== def) {
+    box.style.color = '#8a5300';
+    box.innerHTML = '本次按 <b>' + esc(String(v)) + ' 分制</b>批阅（已自定义；' + esc(currentSubjectName())
+      + '方案默认 ' + esc(String(def)) + ' 分）';
+  } else {
+    box.style.color = '';
+    box.innerHTML = '本次按 <b>' + esc(String(v)) + ' 分制</b>批阅（' + esc(currentSubjectName())
+      + '方案的默认分值）';
+  }
 }
 function syncMaxScore() {
   const el = $('#maxScore');
   if (!el) return;
   const saved = Number(maxScoreStore()[currentSubjectKey()]);
-  el.value = saved > 0 ? saved : subjectDefaultMax();
+  el.value = (saved > 0 && saved <= 1000) ? saved : subjectDefaultMax();
+  renderMaxChips();
+  updateMaxHint();
 }
 function readMaxScore() {
   const el = $('#maxScore');
@@ -629,20 +733,26 @@ function readMaxScore() {
   return subjectDefaultMax();
 }
 if ($('#maxScore')) {
-  $('#maxScore').onchange = $('#maxScore').onblur = () => {
+  // 输入即生效：手填一个不在预设里的值时，输入框自身就是「自定义」的入口，
+  // 不必再点一次「确定」——扫描按钮读的就是这个值。
+  const onEdit = () => {
     const el = $('#maxScore');
     const v = Number(el.value);
     const store = maxScoreStore();
     const def = subjectDefaultMax();
     if (!(v > 0 && v <= 1000) || v === def) {
       delete store[currentSubjectKey()];
-      el.value = def;
+      if (!(v > 0 && v <= 1000)) el.value = def;   // 非法值不让它留在框里
     } else {
       store[currentSubjectKey()] = v;
-      el.value = v;
     }
-    try { localStorage.setItem('qj_station_max', JSON.stringify(store)); } catch (e) {}
+    saveMaxScoreStore(store);
+    renderMaxChips();
+    updateMaxHint();
   };
+  $('#maxScore').onchange = onEdit;
+  $('#maxScore').onblur = onEdit;
+  $('#maxScore').oninput = () => { renderMaxChips(); updateMaxHint(); };
   syncMaxScore();   // 先给个默认值，别让输入框空着；loadContext 拿到方案后会再校准
 }
 
@@ -780,8 +890,12 @@ function syncExerciseMaxScore() {
     el.readOnly = true;
     el.title = '满分 = 练习里各要点分值合计（' + ex.max_score + ' 分）；要改请改练习里的分值';
   } else {
+    // 从"锁着"变回"可填"时要把值还回去：否则会留着上一份练习的合计分（比如 10），
+    // 老师看着 10 分以为那是这门课的标准，实际上这门课默认是别的数
+    const wasLocked = el.readOnly === true;
     el.readOnly = false;
     el.title = '这一批卷子的满分；默认跟着上面的方案走，改了就按你填的算';
+    if (wasLocked) syncMaxScore();
   }
 }
 
@@ -790,10 +904,10 @@ function renderExerciseMeta() {
   if (!el) return;
   const ex = currentExerciseSummary();
   if (!ex) {
-    const any = (CTX.exercises || []).filter(e => e && e.subject === currentSubjectKey()).length;
-    el.innerHTML = any
-      ? '必须选一份练习：这批卷子按练习里的要点逐条判分，达到要点得分，写错别字不得分。'
-      : '这个学科还没有练习。点右边「＋ 新建练习」，把参考答案和每题要点粘进来（分值写在行尾）。';
+    // 老师问的是"我扫进去就能做吗"，这句就要先回答"能"。要点表是可选的增值项，
+    // 不该写成前置条件（原来是"就选一份练习，或点右边「＋ 新建练习」"，等于先给一道门）。
+    el.innerHTML = '不选也能扫：按<b>' + esc(currentSubjectMeta().name || '学科')
+      + '标准整体给分</b>（分数 + 评语，不逐点给分）。';
     return;
   }
   el.innerHTML = '📋 ' + esc(ex.title || '未命名练习') + ' · ' + (ex.question_count || 0) + ' 题 / '
@@ -811,7 +925,9 @@ function renderExerciseOptions() {
     .filter(e => e && e.id && (!e.subject || e.subject === subj))
     .sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')));
   const keep = usable.some(e => e.id === sel.value) ? sel.value : exerciseStore();
-  sel.innerHTML = '<option value="">— 选择本批练习（必选）—</option>'
+  // 默认项就是"不选"：老师最常见的诉求是"扫进去就能做"，
+  // 不该因为没准备要点表被挡在扫描仪前面
+  sel.innerHTML = '<option value="">— 不用要点表（按学科标准整体判分）—</option>'
     + usable.map(e => '<option value="' + esc(e.id) + '">' + esc(e.title || '未命名练习')
         + '（' + esc(e.max_score) + ' 分）</option>').join('');
   sel.value = usable.some(e => e.id === keep) ? keep : '';
@@ -827,9 +943,33 @@ function syncSubjectUi() {
   if (xw) xw.style.display = pts ? '' : 'none';
   const pm = $('#promptMode'), ph = $('#promptHint');
   if (pm) pm.textContent = pts ? '练习' : '题目';
-  if (ph) ph.textContent = pts ? '（必选，按要点逐条判分）' : '（可选，不填就按卷面识别题干）';
+  if (ph) ph.textContent = pts ? '（可选：选了按要点逐条判，不选就整体判分）' : '（可选，不填就按卷面识别题干）';
   renderExerciseOptions();
   syncPromptBadge();
+  syncMaxEnabled();
+}
+
+function syncMaxEnabled() {
+  // 要点判分学科（政治/地理）的满分来自练习里各要点分值的合计，扫描端填了也不作数。
+  // 与其让老师填一个「填了没用」的数，不如直接把控件收起说明白——说谎的输入框最伤信任。
+  const pts = (typeof isPointsSubject === 'function') && isPointsSubject();
+  const el = $('#maxScore');
+  if (el) {
+    el.disabled = !!pts;
+    el.style.opacity = pts ? '.45' : '';
+  }
+  $$('#maxChips .maxchip').forEach(b => {
+    b.disabled = !!pts;
+    b.style.opacity = pts ? '.45' : '';
+    b.style.cursor = pts ? 'not-allowed' : 'pointer';
+  });
+  const hint = $('#maxHint');
+  if (pts && hint) {
+    hint.style.color = '';
+    hint.innerHTML = '本学科按<b>练习里的要点分值合计</b>给分，这里不用填；选好练习后以练习总分为准。';
+  } else {
+    updateMaxHint();
+  }
 }
 
 function renderExSubjectOptions() {
@@ -927,26 +1067,93 @@ if ($('#exerciseNewBtn')) {
 }
 if ($('#exCancelBtn')) $('#exCancelBtn').onclick = () => showExerciseBox(false);
 
+// 「填个示例」：填的是老师手上答案文档的真实样子——没有「- 」、没有分值、带【答案】和 ①②③。
+// 让示例本身证明"不用改格式"，比在旁边写十条格式说明有用。
+const EX_SAMPLE = [
+  '16表格内填空题 答案【答案】①坚持以人民为中心  ②坚持全面深化改革  ③坚持全面依法治国  ④坚持推动构建人类命运共同体',
+  '',
+  '17简答题 答案',
+  '①人民代表大会制度是我国的根本政治制度。②保障人民当家作主，保证国家机关协调高效运转。'
+].join('\n');
+
+if ($('#exSampleBtn')) {
+  $('#exSampleBtn').onclick = () => {
+    const ta = $('#exNewBody');
+    if (!ta) return;
+    if (String(ta.value || '').trim() && !confirm('正文里已经有内容，用示例覆盖掉？')) return;
+    ta.value = EX_SAMPLE;
+    if ($('#exNewTitle') && !String($('#exNewTitle').value || '').trim()) {
+      $('#exNewTitle').value = '示例：主观题（照着改）';
+    }
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    toast('已填入示例，点「解析预览」看看，再换成你自己的答案', 'ok');
+  };
+}
+
+// 「AI 整理」：把原文交给模型拆成一条条要点，结果写回文本框。
+// 认不出来的时候（本地解析失败）保存/预览也会自动走这条路，这个按钮是给
+// "认出来了但拆得不对" 的情况用的。
+if ($('#exAiBtn')) {
+  $('#exAiBtn').onclick = async () => {
+    const ta = $('#exNewBody');
+    const body = String((ta && ta.value) || '');
+    if (!body.trim()) { toast('先把答案原文粘进来', 'err'); return; }
+    const btn = $('#exAiBtn');
+    const old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'AI 整理中…';
+    try {
+      const r = await api('/api/exercises/ai_parse', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject: currentSubjectKey(), text: body })
+      });
+      if (r.text && ta) ta.value = r.text;
+      if (r.title && $('#exNewTitle') && !String($('#exNewTitle').value || '').trim()) {
+        $('#exNewTitle').value = r.title;
+      }
+      renderExPreview(r.parsed || {});
+      toast('已整理成要点表，确认没问题就点「保存并使用」', 'ok');
+    } catch (e) {
+      renderExError(e);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  };
+}
+
+// 解析失败的提示要能直接照着改：错误原文 + 后端给的 warnings（含示例）
+function renderExError(err) {
+  const pv = $('#exPreview');
+  if (!pv) { toast(err.message, 'err'); return; }
+  pv.innerHTML = '<div style="padding:8px 10px;border:1px solid #f3c2c2;background:#fdf4f4;'
+    + 'border-radius:8px;color:#a33;font-size:12px;line-height:1.7;">'
+    + esc(err.message).replace(/\n/g, '<br>')
+    + ((err.warnings || []).length ? '<br><br>' + err.warnings.map(esc).join('<br>') : '')
+    + '</div>';
+}
+
 if ($('#exPreviewBtn')) {
   $('#exPreviewBtn').onclick = async () => {
     const btn = $('#exPreviewBtn');
     const body = exercisePayload({ dry_run: true });
-    if (!body.body.trim()) { toast('先把参考答案和要点粘进来', 'err'); return; }
+    if (!body.body.trim()) { toast('先把答案原文粘进来', 'err'); return; }
     btn.disabled = true;
     try {
       const r = await api('/api/exercises', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       });
+      // 后端认不出来时会自动叫 AI 整理，并把它整理好的文本一起返回：
+      // 直接写回文本框，老师看到的就是"能存的那一份"，不是他粘的原文
+      if (r.ai && r.text) {
+        const ta = $('#exNewBody');
+        if (ta) ta.value = r.text;
+        toast(r.ai, 'ok');
+      }
       renderExPreview(r.parsed || {});
     } catch (e) {
-      const pv = $('#exPreview');
-      if (pv) {
-        pv.innerHTML = '<div style="padding:8px 10px;border:1px solid #f3c2c2;background:#fdf4f4;'
-          + 'border-radius:8px;color:#a33;font-size:12px;line-height:1.6;">' + esc(e.message)
-          + ((e.warnings || []).length ? '<br>' + e.warnings.map(esc).join('<br>') : '') + '</div>';
-      } else {
-        toast(e.message, 'err');
-      }
+      renderExError(e);
     } finally {
       btn.disabled = false;
     }
@@ -958,7 +1165,7 @@ if ($('#exSaveBtn')) {
     const btn = $('#exSaveBtn');
     const isEdit = !!EX_EDIT_ID;   // showExerciseBox(false) 会清掉 EX_EDIT_ID，先存一份
     const body = exercisePayload();
-    if (!body.body.trim()) { toast('先把参考答案和要点粘进来', 'err'); return; }
+    if (!body.body.trim()) { toast('先把答案原文粘进来', 'err'); return; }
     btn.disabled = true;
     try {
       const r = await api('/api/exercises', {
@@ -980,9 +1187,12 @@ if ($('#exSaveBtn')) {
       if ($('#promptBox')) $('#promptBox').open = true;
       toast((isEdit ? '已更新' : '已建好') + '「' + (ex.title || '练习') + '」：'
         + (sum.question_count || 0) + ' 题 / ' + (sum.point_count || 0) + ' 个要点 / 总分 ' + (sum.max_score || 0)
-        + '，本批按它判分', 'ok');
+        + '，本批按它判分'
+        + (r.ai ? '（' + r.ai + '）' : ''), 'ok');
     } catch (e) {
-      toast('保存失败：' + e.message, 'err');
+      // 保存失败同样要把"为什么"摆在框里（多半就是没解析出题目），只弹一个 toast 等于让老师猜
+      renderExError(e);
+      toast('保存失败：' + String(e.message || '').split('\n')[0], 'err');
     } finally {
       btn.disabled = false;
     }
@@ -1129,6 +1339,103 @@ if ($('#ocrInput')) {
 
 
 
+/* ---------------- 扫描答案 → 框区域 → 识别 ---------------- */
+// 为什么单独一条链路：答案不是学生卷子。混进临时区会被「全部提交」当成试卷归档，
+// 也会把老师刚扫完的卷子挤出视野。所以答案页走自己的暂存区，扫完直接进框选。
+let ANSWER_PAGES = [];   // [{ id, url, regions: [{x,y,w,h,label}] }]
+
+function renderAnswerPages() {
+  const box = $('#answerPages');
+  if (!box) return;
+  if (!ANSWER_PAGES.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.style.display = '';
+  const total = ANSWER_PAGES.reduce((n, p) => n + (p.regions || []).length, 0);
+  box.innerHTML =
+    '<div style="font-size:11.5px;color:var(--text2);margin-bottom:6px;">已扫 '
+      + ANSWER_PAGES.length + ' 页，共框 ' + total + ' 块区域（不框就整页识别）</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
+    + ANSWER_PAGES.map((p, i) => `
+        <div style="width:106px;border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden;">
+          <img src="${p.url}" alt="" style="width:100%;height:104px;object-fit:cover;display:block;background:#f3f4f6;">
+          <div style="padding:4px 6px;font-size:11px;color:var(--text2);">第 ${i + 1} 页 · ${(p.regions || []).length} 块</div>
+          <button type="button" class="btn tiny" data-anscrop="${i}"
+                  style="width:100%;border-radius:0;border:0;border-top:1px solid var(--line);">框选区域</button>
+        </div>`).join('')
+    + '</div>'
+    + '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">'
+    + '<button type="button" class="btn tiny primary" id="ansOcrBtn">🔍 识别这些区域</button>'
+    + '<button type="button" class="btn tiny" id="ansClearBtn">清空答案页</button>'
+    + '</div>';
+  $$('#answerPages [data-anscrop]').forEach(b => b.onclick = () => openAnswerCrop(+b.dataset.anscrop));
+  if ($('#ansOcrBtn')) $('#ansOcrBtn').onclick = recognizeAnswer;
+  if ($('#ansClearBtn')) $('#ansClearBtn').onclick = clearAnswerPages;
+}
+
+async function scanAnswer() {
+  const btn = $('#ocrScanBtn');
+  const old = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span>扫描中，请把答案放进扫描仪…'; }
+  try {
+    const r = await api('/api/station/scan_answer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ replace: true }), timeout_ms: 180000
+    });
+    ANSWER_PAGES = (r.items || []).map(it => ({
+      id: it.id, url: '/api/station/answer_staging/' + it.id + '/image', regions: []
+    }));
+    renderAnswerPages();
+    toast('已扫入 ' + (r.count || ANSWER_PAGES.length) + ' 页答案，先框出要识别的区域', 'ok');
+    if (ANSWER_PAGES.length) openAnswerCrop(0);
+  } catch (e) {
+    if (e.jam) { fail('答案扫描失败 · 需要先取出卡纸', e.message, UNLOCK_BTN_HTML); showUnlock(); }
+    else fail('答案扫描失败', e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = old; }
+  }
+}
+
+async function recognizeAnswer() {
+  if (!ANSWER_PAGES.length) { toast('先扫一页答案', 'err'); return; }
+  const btn = $('#ansOcrBtn');
+  const old = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span>识别中…'; }
+  try {
+    const r = await api('/api/ocr/answer_key', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: isPointsSubject() ? 'exercise' : 'requirements',
+        subject: currentSubjectKey(),
+        items: ANSWER_PAGES.map(p => ({ id: p.id, regions: p.regions || [] }))
+      }),
+      timeout_ms: 240000
+    });
+    renderOcrResult(r);
+    if ($('#promptBox')) $('#promptBox').open = true;
+    toast('识别完成：' + (r.pages || 1) + ' 块，检查一下再填进去', 'ok');
+  } catch (e) {
+    const box = ocrResultBox();
+    if (box) {
+      box.style.display = '';
+      box.innerHTML = '<div style="padding:8px 10px;border:1px solid #f3c2c2;background:#fdf4f4;'
+        + 'border-radius:8px;color:#a33;font-size:12px;line-height:1.6;">' + esc(e.message)
+        + ((e.warnings || []).length ? '<br>' + e.warnings.map(esc).join('<br>') : '') + '</div>';
+    } else {
+      toast(e.message, 'err');
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = old; }
+  }
+}
+
+async function clearAnswerPages() {
+  try { await api('/api/station/answer_staging/clear', { method: 'POST' }); } catch (e) {}
+  ANSWER_PAGES = [];
+  renderAnswerPages();
+}
+
+if ($('#ocrScanBtn')) $('#ocrScanBtn').onclick = scanAnswer;
+
+
 /* ---------------- 扫描 / 导入 ---------------- */
 let JOB_TIMER = null;
 
@@ -1148,7 +1455,10 @@ function renderJob(j) {
   const pct = done ? 100 : (total ? Math.round(dn / total * 100) : 0);
   // 要点判分批次读的是「学号 + 作答」，不是作文正文；文案要跟着换，否则老师会以为批错了
   const stx = Object.assign({}, STAGE_TEXT);
-  if (j.exercise) { stx.reading = '识别学号与作答'; stx.grading = '逐点判分'; }
+  if (j.exercise || j.mode) {
+    stx.reading = '识别学号与作答';
+    stx.grading = (j.mode === 'free') ? '整体判分' : '逐点判分';
+  }
   $('#jobStage').textContent = job.message || stx[job.stage] || '处理中…';
   $('#jobPct').textContent = pct + '%';
   $('#jobBar').style.width = pct + '%';
@@ -1173,7 +1483,11 @@ function renderJob(j) {
     const byEx = j.exercise
       ? '<div style="margin-top:4px;color:var(--text3,#999);">判分依据：《' + esc(j.exercise.title || '练习')
         + '》' + (j.exercise.point_count || 0) + ' 个要点 / 满分 ' + esc(j.exercise.max_score) + '</div>'
-      : '';
+      : (j.mode === 'free'
+        // 没选练习 → 没说清"为什么只有总分"，老师会以为是明细没加载出来
+        ? '<div style="margin-top:4px;color:var(--text3,#999);">判分依据：按学科标准整体判分（本批没选要点表，'
+          + '所以只有总分和评语）</div>'
+        : '');
     foot.style.display = 'block';
     foot.innerHTML = `已归档 <b>${n}</b> 份 · <a href="/portal" target="_blank" rel="noopener">去用户端查看 →</a>` + byEx;
   } else if (err) {
@@ -1671,10 +1985,27 @@ window.addEventListener('keydown', e => {
 
 /* ---------------- 区域分割（一页多块） ---------------- */
 let cropItemId = null, cropRegions = [], cropSel = -1, dragState = null;
+// 同一个框选层服务两种用途：stage＝试卷区域（保存到临时区条目），
+// answer＝答案区域（只记在本地，识别时随请求送过去）。多一个 mode，少一套重复的拖拽代码。
+let cropMode = 'stage', cropAnswerIdx = -1;
+
+function setCropChrome(mode) {
+  const h = $('#cropMask .mhd h3');
+  const tip = $('#cropMask .mhd .hint');
+  if (h) h.textContent = mode === 'answer'
+    ? '答案区域 · 框出这次要识别的部分'
+    : '区域分割 · 框选要评阅的部分';
+  if (tip) tip.textContent = mode === 'answer'
+    ? '空白处拖动＝新增一块；一页可以框多块，每块单独识别后按顺序拼起来'
+    : '空白处拖动＝新增一块；点框选中后可移动、拖角缩放';
+}
 
 function openCrop(id) {
   const it = QUEUE.find(x => x.id === id);
   if (!it) return;
+  cropMode = 'stage';
+  cropAnswerIdx = -1;
+  setCropChrome('stage');
   cropItemId = id;
   cropSel = -1;
   const img = $('#cropImg');
@@ -1692,6 +2023,29 @@ function openCrop(id) {
     renderRegions();
   };
   img.src = '/api/station/staging/' + id + '/image?rotated=1&t=' + Date.now();
+  $('#cropMask').classList.add('show');
+}
+
+function openAnswerCrop(idx) {
+  const p = ANSWER_PAGES[idx];
+  if (!p) return;
+  cropMode = 'answer';
+  cropAnswerIdx = idx;
+  setCropChrome('answer');
+  cropItemId = p.id;
+  cropSel = -1;
+  const img = $('#cropImg');
+  img.onload = () => {
+    const w = wrapBox();
+    cropRegions = (p.regions || []).map((r, i) => ({
+      id: r.id || ('r' + (i + 1)),
+      label: r.label || ('区域' + (i + 1)),
+      x: r.x * w.width, y: r.y * w.height, w: r.w * w.width, h: r.h * w.height
+    }));
+    cropSel = cropRegions.length ? 0 : -1;
+    renderRegions();
+  };
+  img.src = '/api/station/answer_staging/' + p.id + '/image?t=' + Date.now();
   $('#cropMask').classList.add('show');
 }
 
@@ -1808,9 +2162,14 @@ document.addEventListener('mouseup', () => {
 
 function updateCropInfo() {
   const n = cropRegions.length;
-  if (!n) { $('#cropInfo').textContent = '未框选 · 整页当作一块'; return; }
+  const verb = cropMode === 'answer' ? '每块单独识别' : '每块独立评分';
+  if (!n) {
+    $('#cropInfo').textContent = cropMode === 'answer'
+      ? '未框选 · 整页送去识别' : '未框选 · 整页当作一块';
+    return;
+  }
   const i = cropSel >= 0 ? cropSel + 1 : 1;
-  $('#cropInfo').textContent = '共 ' + n + ' 块 · 每块独立评分 · 当前第 ' + i + ' 块';
+  $('#cropInfo').textContent = '共 ' + n + ' 块 · ' + verb + ' · 当前第 ' + i + ' 块';
 }
 
 function normRegions() {
@@ -1837,6 +2196,14 @@ $('#cropResetBtn').onclick = () => { cropRegions = []; cropSel = -1; renderRegio
 $('#cropCancelBtn').onclick = () => $('#cropMask').classList.remove('show');
 $('#cropSaveBtn').onclick = async () => {
   const list = normRegions();
+  if (cropMode === 'answer') {
+    const p = ANSWER_PAGES[cropAnswerIdx];
+    if (p) p.regions = list;
+    $('#cropMask').classList.remove('show');
+    renderAnswerPages();
+    toast(list.length ? ('已记下 ' + list.length + ' 块区域') : '这一页不框区域，整页送去识别', 'ok');
+    return;
+  }
   try {
     await api('/api/station/staging/' + cropItemId, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
