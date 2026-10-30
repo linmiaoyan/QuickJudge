@@ -193,6 +193,14 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .hwline .wf{color:#047857;}
 .qnote{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.6;}
 
+/* 科目区分：一个班里混着作文卷和政治卷，卡片上必须一眼分得出来 */
+.subjchip{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:999px;
+  font-size:11.5px;font-weight:600;background:var(--primary-soft);color:var(--primary-dark);
+  border:1px solid #bfdbfe;white-space:nowrap;}
+.subjchip.pts{background:#fff7ed;color:#9a3412;border-color:#fed7aa;}
+.subjtag{margin-left:8px;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:600;
+  background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;}
+
 /* 要点判分（政治 / 地理 …）：逐题列出要点是否拿到分。
    和作文的"逐句改错"视觉上要区分开，老师一眼能认出这是另一种卷子。 */
 .qblk+.qblk{margin-top:10px;padding-top:9px;border-top:1px dashed var(--line-soft);}
@@ -452,6 +460,9 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
           <button class="btn sm" id="backToClassesBtn">← 返回班级</button>
           <div class="pt"><span id="detailTitle"></span></div>
           <div class="acts">
+            <select id="subjectFilter" class="hidden" title="一个班里通常有好几科，按科目分开看">
+              <option value="">全部科目</option>
+            </select>
             <select id="statusFilter">
               <option value="">全部状态</option>
               <option value="pending">待批阅</option>
@@ -551,7 +562,7 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
 <script>
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
-let ME = null, CTX = null, VIEW = { class_name: '', status: '', student_id: '' };
+let ME = null, CTX = null, VIEW = { class_name: '', status: '', student_id: '', subject: '' };
 let RECORDS = [], EDIT_ID = null, LOAD_SEQ = 0;
 let SBATCH = null, SGROUPS = [];      // 学生端：当前打开的批次 / 全部批次
 
@@ -672,7 +683,7 @@ async function enterApp() {
   $('#studentPage').classList.add('hidden');
   SBATCH = null;
   syncTopbarH();
-  VIEW = { class_name: '', status: '', student_id: '' };
+  VIEW = { class_name: '', status: '', student_id: '', subject: '' };
   try {
     CTX = await api('/api/portal/overview');
   } catch (e) { toast(e.message, 'err'); return; }
@@ -999,6 +1010,14 @@ function num(v) {
   return String(r);
 }
 
+/* 科目小标签：要点判分类（政治/地理）用橙色，整篇作文等用蓝色 */
+function subjectBadge(r) {
+  const name = r.subject_name || '';
+  if (!name) return '';
+  const pts = !!(r.points && r.points.length);
+  return '<span class="subjchip' + (pts ? ' pts' : '') + '">' + esc(name) + '</span>';
+}
+
 function pointsHtml(r) {
   const qs = r.points || [];
   if (!qs.length) return '';
@@ -1067,6 +1086,7 @@ function recCardHtml(r, o) {
     + '<span class="sid">' + esc(r.student_id || (o.anon ? '' : '未填学号')) + '</span>'
     + (o.anon ? '' : '<span class="nm">' + esc(r.student_name || '') + '</span>')
     + (o.showClass && r.class_name ? '<span class="subj">' + esc(r.class_name) + '</span>' : '')
+    + (o.showSubject ? subjectBadge(r) : '')
     + (review ? '<span class="lvl bad">待确认</span>' : '')
     + badge
     + '<span class="tm">' + esc(fmt(r.submitted_at)) + '</span>'
@@ -1110,7 +1130,9 @@ function groupBatches(list) {
     let g = map.get(key);
     if (!g) {
       g = { key, title, task_id: r.task_id || '', batch_id: r.batch_id || '',
-            records: [], count: 0, graded: 0, pending: 0, last_at: '', score_text: '' };
+            records: [], count: 0, graded: 0, pending: 0, last_at: '', score_text: '',
+            // 一批卷子 = 一科：学生手里可能同时有作文批和政治批，卡上得说清是哪科
+            subject: r.subject || '', subject_name: r.subject_name || '' };
       map.set(key, g);
     }
     g.records.push(r);
@@ -1155,7 +1177,9 @@ function renderStudentHome() {
     const st = g.pending ? '<span class="lvl warn">待批阅 ' + g.pending + '</span>'
       : '<span class="lvl">已批阅</span>';
     return '<div class="bcard" data-batch="' + esc(g.key) + '">'
-      + '<div class="bt"><span>📝 ' + esc(g.title) + '</span><span class="rd">查看 →</span></div>'
+      + '<div class="bt"><span>📝 ' + esc(g.title) + '</span>'
+      + (g.records.length ? subjectBadge(g.records[0]) : '')
+      + '<span class="rd">查看 →</span></div>'
       + '<div class="bm">'
       + '<span>' + esc(fmt(g.last_at)) + '</span>'
       + '<span>' + g.count + ' 份</span>'
@@ -1173,6 +1197,7 @@ function renderStudentBatchPage(g) {
   $('#studentHome').classList.add('hidden');
   $('#studentPage').classList.remove('hidden');
   $('#sPageTitle').innerHTML = esc(g.title)
+    + (g.records.length ? ' ' + subjectBadge(g.records[0]) : '')
     + ' <span class="cnt">' + g.count + ' 份 · 提交 ' + esc(fmt(g.last_at))
     + (g.pending ? ' · 待批阅 ' + g.pending : ' · 已全部批阅') + '</span>';
   const body = $('#studentPageBody');
@@ -1183,7 +1208,7 @@ function renderStudentBatchPage(g) {
 /* 教师视角：本批共性分析（错误类型分布 + 要点覆盖 + 均分），一次批完自动得出 */
 // 作文与要点判分共用这一块：前者统计错因和要点覆盖，后者统计"哪个要点全班都没拿到"。
 // 后者对讲评更有用——某条要点 30 份里 28 份没写，多半是没讲到，而不是学生没听懂。
-function errStats(list) {
+function errStats(list, title) {
   const cnt = {}, req = { covered: 0, partial: 0, missing: 0 };
   const miss = {};          // 要点文本 → 未得分份数
   let graded = 0, sum = 0, maxSum = 0, withId = 0;
@@ -1224,7 +1249,9 @@ function errStats(list) {
   const pct = maxSum ? Math.round(sum / maxSum * 100) : 0;
   const missTop = Object.entries(miss).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-  return '<div class="eblk"><div class="eh">📊 本批共性分析<span class="cnt">已批 ' + graded + ' 份</span></div><div class="eb">'
+  return '<div class="eblk"><div class="eh">📊 共性分析'
+    + (title ? '<span class="subjtag">' + esc(title) + '</span>' : '')
+    + '<span class="cnt">已批 ' + graded + ' 份</span></div><div class="eb">'
     + '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:8px;">'
     + '<span>平均分 <b style="color:#b45309">' + (avg || '—') + '</b>' + (maxSum ? ' / ' + (maxSum / graded).toFixed(0) + '（' + pct + '%）' : '') + '</span>'
     + (totalErr ? '<span>人均错误 <b>' + (totalErr / graded).toFixed(1) + '</b> 处</span>' : '')
@@ -1288,10 +1315,18 @@ function renderTeacher() {
         : '<span class="pill ' + (c.claimed_by_me ? '' : 'gray') + '">'
           + (c.claimed_by_me ? '我的班级' : (c.owners && c.owners.length ? '他人班级' : '未认领')) + '</span>';
       const empty = !c.total ? ' style="opacity:.62;"' : '';
+      // 一个班通常有好几科：卡片上直接摊开各科份数，点进去之前就知道有什么
+      const sl = (c.subjects || []);
+      const subjLine = sl.length
+        ? '<div class="meta" style="margin-top:4px;flex-wrap:wrap;">' + sl.map(s =>
+            '<span class="subjchip' + (s.kind === 'points' ? ' pts' : '') + '">' + esc(s.name)
+            + ' ' + s.total + '</span>').join('') + '</div>'
+        : '';
       return `
       <div class="classcard" data-class="${esc(c.class_name)}"${empty}>
         <div class="t">${esc(c.class_name)} ${pill}</div>
         <div class="meta"><span>${c.total} 份</span><span>已批 ${c.graded}</span><span>待批 ${c.pending}</span><span>${c.student_count} 人</span></div>
+        ${subjLine}
         <div class="bar"><i style="width:${pct}%"></i><i class="p" style="width:${100 - pct}%"></i></div>
         <div class="meta" style="margin-top:6px;"><span>${c.total ? '最近提交 ' + esc(fmt(c.last_at)) : '还没有扫描件'}</span>${c.claimed_by_me ? '<button class="btn sm" data-release="' + esc(c.class_name) + '" style="margin-left:auto;padding:2px 8px;font-size:11.5px;" title="退出后会回到「未认领」，可重新认领">退出认领</button>' : ''}</div>
       </div>`;
@@ -1418,7 +1453,7 @@ function showRecordsLoading(cname) {
 async function openClass(cname) {
   const same = VIEW.class_name === cname && !$('#detailBox').classList.contains('hidden');
   if (same) { scrollToPage(); return; }      // 已经在看这个班，点切换条只回到顶部
-  VIEW = { class_name: cname, status: '', student_id: '' };
+  VIEW = { class_name: cname, status: '', student_id: '', subject: '' };
   $('#statusFilter').value = '';
   $('#sidSearch').value = '';
   $('#classHome').classList.add('hidden');   // 整页模式：班级网格整页让位给这一个班
@@ -1433,7 +1468,7 @@ async function openClass(cname) {
 
 /* 管理员：不选班，直接看全校所有试卷（跨班按时间倒序） */
 async function openAllPapers() {
-  VIEW = { class_name: '', status: '', student_id: '', all: true };
+  VIEW = { class_name: '', status: '', student_id: '', subject: '', all: true };
   $('#statusFilter').value = '';
   $('#sidSearch').value = '';
   $('#classHome').classList.add('hidden');
@@ -1449,7 +1484,8 @@ async function openAllPapers() {
 $('#backToClassesBtn').onclick = () => {
   $('#detailBox').classList.add('hidden');
   $('#classHome').classList.remove('hidden');
-  VIEW = { class_name: '', status: '', student_id: '' };
+  VIEW = { class_name: '', status: '', student_id: '', subject: '' };
+  const sf = $('#subjectFilter'); if (sf) { sf.value = ''; sf.classList.add('hidden'); }
   syncClassView();
   scrollToPage();
 };
@@ -1461,6 +1497,7 @@ $('#applyFilterBtn').onclick = () => {
 };
 $('#sidSearch').addEventListener('keydown', e => { if (e.key === 'Enter') $('#applyFilterBtn').click(); });
 $('#statusFilter').onchange = () => { VIEW.status = $('#statusFilter').value; loadTeacherRecords(); };
+$('#subjectFilter').onchange = () => { VIEW.subject = $('#subjectFilter').value; loadTeacherRecords(); };
 
 async function loadTeacherRecords() {
   const seq = ++LOAD_SEQ;
@@ -1468,6 +1505,7 @@ async function loadTeacherRecords() {
   if (VIEW.class_name) qs.set('class_name', VIEW.class_name);
   if (VIEW.status) qs.set('status', VIEW.status);
   if (VIEW.student_id) qs.set('student_id', VIEW.student_id);
+  if (VIEW.subject) qs.set('subject', VIEW.subject);
   let data;
   try { data = await api('/api/portal/records?' + qs.toString()); }
   catch (e) {
@@ -1478,20 +1516,37 @@ async function loadTeacherRecords() {
   }
   if (seq !== LOAD_SEQ) return;                      // 过期响应丢弃，防止慢请求覆盖新班级
   RECORDS = data.records || [];
+  const subjList = data.subjects || [];
+  renderSubjectFilter(subjList, data.base_count);
   const box = $('#teacherRecords');
-  const filtered = !!(VIEW.status || VIEW.student_id);
+  const filtered = !!(VIEW.status || VIEW.student_id || VIEW.subject);
   const titlePrefix = VIEW.all ? '全校 · 全部试卷' : (esc(VIEW.class_name || '全部班级') + ' · 已扫描试卷');
   const graded = RECORDS.filter(r => r.status === 'graded').length;
+  // 一个班里混着好几科是常态：标题里把各科份数摊开，一眼看得出这批是什么卷子
+  const bySubj = subjList.length > 1
+    ? '　<span style="color:var(--muted);font-size:12px;">' + subjList.map(s =>
+        esc(s.name) + ' ' + s.total).join(' · ') + '</span>'
+    : '';
   $('#detailTitle').innerHTML = titlePrefix
+    + (VIEW.subject ? '　<span class="subjchip">' + esc(subjectNameOf(VIEW.subject, subjList)) + '</span>' : '')
     + ' <span class="cnt">共 ' + RECORDS.length + ' 份 · 已批 ' + graded + ' · 待批 ' + (RECORDS.length - graded)
-    + (filtered ? '（已筛选）' : '') + '</span>';
+    + (filtered ? '（已筛选）' : '') + '</span>' + bySubj;
   renderNavStrip(RECORDS);
   if (!RECORDS.length) {
     box.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="big">🗂️</div>'
       + (filtered ? '该筛选条件下没有试卷。' : (VIEW.all ? '全校还没有已扫描的试卷。' : '这个班级还没有试卷。')) + '</div>';
     return;
   }
-  const statsHtml = errStats(RECORDS);
+  // 科目不止一科就各算各的：5 份作文（满分 25）和 3 份政治（满分 50）混在一起算平均分没有意义
+  const subjGroups = new Map();
+  RECORDS.forEach(r => {
+    const k = r.subject || 'unknown';
+    let g = subjGroups.get(k);
+    if (!g) { g = { key: k, name: subjectNameOf(k, subjList), records: [] }; subjGroups.set(k, g); }
+    g.records.push(r);
+  });
+  let statsHtml = '';
+  subjGroups.forEach(g => { statsHtml += errStats(g.records, subjGroups.size > 1 ? g.name : ''); });
   // 批改备注是「整批」的属性：同一批几十份卷子只在该批第一张卡上写一次，
   // 否则老师要往下滚几十个一模一样的琥珀色框。
   const noteSeen = new Set();
@@ -1500,12 +1555,46 @@ async function loadTeacherRecords() {
       const bk = r.batch_id || r.task_id || r.id;
       const first = !noteSeen.has(bk);
       noteSeen.add(bk);
-      return recCardHtml(r, { showClass: !!VIEW.all, actions: true, hideNote: !first });
+      return recCardHtml(r, { showClass: !!VIEW.all, actions: true, hideNote: !first,
+                              showSubject: subjGroups.size > 1 });
     }).join('');
   bindCommon();
   $$('[data-edit]').forEach(b => b.onclick = () => openEdit(b.dataset.edit));
   $$('[data-zoombtn]').forEach(b => b.onclick = () => showZoom(b.dataset.zoombtn, '原图'));
   $$('[data-del]').forEach(b => b.onclick = () => delRecord(b.dataset.del));
+}
+
+/* 科目名查表：记录里没带 subject_name 时从统计清单里找，最后回落到 key 本身 */
+function subjectNameOf(key, list) {
+  if (!key || key === 'unknown') return '未标注科目';
+  const hit = (list || []).find(s => s.key === key);
+  if (hit && hit.name) return hit.name;
+  const rec = RECORDS.find(r => (r.subject || '') === key && r.subject_name);
+  return (rec && rec.subject_name) || String(key);
+}
+
+/* 科目切换条：只在当前范围里确实有多科时出现，否则白占一行 */
+function renderSubjectFilter(list, baseCount) {
+  const sel = $('#subjectFilter');
+  if (!sel) return;
+  // 选中的科目被清空（卷子删了/换班了）→ 回到「全部科目」，否则会停在一个空列表上，
+  // 而切换条又被隐藏了，老师没有入口退出来
+  if (VIEW.subject && !(list || []).some(s => s.key === VIEW.subject)) {
+    VIEW.subject = '';
+    loadTeacherRecords();
+    return;
+  }
+  if ((list || []).length < 2) {
+    sel.classList.add('hidden');
+    sel.innerHTML = '<option value="">全部科目</option>';
+    sel.value = '';
+    return;
+  }
+  sel.classList.remove('hidden');
+  const total = baseCount || list.reduce((s, x) => s + (x.total || 0), 0);
+  sel.innerHTML = '<option value="">全部科目（' + total + '）</option>'
+    + list.map(s => '<option value="' + esc(s.key) + '">' + esc(s.name) + '（' + s.total + '）</option>').join('');
+  sel.value = list.some(s => s.key === VIEW.subject) ? VIEW.subject : '';
 }
 
 /* 整页详情里的名单跳转条：一个班几十份卷子，靠它横着扫一眼、点一下跳过去 */

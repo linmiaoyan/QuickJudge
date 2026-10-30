@@ -326,6 +326,19 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
               </div>
             </div>
 
+            <!-- 答案图片识别：老师手里的参考答案常常是纸质的，抄一遍要点又慢又容易抄错分值。
+                 识别结果只是「填进输入框的草稿」，改完再存，绝不直接落盘。 -->
+            <div id="ocrWrap" style="margin-top:9px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;background:#fcfdfe;">
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button class="btn tiny" type="button" id="ocrBtn">📷 上传答案图片识别</button>
+                <span id="ocrHint" style="font-size:11.5px;color:var(--text3,#999);line-height:1.5;">
+                  把参考答案 / 评分标准拍照或截图传上来，识别成文字后可改再用；一次最多 8 张
+                </span>
+                <input type="file" id="ocrInput" accept="image/*" multiple style="display:none;">
+              </div>
+              <div id="ocrResult" style="display:none;margin-top:8px;"></div>
+            </div>
+
             <label for="teacherNote" style="display:block;margin-top:9px;font-size:12px;color:var(--text2);">批改备注</label>
             <textarea id="teacherNote" rows="2" maxlength="300" placeholder="写一句话给批阅参考，例：这次只看第 2 段的建议部分；按中考标准评分，不扣书写分"
                       style="width:100%;box-sizing:border-box;margin-top:4px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;resize:vertical;"></textarea>
@@ -483,6 +496,9 @@ async function api(url, opts) {
       const err = new Error((data && (data.error || data.message)) || ('请求失败 ' + res.status));
       err.jam = !!(data && data.jam);
       err.diag = data && data.diag;
+      // 400 里常带着 warnings / parsed（解析预览、识别结果），丢掉就没法告诉老师哪里不对
+      err.warnings = (data && data.warnings) || [];
+      err.parsed = (data && data.parsed) || null;
       throw err;
     }
     return data;
@@ -981,6 +997,137 @@ if ($('#exerciseSel')) {
     syncPromptBadge();
   };
 }
+
+/* ---------------- 答案图片识别 ---------------- */
+// 识别 ≠ 保存：模型给的是草稿，老师核对过再点「保存并使用」。
+// 答案纸上常有自己的编号、分档描述、页眉页脚，机器照抄进评分标准只会添乱，
+// 所以这里永远留一步人工确认。
+let OCR_LAST = null;
+
+function ocrResultBox() { return $('#ocrResult'); }
+
+function clearOcrResult() {
+  OCR_LAST = null;
+  const box = ocrResultBox();
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+}
+
+function renderOcrResult(r) {
+  const box = ocrResultBox();
+  if (!box) return;
+  OCR_LAST = r;
+  const pts = (r.mode || 'exercise') === 'exercise';
+  const parsed = r.parsed || {};
+  const warns = (r.warnings || []).concat(r.errors || []);
+  const head = pts
+    ? '识别出 <b>' + ((parsed.questions || []).length) + '</b> 题 · <b>' + (parsed.point_count || 0)
+      + '</b> 个要点 · 总分 <b>' + (parsed.max_score || 0) + '</b> 分'
+    : '识别出 <b>' + (r.requirement_count || 0) + '</b> 条评分要点';
+  box.style.display = '';
+  box.innerHTML = '<div style="padding:8px 10px;border:1px solid #cfe6d6;background:#f4fbf6;'
+    + 'border-radius:8px;font-size:12.5px;">'
+    + '识别了 ' + (r.pages || 1) + ' 张，' + head
+    + (r.title ? '　<span style="color:var(--text3,#999);">标题：' + esc(r.title) + '</span>' : '')
+    + '</div>'
+    + (warns.length
+      ? '<div style="margin-top:6px;padding:7px 10px;border:1px solid #f5d9a8;background:#fff8ec;'
+        + 'border-radius:8px;color:#8a5300;font-size:12px;line-height:1.6;">'
+        + warns.map(x => '· ' + esc(x)).join('<br>') + '</div>'
+      : '')
+    + '<textarea id="ocrText" rows="8" style="width:100%;box-sizing:border-box;margin-top:6px;padding:7px 9px;'
+    + 'border:1px solid var(--line);border-radius:7px;font-family:ui-monospace,Consolas,monospace;'
+    + 'font-size:12.5px;line-height:1.7;resize:vertical;">' + esc(r.text || '') + '</textarea>'
+    + '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">'
+    + '<button class="btn tiny primary" type="button" id="ocrFill">'
+    + (pts ? '填入练习正文' : '填入题目要点') + '</button>'
+    + '<button class="btn tiny" type="button" id="ocrNote">追加到批改备注</button>'
+    + '<button class="btn tiny ghost" type="button" id="ocrClear">清空</button>'
+    + '<span style="font-size:11.5px;color:var(--text3,#999);align-self:center;">'
+    + '上面这段可以直接改，改完再填；填进去之后仍要「解析预览」确认一次</span>'
+    + '</div>';
+
+  const fillBtn = $('#ocrFill');
+  if (fillBtn) fillBtn.onclick = () => {
+    const text = String(($('#ocrText') || {}).value || '');
+    if (!text.trim()) { toast('识别结果是空的', 'err'); return; }
+    const title = (OCR_LAST && OCR_LAST.title) || '';
+    if (isPointsSubject()) {
+      if ($('#promptBox')) $('#promptBox').open = true;
+      showExerciseBox(true);
+      EX_EDIT_ID = '';                                  // 识别结果一律当新建，不覆盖已有练习
+      if ($('#exSaveBtn')) $('#exSaveBtn').textContent = '保存并使用';
+      if ($('#exNewTitle') && title && !$('#exNewTitle').value) $('#exNewTitle').value = title.slice(0, 60);
+      if ($('#exNewBody')) $('#exNewBody').value = text;
+      toast('已填入练习正文，先看「解析预览」对不对', 'ok');
+      if ($('#exPreviewBtn')) $('#exPreviewBtn').click();
+    } else {
+      if ($('#promptBox')) $('#promptBox').open = true;
+      if ($('#taskNewBox')) $('#taskNewBox').style.display = '';
+      if ($('#taskNewTitle') && title && !$('#taskNewTitle').value) $('#taskNewTitle').value = title.slice(0, 60);
+      if ($('#taskNewReqs')) $('#taskNewReqs').value = text;
+      toast('已填入题目要点，确认后点「保存并使用」', 'ok');
+    }
+  };
+
+  const noteBtn = $('#ocrNote');
+  if (noteBtn) noteBtn.onclick = () => {
+    const text = String(($('#ocrText') || {}).value || '').trim();
+    const el = $('#teacherNote');
+    if (!el || !text) return;
+    const cur = String(el.value || '').trim();
+    const joined = cur ? (cur + '\n' + text) : text;
+    // 备注是拼进提示词的一句话口径，只有 300 字；整份答案塞进去会被截断，反而误导模型
+    if (joined.length > 300) {
+      toast('批改备注上限 300 字，这段内容太长。建议「填入练习正文 / 题目要点」，备注只写一句口径。', 'err');
+      return;
+    }
+    el.value = joined;
+    try { localStorage.setItem('qj_station_note', el.value.slice(0, 300)); } catch (e) {}
+    syncPromptBadge();
+    toast('已追加到批改备注', 'ok');
+  };
+
+  const clr = $('#ocrClear');
+  if (clr) clr.onclick = clearOcrResult;
+}
+
+if ($('#ocrBtn')) {
+  $('#ocrBtn').onclick = () => { if ($('#ocrInput')) $('#ocrInput').click(); };
+}
+if ($('#ocrInput')) {
+  $('#ocrInput').onchange = async (ev) => {
+    const files = ev.target.files;
+    if (!files || !files.length) return;
+    const btn = $('#ocrBtn');
+    const old = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span>正在识别…'; }
+    const fd = new FormData();
+    Array.from(files).forEach(f => fd.append('files', f));
+    fd.append('mode', isPointsSubject() ? 'exercise' : 'requirements');
+    fd.append('subject', currentSubjectKey());
+    try {
+      const r = await api('/api/ocr/answer_key', { method: 'POST', body: fd, timeout_ms: 240000 });
+      renderOcrResult(r);
+      if ($('#promptBox')) $('#promptBox').open = true;
+      toast('识别完成：' + (r.pages || 1) + ' 张，检查一下再填进去', 'ok');
+    } catch (e) {
+      const box = ocrResultBox();
+      if (box) {
+        box.style.display = '';
+        box.innerHTML = '<div style="padding:8px 10px;border:1px solid #f3c2c2;background:#fdf4f4;'
+          + 'border-radius:8px;color:#a33;font-size:12px;line-height:1.6;">' + esc(e.message)
+          + ((e.warnings || []).length ? '<br>' + e.warnings.map(esc).join('<br>') : '') + '</div>';
+      } else {
+        toast(e.message, 'err');
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = old; }
+      ev.target.value = '';
+    }
+  };
+}
+
+
 
 /* ---------------- 扫描 / 导入 ---------------- */
 let JOB_TIMER = null;

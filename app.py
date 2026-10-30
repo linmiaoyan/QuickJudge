@@ -982,6 +982,163 @@ def _exercise_prompt_block(exercise):
     return '\n'.join(lines).strip()
 
 
+# ---------------------- 答案图片识别（把老师手里的参考答案拍成文字） ----------------------
+# 老师手里的答案往往是打印稿或手写稿，抄一遍要点再录进去很费事，也容易抄错分值。
+# 这里让视觉模型只做"读出来 + 按题拆好"，格式由服务端生成——这样出来的一定是
+# parse_exercise_body 认的格式，老师改两行就能用，而不是让模型去模仿我们的格式。
+
+ANSWER_KEY_EXERCISE_PROMPT = '''你在把一张「参考答案 / 评分标准」的图片转成结构化数据，供系统建评分标准用。
+
+只输出 JSON，不要 Markdown 代码块，不要解释：
+{
+  "title": "这份答案的标题（如「第 3 课 主观题 参考答案」）；图上没有就留空",
+  "questions": [
+    {
+      "no": "1",
+      "stem": "题目/设问原文（图上印了就抄，没印就留空）",
+      "answer": "参考答案正文（可多行，用 \\n 分段）",
+      "points": [{"text": "一条独立、可判定的给分要点", "score": 2}]
+    }
+  ],
+  "notes": ["图上读不准或拿不准的地方"]
+}
+
+规则（按重要性排序）：
+1. 分值以图上印的为准：「（2分）」「2分」「每点 2 分」「本小题 6 分」都要认出来；
+   「每点 N 分」要展开到每一条要点上；图上确实没标分值的，score 填 null，不要自己编。
+2. 一条要点 = 一个判分单位，要把整段话拆开（「保障人民当家作主；动员人民参与管理」是两条）。
+3. 要点文字要短、要能独立判断（15-30 字），不要写成"结合材料分析"这种无法判定的空话。
+4. 看不清的字用 [?] 占位并写进 notes，绝对不要猜着编。
+5. 不要把「评分说明」「注意事项」这类与得分无关的话写进 points，可以放进 notes。
+6. 题号原样保留（图片上是几就是几）；跨页时题目编号可能各自从 1 开始，照抄即可，系统会重整。'''
+
+ANSWER_KEY_REQUIREMENTS_PROMPT = '''你在把一张「作文题 / 写作要求 / 评分标准」的图片转成结构化数据。
+
+只输出 JSON，不要 Markdown 代码块，不要解释：
+{
+  "title": "题目名称（如「Unit 3 建议信」）；图上没有就留空",
+  "requirements": ["一条评分要点", "另一条评分要点"],
+  "notes": ["图上读不准或拿不准的地方"]
+}
+
+规则：
+1. requirements 每条写一个可判断的要求（内容点 / 格式 / 词数 / 语气），一行一条；
+2. 分档描述（"优秀 21-25 分"这类）拆成"达到什么标准"，不要写成区间；
+3. 看不清的字用 [?] 占位并写进 notes，不要猜。'''
+
+# 一次最多收几张答案图：答案一般 1-3 页，给 8 张足够，也避免误选整个文件夹把额度烧光
+ANSWER_OCR_MAX_PAGES = 8
+
+
+def _bytes_to_rgb(raw):
+    """上传的图片字节 → RGB 图（处理 PNG 透明通道与调色板，与 _open_image 同口径）。"""
+    img = Image.open(io.BytesIO(raw))
+    if img.mode == 'P':
+        img = img.convert('RGBA')
+    if img.mode in ('RGBA', 'LA'):
+        bg = Image.new('RGB', img.size, (255, 255, 255))
+        bg.paste(img, mask=img.split()[-1])
+        return bg
+    return img if img.mode == 'RGB' else img.convert('RGB')
+
+
+def _ocr_answer_page(img, mode='exercise', max_tokens=6000):
+    """识别一页答案图，返回 (dict, 错误信息)。mode: exercise | requirements。"""
+    if not minimax_api_key:
+        return None, '未配置 LLM_API_KEY，无法识别图片'
+    prompt = ANSWER_KEY_REQUIREMENTS_PROMPT if mode == 'requirements' else ANSWER_KEY_EXERCISE_PROMPT
+    try:
+        data_url = _img_to_data_url(img, 2200)
+        client = OpenAI(base_url=minimax_base_url, api_key=minimax_api_key, timeout=180.0)
+        resp, err = _llm_retry(lambda: _vision_chat(
+            client, model=resolve_vision_model(),
+            messages=[{'role': 'system', 'content': '你只做忠实转写与结构化，不评价、不改写内容。'},
+                      {'role': 'user', 'content': [
+                          {'type': 'image_url', 'image_url': {'url': data_url}},
+                          {'type': 'text', 'text': prompt}]}],
+            temperature=0, max_tokens=max_tokens), tries=2)
+        if resp is None:
+            return None, '识别失败：%s' % err
+        out = _loads_lenient(resp.choices[0].message.content or '')
+        if not isinstance(out, dict):
+            return None, '模型返回的不是 JSON'
+        return out, ''
+    except Exception as e:
+        return None, '识别失败：%s' % e
+
+
+def _merge_ocr_questions(pages):
+    """把多页识别结果并成一套题目；页内题号重复时整体重编号。
+
+    两张答案图各自从"1."开始编号是常态，直接拼会得到两道"第 1 题"，
+    解析后要点会被并到同一题里，分数就乱了。
+    """
+    merged = []
+    for page in pages:
+        for q in (page.get('questions') or []):
+            if not isinstance(q, dict):
+                continue
+            if not (q.get('answer') or q.get('points') or q.get('stem')):
+                continue
+            merged.append(q)
+    nos = [str(q.get('no') or '').strip() for q in merged]
+    if len(set(n for n in nos if n)) != len([n for n in nos if n]):
+        for i, q in enumerate(merged, 1):
+            q['no'] = str(i)
+    return merged
+
+
+def _render_exercise_text(questions, title=''):
+    """结构化题目 → 老师能直接改的文本（就是 parse_exercise_body 认的格式）。"""
+    lines = []
+    for i, q in enumerate(questions or [], 1):
+        no = str(q.get('no') or i).strip()
+        stem = ' '.join(str(q.get('stem') or '').split())
+        pts = [p for p in (q.get('points') or []) if isinstance(p, dict)]
+        want = 0.0
+        # 有点没标分值就不在题号行写总分：否则"题头 2 分 / 要点合计 3 分"这种自相矛盾的
+        # 数据会一路带到解析警告里，老师还得回头查是哪一步错了
+        all_scored = bool(pts)
+        for p in pts:
+            try:
+                sc = float(p.get('score') or 0)
+            except (TypeError, ValueError):
+                sc = 0.0
+            if sc <= 0:
+                all_scored = False
+            want += sc
+        head = '%s. %s' % (no, stem) if stem else '%s.' % no
+        if want > 0 and all_scored:
+            head += '（%s分）' % _fmt_num(want)
+        lines.append(head)
+        ans = str(q.get('answer') or '').strip()
+        if ans:
+            # 答案压成一行：多行答案里的续行会被解析器当成要点（以「-」开头时）
+            lines.append('答：' + ' '.join(ans.split()))
+        for p in pts:
+            text = ' '.join(str(p.get('text') or '').split())
+            if not text:
+                continue
+            try:
+                sc = float(p.get('score') or 0)
+            except (TypeError, ValueError):
+                sc = 0.0
+            lines.append('- %s%s' % (text, ('（%s分）' % _fmt_num(sc)) if sc > 0 else ''))
+        lines.append('')
+    return '\n'.join(lines).strip()
+
+
+def _render_requirements_text(requirements):
+    """作文要求 → 一行一条，正好是扫描端「新建题目」的 requirements 写法。"""
+    out = []
+    for i, r in enumerate(requirements or [], 1):
+        t = ' '.join(str(r or '').split())
+        if not t:
+            continue
+        out.append('%d. %s' % (len(out) + 1, t))
+    return '\n'.join(out)
+
+
 def decode_qr_from_image(image_bytes):
     """从图片字节中解析二维码内容，返回解码字符串或 None。用于试卷扫码自动归类。"""
     if not image_bytes or len(image_bytes) < 100:
@@ -2144,6 +2301,77 @@ def delete_exercise_api(exercise_id):
         return jsonify({'error': '练习不存在'}), 404
     save_exercises(keep)
     return jsonify({'ok': True})
+
+
+@app.route('/api/ocr/answer_key', methods=['POST'])
+def ocr_answer_key_api():
+    """上传参考答案/评分标准的图片，识别成文字回给老师。
+
+    mode=exercise（默认）：返回一套可直接建练习的文本（题号 / 答：/ 行尾分值）；
+    mode=requirements：返回作文用的一行一条评分要点。
+
+    **只识别、不保存**：识别结果先给老师看，他改完点「保存」才落盘。答案图往往
+    是别处搬来的、带自己的编号和分档描述，机器直接信它反而会错，必须留一道人工确认。
+    """
+    if _require_teacher():
+        return jsonify({'error': '仅教师或管理员可操作'}), 403
+    files = [f for f in (request.files.getlist('files') or []) if f and f.filename]
+    if not files:
+        return jsonify({'error': '请选择答案图片'}), 400
+    if len(files) > ANSWER_OCR_MAX_PAGES:
+        return jsonify({'error': '一次最多 %d 张，分两次传吧' % ANSWER_OCR_MAX_PAGES}), 400
+    mode = str(request.form.get('mode') or 'exercise').strip().lower()
+    if mode not in ('exercise', 'requirements'):
+        mode = 'exercise'
+    subject = str(request.form.get('subject') or '').strip()
+
+    pages, warnings, errors = [], [], []
+    for idx, f in enumerate(files, 1):
+        try:
+            img = _bytes_to_rgb(f.read())
+        except Exception as e:
+            errors.append('第 %d 张读不出来：%s' % (idx, e))
+            continue
+        data, err = _ocr_answer_page(img, mode=mode)
+        if err:
+            errors.append('第 %d 张：%s' % (idx, err))
+            continue
+        pages.append(data)
+        warnings.extend([str(n) for n in (data.get('notes') or []) if str(n).strip()])
+        if not data.get('questions') and not data.get('requirements'):
+            errors.append('第 %d 张没识别出题目/要点（可能拍糊了或不是答案页）' % idx)
+
+    if not pages:
+        return jsonify({'error': '一张都没认出来。' + ('；'.join(errors) if errors else '').strip()}), 400
+
+    title = next((str(p.get('title') or '').strip() for p in pages
+                  if str(p.get('title') or '').strip()), '')
+
+    if mode == 'requirements':
+        reqs = []
+        for p in pages:
+            reqs.extend(p.get('requirements') or [])
+        text = _render_requirements_text(reqs)
+        if not text:
+            return jsonify({'error': '没识别出评分要点，换一张清晰点的图试试',
+                            'warnings': warnings}), 400
+        return jsonify({'ok': True, 'mode': mode, 'title': title, 'text': text,
+                        'requirement_count': len(reqs), 'pages': len(pages),
+                        'warnings': warnings, 'errors': errors})
+
+    questions = _merge_ocr_questions(pages)
+    if not questions:
+        return jsonify({'error': '没识别出题目和要点，换一张清晰点的图试试',
+                        'warnings': warnings}), 400
+    text = _render_exercise_text(questions, title)
+    # 拿自己的解析器回读一遍：识别结果立刻变成"几题/几点/总分/警告"，
+    # 老师不用先存下来才知道哪里不对
+    parsed = parse_exercise_body(text, subject)
+    if parsed['warnings']:
+        warnings.extend(parsed['warnings'])
+    return jsonify({'ok': True, 'mode': mode, 'title': title, 'text': text,
+                    'parsed': parsed, 'pages': len(pages),
+                    'warnings': warnings, 'errors': errors})
 
 
 @app.route('/api/tasks/<task_id>', methods=['GET'])
@@ -7279,7 +7507,8 @@ def _teacher_visible_classes():
     return {c for c, lst in owners.items() if uid and uid in (lst or [])}
 
 
-def _filter_records_for_session(records, class_name='', student_id='', task_id='', status=''):
+def _filter_records_for_session(records, class_name='', student_id='', task_id='', status='',
+                                subject=''):
     role = session.get('user_role')
     uid = str(session.get('user_id') or '')
     if role == 'student':
@@ -7300,7 +7529,35 @@ def _filter_records_for_session(records, class_name='', student_id='', task_id='
         records = [r for r in records if (r.get('task_id') or '') == task_id]
     if status:
         records = [r for r in records if (r.get('status') or 'pending') == status]
+    if subject:
+        records = [r for r in records if (r.get('subject') or '') == subject]
     return records
+
+
+def _subject_counts(records):
+    """按科目统计份数（总数 / 已批 / 待批）。
+
+    一个班里同时有英语作文和政治卷是常态，门户不能只给一个混合的"共 N 份"——
+    5 份作文和 3 份政治混在一起算平均分没有意义，所以每个科目各自一份统计。
+    """
+    agg = {}
+    for r in records or []:
+        key = str(r.get('subject') or '').strip() or 'unknown'
+        d = agg.get(key)
+        if d is None:
+            name = str(r.get('subject_name') or '').strip()
+            if not name:
+                name = '未标注科目' if key == 'unknown' else _subject_display_name(key)
+            d = agg[key] = {'key': key, 'name': name, 'total': 0, 'graded': 0, 'pending': 0,
+                            'kind': subject_kind(key) if key != 'unknown' else 'generic'}
+        d['total'] += 1
+        if r.get('status') == 'graded':
+            d['graded'] += 1
+        else:
+            d['pending'] += 1
+    out = list(agg.values())
+    out.sort(key=lambda x: (-x['total'], x['name']))
+    return out
 
 
 def _record_image_version(rec):
@@ -10532,12 +10789,13 @@ def portal_overview():
     for r in scoped:
         c = r.get('class_name') or '未归档'
         g = groups.setdefault(c, {'class_name': c, 'total': 0, 'graded': 0, 'pending': 0,
-                                  'students': set(), 'last_at': ''})
+                                  'students': set(), 'last_at': '', 'records': []})
         g['total'] += 1
         if r.get('status') == 'graded':
             g['graded'] += 1
         else:
             g['pending'] += 1
+        g['records'].append(r)
         if r.get('student_id'):
             g['students'].add(str(r['student_id']))
         if (r.get('submitted_at') or '') > g['last_at']:
@@ -10549,14 +10807,14 @@ def portal_overview():
         for c in sorted(owned_only):
             if c not in groups:
                 groups[c] = {'class_name': c, 'total': 0, 'graded': 0, 'pending': 0,
-                             'students': set(), 'last_at': ''}
+                             'students': set(), 'last_at': '', 'records': []}
     elif role == 'admin':
         # 管理员默认就是管全校：名单里的班全列出来（0 份也列），
         # 否则空班在首页根本不出现，管理员点不进去，只能等别人扫了才有入口。
         for c in all_classes:
             if c not in groups:
                 groups[c] = {'class_name': c, 'total': 0, 'graded': 0, 'pending': 0,
-                             'students': set(), 'last_at': ''}
+                             'students': set(), 'last_at': '', 'records': []}
     group_list = []
     for c, g in groups.items():
         group_list.append({
@@ -10566,6 +10824,9 @@ def portal_overview():
             'pending': g['pending'],
             'student_count': len(g['students']),
             'last_at': g['last_at'],
+            # 一个班里通常有好几科：卡片上直接写清「作文 12 · 政治 8」，
+            # 老师不必点进去才发现这个班混着两科
+            'subjects': _subject_counts(g['records']),
             'claimed_by_me': uid in (owners.get(c) or []),
             'owners': owners.get(c) or [],
         })
@@ -10580,6 +10841,7 @@ def portal_overview():
         'total': len(scoped),
         'graded': len([r for r in scoped if r.get('status') == 'graded']),
         'pending': len([r for r in scoped if r.get('status') != 'graded']),
+        'subjects': _subject_counts(scoped),
         'classes': group_list,
         'all_classes': all_classes,
         'unclaimed_classes': unclaimed,
@@ -10589,18 +10851,28 @@ def portal_overview():
 
 @app.route('/api/portal/records', methods=['GET'])
 def portal_records():
-    """按条件列出已扫描档案（教师视图）。"""
+    """按条件列出已扫描档案（教师视图）。
+
+    返回体里的 `subjects` 是**当前筛选范围（不含 subject 条件）**的科目清单，
+    前端据此画科目切换条：选了「政治」以后，切换条还得能切回「全部」和别的科目，
+    所以这份清单不能用被 subject 过滤后的结果去算，否则一键进政治就只剩政治了。
+    """
     if not session.get('user_id'):
         return jsonify({'error': '未登录'}), 401
-    records = _filter_records_for_session(
+    base = _filter_records_for_session(
         load_records(),
         class_name=(request.args.get('class_name') or '').strip(),
         student_id=(request.args.get('student_id') or '').strip(),
         task_id=(request.args.get('task_id') or '').strip(),
         status=(request.args.get('status') or '').strip(),
     )
+    subjects = _subject_counts(base)
+    want = (request.args.get('subject') or '').strip()
+    records = [r for r in base if (r.get('subject') or '') == want] if want else list(base)
     records = sorted(records, key=lambda r: r.get('submitted_at') or '', reverse=True)
-    return jsonify({'records': [_public_record(r) for r in records], 'count': len(records)})
+    return jsonify({'records': [_public_record(r) for r in records], 'count': len(records),
+                    'subjects': subjects, 'subject': want,
+                    'base_count': len(base)})
 
 
 @app.route('/api/portal/records/<rec_id>/image')
