@@ -1088,12 +1088,25 @@ def _merge_ocr_questions(pages):
     return merged
 
 
+def _strip_score_tail(text):
+    """去掉行尾已有的分值标记。
+
+    模型抄题干时经常把「（6分）」一起带出来，我们再补一次合计分就成了
+    「…（6分）（6分）」。分值由我们按要点算，尾巴一律摘掉。
+    """
+    s = str(text or '').strip()
+    m = _SCORE_BRACKET_RE.search(s) or _SCORE_SUFFIX_RE.search(s)
+    if m:
+        return s[:m.start()].strip(' 　,，;；、')
+    return s
+
+
 def _render_exercise_text(questions, title=''):
     """结构化题目 → 老师能直接改的文本（就是 parse_exercise_body 认的格式）。"""
     lines = []
     for i, q in enumerate(questions or [], 1):
         no = str(q.get('no') or i).strip()
-        stem = ' '.join(str(q.get('stem') or '').split())
+        stem = _strip_score_tail(' '.join(str(q.get('stem') or '').split()))
         pts = [p for p in (q.get('points') or []) if isinstance(p, dict)]
         want = 0.0
         # 有点没标分值就不在题号行写总分：否则"题头 2 分 / 要点合计 3 分"这种自相矛盾的
@@ -1116,7 +1129,7 @@ def _render_exercise_text(questions, title=''):
             # 答案压成一行：多行答案里的续行会被解析器当成要点（以「-」开头时）
             lines.append('答：' + ' '.join(ans.split()))
         for p in pts:
-            text = ' '.join(str(p.get('text') or '').split())
+            text = _strip_score_tail(' '.join(str(p.get('text') or '').split()))
             if not text:
                 continue
             try:
