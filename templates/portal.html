@@ -9,8 +9,12 @@
 :root{
   --primary:#2563eb; --primary-dark:#1d4ed8; --primary-soft:#eff6ff;
   --bg:#f5f6f8; --card:#fff; --line:#e5e7eb; --line-soft:#f1f3f5;
-  --text:#111827; --text2:#6b7280; --muted:#9ca3af;
+  /* 三级文字都过 AA（白底）：#111827 17.7 / #4b5563 7.56 / #5f6b7a 5.43。
+     原 --muted #9ca3af 只有 2.54，家长/学生在手机上看基本是"淡淡的灰线"。 */
+  --text:#111827; --text2:#4b5563; --text3:#5f6b7a; --muted:#5f6b7a;
+  /* 亮色留给色块/圆点/进度条；文字与数字用深色变体，否则 26px 的大数字也只有 2.15。 */
   --ok:#10b981; --warn:#f59e0b; --danger:#ef4444;
+  --ok-ink:#047857; --warn-ink:#b45309; --danger-ink:#b91c1c;
   --radius:14px;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
@@ -56,8 +60,8 @@ input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(3
 .login-help .row{display:flex;gap:8px;align-items:flex-start;}
 .login-help .row .who{flex:0 0 46px;color:var(--muted);}
 .login-help code{background:#fff;border:1px solid var(--line);border-radius:4px;padding:0 5px;
-  font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--primary-dark);white-space:nowrap;}
-.login-help .foot{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);font-size:11.5px;color:var(--muted);}
+  font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--primary-dark);white-space:nowrap;}
+.login-help .foot{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);font-size:12px;color:var(--muted);}
 
 /* 顶栏 */
 .topbar{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:40;padding:12px 20px;display:flex;align-items:center;gap:14px;}
@@ -65,7 +69,7 @@ input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(3
 .topbar .who{font-size:13px;color:var(--text2);}
 .topbar .who b{color:var(--text);font-weight:600;}
 .topbar .spacer{flex:1;}
-.chip{font-size:11.5px;padding:3px 9px;border-radius:999px;background:var(--primary-soft);color:var(--primary-dark);border:1px solid #bfdbfe;font-weight:500;}
+.chip{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--primary-soft);color:var(--primary-dark);border:1px solid #bfdbfe;font-weight:500;}
 .chip.gray{background:#f3f4f6;border-color:var(--line);color:var(--text2);}
 
 .wrap{max-width:1280px;margin:0 auto;padding:20px 20px 70px;}
@@ -75,9 +79,13 @@ input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(3
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;}
 @media (max-width:520px){.stats{grid-template-columns:repeat(3,1fr);gap:8px;}}
 .stat{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;}
-.stat .n{font-size:26px;font-weight:600;letter-spacing:-.5px;line-height:1.2;}
+.stat .n{font-size:26px;font-weight:600;letter-spacing:-.5px;line-height:1.2;font-variant-numeric:tabular-nums;}
 .stat .l{font-size:12.5px;color:var(--text2);margin-top:2px;}
-.stat.g .n{color:var(--ok);} .stat.w .n{color:var(--warn);}
+/* 数字用 ink 色：--ok/--warn 本色当文字只有 2.1~2.5，26px 也够不上 AA 大字线 3.0 */
+.stat.g .n{color:var(--ok-ink);} .stat.w .n{color:var(--warn-ink);}
+/* 有待批阅时把这格点亮：这是唯一需要老师动手的数字，不该和两个"已完成"长一样 */
+.stat.w.act{border-color:#fcd34d;background:#fffbeb;box-shadow:0 0 0 3px rgba(245,158,11,.10);}
+.stat.w.act .l{color:var(--warn-ink);font-weight:600;}
 
 h2.sec{font-size:16px;margin:26px 0 12px;font-weight:600;display:flex;align-items:center;gap:8px;}
 h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
@@ -88,14 +96,16 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .classcard:hover{border-color:var(--primary);box-shadow:0 4px 16px rgba(37,99,235,.09);transform:translateY(-1px);}
 .classcard .t{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;}
 .classcard .meta{font-size:12.5px;color:var(--text2);margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;}
+/* 只有真存在积压时才出现，所以给它一点分量，不该和「35 人」一样淡 */
+.classcard .meta .waitn{color:var(--warn-ink);font-weight:600;}
 .classcard .bar{height:5px;background:#f1f3f5;border-radius:99px;margin-top:12px;overflow:hidden;display:flex;}
 .classcard .bar i{display:block;height:100%;background:var(--ok);}
 .classcard .bar i.p{background:#e5e7eb;}
-.pill{font-size:11px;padding:2px 8px;border-radius:999px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;}
-.pill.gray{background:#f3f4f6;color:var(--text2);border-color:var(--line);}
+.pill{font-size:12px;padding:2px 8px;border-radius:999px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;}
+.pill.gray{background:#f3f4f6;color:var(--muted);border-color:#dfe3e8;}
 
 .classcard.on{border-color:var(--primary);box-shadow:0 0 0 2px rgba(37,99,235,.18);}
-.classcard.on .t::after{content:"当前查看";margin-left:auto;font-size:10.5px;font-weight:500;color:var(--primary);}
+.classcard.on .t::after{content:"当前查看";margin-left:auto;font-size:12px;font-weight:500;color:var(--primary);}
 /* 未认领班级栏：数量多时先显示前 8 个，可展开 */
 .claimbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:12px 0 6px;padding:10px 12px;background:#f8fafc;border:1px dashed var(--line);border-radius:var(--radius);}
 .claimbar .lab{font-size:12.5px;color:var(--text2);margin-right:2px;}
@@ -111,7 +121,7 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .classswitch .cslab{font-size:12px;color:var(--muted);}
 .classswitch .cs{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:5px 12px;border-radius:999px;
   border:1px solid var(--line);background:#fff;color:var(--text2);cursor:pointer;transition:.15s;font-family:inherit;}
-.classswitch .cs i{font-style:normal;font-size:11px;color:var(--muted);}
+.classswitch .cs i{font-style:normal;font-size:12px;color:var(--muted);}
 .classswitch .cs:hover{border-color:var(--primary);color:var(--primary);}
 .classswitch .cs.on{background:var(--primary);border-color:var(--primary);color:#fff;}
 .classswitch .cs.on i{color:rgba(255,255,255,.8);}
@@ -129,13 +139,13 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .rec{background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;}
 .rec .pic{height:250px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:zoom-in;position:relative;border-bottom:1px solid var(--line-soft);}
 .rec .pic img{max-width:100%;max-height:100%;object-fit:contain;display:block;}
-.rec .st{position:absolute;top:10px;left:10px;font-size:11.5px;padding:3px 9px;border-radius:999px;background:rgba(17,24,39,.75);color:#fff;}
+.rec .st{position:absolute;top:10px;left:10px;font-size:12px;padding:3px 9px;border-radius:999px;background:rgba(17,24,39,.75);color:#fff;}
 .rec .st.done{background:rgba(16,185,129,.92);}
 .rec .bd{padding:14px 16px;display:flex;flex-direction:column;gap:10px;flex:1;}
 .rec .head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
 .rec .sid{font-family:ui-monospace,Consolas,monospace;font-size:15px;font-weight:600;letter-spacing:.5px;}
 .rec .nm{font-size:13px;color:var(--text2);}
-.rec .tm{font-size:11.5px;color:var(--muted);margin-left:auto;}
+.rec .tm{font-size:12px;color:var(--muted);margin-left:auto;}
 .rec .task{font-size:12px;color:var(--text2);}
 /* 本批批改备注：只在教师/管理员视角出现，用琥珀色和题目行区分开，
    让人一眼看出「这条不是卷面上的要求，是老师当批加的口径」 */
@@ -147,10 +157,10 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .scorerow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .score{font-family:ui-monospace,Consolas,monospace;font-size:19px;font-weight:600;color:#b45309;letter-spacing:.5px;}
 .score.na{font-size:13px;color:var(--muted);font-weight:400;}
-.lvl{font-size:11.5px;padding:2px 9px;border-radius:999px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;}
+.lvl{font-size:12px;padding:2px 9px;border-radius:999px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;}
 .lvl.warn{background:#fffbeb;color:#b45309;border-color:#fde68a;}
 .lvl.bad{background:#fef2f2;color:#b91c1c;border-color:#fecaca;}
-.subj{font-size:11.5px;color:var(--muted);}
+.subj{font-size:12px;color:var(--muted);}
 .pieces{display:flex;flex-direction:column;gap:10px;}
 .piece{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;}
 .piece .ph{display:flex;align-items:center;gap:8px;padding:7px 11px;background:#f9fafb;border-bottom:1px solid var(--line-soft);font-size:12px;}
@@ -160,7 +170,7 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .piece .thumbline{display:block;cursor:zoom-in;background:#f3f4f6;}
 .piece .thumbline img{display:block;width:100%;max-height:260px;object-fit:contain;}
 .plist{display:flex;flex-wrap:wrap;gap:5px;}
-.chip{font-size:11.5px;padding:2px 8px;border-radius:6px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;}
+.chip{font-size:12px;padding:2px 8px;border-radius:6px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;}
 .chip.bad{background:#fef2f2;color:#991b1b;border-color:#fecaca;}
 
 /* ---------- 英语作文专项 ---------- */
@@ -178,7 +188,7 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .req .ev{display:block;color:var(--muted);font-size:12px;margin-top:1px;}
 .err{display:flex;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line-soft);}
 .err:last-child{border-bottom:none;}
-.err .ty{flex:none;font-size:10.5px;padding:1px 6px;border-radius:5px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;height:18px;line-height:16px;}
+.err .ty{flex:none;font-size:12px;padding:1px 6px;border-radius:5px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;height:18px;line-height:16px;}
 .err .body{flex:1;min-width:0;}
 .err .q{color:#991b1b;text-decoration:line-through;text-decoration-color:rgba(153,27,27,.45);}
 .err .f{color:#047857;font-weight:500;}
@@ -191,16 +201,16 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .hwline:last-child{border-bottom:none;}
 .hwline .wr{flex:none;color:#92400e;font-weight:600;font-family:ui-monospace,Menlo,monospace;}
 .hwline .wf{color:#047857;}
-.qnote{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.6;}
+.qnote{font-size:12px;color:var(--muted);margin-top:7px;line-height:1.6;}
 
 /* 科目区分：一个班里混着作文卷和政治卷，卡片上必须一眼分得出来 */
 .subjchip{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:999px;
-  font-size:11.5px;font-weight:600;background:var(--primary-soft);color:var(--primary-dark);
+  font-size:12px;font-weight:600;background:var(--primary-soft);color:var(--primary-dark);
   border:1px solid #bfdbfe;white-space:nowrap;}
 .subjchip.pts{background:#fff7ed;color:#9a3412;border-color:#fed7aa;}
-.subjtag{margin-left:8px;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:600;
+.subjtag{margin-left:8px;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;
   background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;}
-.freebar{margin-top:6px;font-size:11.5px;color:var(--text2);background:#f8fafc;
+.freebar{margin-top:6px;font-size:12px;color:var(--text2);background:#f8fafc;
   border:1px dashed var(--line);border-radius:7px;padding:4px 9px;display:inline-block;}
 
 /* 要点判分（政治 / 地理 …）：逐题列出要点是否拿到分。
@@ -218,17 +228,17 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .ptl .pt .tx{flex:1 1 auto;min-width:0;}
 .ptl .pt .ps{flex:0 0 auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;}
 .ptl .pt.hit .ps{color:#15803d;font-weight:600;}
-.ptl .pt .ev{color:var(--muted);font-size:11.5px;}
+.ptl .pt .ev{color:var(--muted);font-size:12px;}
 .typo{display:inline-block;margin-left:5px;padding:0 6px;border-radius:5px;background:#fef2f2;
-  color:#991b1b;border:1px solid #fecaca;font-size:11.5px;}
+  color:#991b1b;border:1px solid #fecaca;font-size:12px;}
 .rawtext{margin-top:9px;padding-top:8px;border-top:1px dashed var(--line-soft);
   font-size:12px;color:var(--text2);line-height:1.7;white-space:pre-wrap;}
-.err .w{display:block;color:var(--muted);font-size:11.5px;margin-top:1px;}
+.err .w{display:block;color:var(--muted);font-size:12px;margin-top:1px;}
 .rw{padding:7px 0;border-bottom:1px dashed var(--line-soft);}
 .rw:last-child{border-bottom:none;}
 .rw .o{color:var(--text2);}
 .rw .n{color:#1d4ed8;font-weight:500;}
-.rw .fo{font-size:11px;color:var(--muted);margin-left:6px;}
+.rw .fo{font-size:12px;color:var(--muted);margin-left:6px;}
 .award{background:#fffbeb;border:1px solid #fde68a;border-radius:9px;padding:9px 11px;font-size:13px;line-height:1.7;}
 .award .qt{font-style:italic;color:#92400e;}
 .award .wh{display:block;color:#b45309;font-size:12px;margin-top:3px;}
@@ -241,7 +251,7 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .edu .h{font-size:12px;font-weight:600;color:var(--text2);margin:9px 0 3px;}
 .edu .li{padding:2px 0;border-bottom:1px dashed var(--line-soft);}
 .edu .li:last-child{border-bottom:none;}
-.edu .tag{font-size:10.5px;padding:1px 6px;border-radius:5px;background:var(--primary-soft);color:var(--primary-dark);margin-right:6px;}
+.edu .tag{font-size:12px;padding:1px 6px;border-radius:5px;background:var(--primary-soft);color:var(--primary-dark);margin-right:6px;}
 .awardlist{display:flex;flex-direction:column;gap:7px;}
 .awarditem{display:flex;gap:8px;font-size:12.5px;}
 .awarditem .who{flex:none;color:var(--muted);font-family:ui-monospace,Consolas,monospace;}
@@ -254,11 +264,11 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .essaybody del{color:#b91c1c;text-decoration:line-through;text-decoration-thickness:1.5px;text-decoration-color:#b91c1c;}
 .essaybody ins{color:#047857;text-decoration:none;font-weight:600;}
 .essaybody sup.mk{color:#b91c1c;font-size:9px;font-weight:700;margin-left:1px;}
-.causenote{font-size:11px;color:var(--muted);margin:8px 0 3px;}
+.causenote{font-size:12px;color:var(--muted);margin:8px 0 3px;}
 .causes{margin:0;padding-left:19px;}
 .causes li{font-size:12px;line-height:1.65;color:var(--text2);padding:3px 0;border-bottom:1px dashed var(--line-soft);}
 .causes li:last-child{border-bottom:none;}
-.causes li .ty{display:inline-block;font-size:10.5px;padding:0 5px;border-radius:4px;background:#fef2f2;
+.causes li .ty{display:inline-block;font-size:12px;padding:0 5px;border-radius:4px;background:#fef2f2;
   color:#991b1b;border:1px solid #fecaca;margin-right:5px;}
 .causes li b{color:#047857;font-weight:600;margin-right:5px;}
 .causes li .w{color:var(--muted);}
@@ -270,14 +280,14 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .upg .ar{color:var(--muted);margin:0 5px;}
 .upg .n{color:#047857;font-weight:600;}
 .upg .big{font-size:13.5px;line-height:1.75;color:#1d4ed8;margin-top:3px;}
-.upg .why{font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.6;}
+.upg .why{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.6;}
 .tags2{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;}
-.lab{font-size:10.5px;padding:1px 6px;border-radius:5px;background:var(--primary-soft);color:var(--primary-dark);}
+.lab{font-size:12px;padding:1px 6px;border-radius:5px;background:var(--primary-soft);color:var(--primary-dark);}
 .lab.g{background:#ecfdf5;color:#047857;}
 .lab.a{background:#fffbeb;color:#b45309;}
 .modelbox{background:#f8fafc;border:1px solid var(--line-soft);border-left:3px solid var(--primary);
   border-radius:8px;padding:10px 12px;font-family:Georgia,serif;font-size:13px;line-height:1.95;white-space:pre-wrap;}
-.mnote{font-size:11.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;
+.mnote{font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;
   padding:7px 9px;margin-top:7px;line-height:1.6;}
 .cp{margin-top:9px;}
 .cph{font-size:12px;font-weight:600;color:var(--text2);padding-bottom:3px;
@@ -286,7 +296,7 @@ h2.sec .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
 .ci:last-child{border-bottom:none;}
 .ci .en{font-size:12.8px;line-height:1.6;}
 .ci .cn{font-size:11.8px;color:var(--text2);}
-.ci .cu{font-size:11px;color:var(--muted);}
+.ci .cu{font-size:12px;color:var(--muted);}
 textarea{
   width:100%;min-height:120px;border:1px solid var(--line);border-radius:10px;padding:11px;
   font-family:inherit;font-size:13.5px;line-height:1.7;resize:vertical;outline:none;
@@ -308,6 +318,23 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
 .modal img.full{max-width:100%;display:block;margin:0 auto;border:1px solid var(--line);border-radius:10px;}
 
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:28px;z-index:500;display:flex;flex-direction:column;gap:8px;align-items:center;width:max-content;max-width:92vw;}
+
+/* ---------- 多选批阅 ---------- */
+/* 勾选框放在卡片标题行的最前面：一排 40 张卷子里，左边缘是最容易连点的地方，
+   塞进底部那排按钮里的话，每次都要先在卡片上找一遍。 */
+.pick{margin:0 2px 0 0;width:15px;height:15px;flex:0 0 auto;cursor:pointer;accent-color:var(--primary);}
+.rec.picked{box-shadow:0 0 0 2px var(--primary),0 6px 18px rgba(37,99,235,.14);}
+/* 选中后才出现的操作条：固定在底部，滚到哪都能点到 */
+#pickBar{position:fixed;left:0;right:0;bottom:0;z-index:120;display:none;align-items:center;gap:10px;
+  padding:10px 18px;background:rgba(17,24,39,.96);color:#fff;box-shadow:0 -6px 24px rgba(0,0,0,.22);
+  backdrop-filter:blur(6px);font-size:13.5px;}
+#pickBar.show{display:flex;}
+#pickBar .spacer{flex:1;}
+#pickBar .btn{background:transparent;border-color:rgba(255,255,255,.35);color:#fff;}
+#pickBar .btn:hover{background:rgba(255,255,255,.12);}
+#pickBar .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff;}
+#pickBar .btn.primary:hover{background:var(--primary-dark);}
+#pickBar .warn{color:#fbbf24;}
 .toast .t{background:#111827;color:#fff;padding:10px 18px;border-radius:10px;font-size:13.5px;box-shadow:0 8px 24px rgba(0,0,0,.22);}
 .toast .t.ok{background:#059669;} .toast .t.err{background:#dc2626;}
 .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;}
@@ -321,11 +348,23 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
   padding:10px 0;margin:-2px 0 14px;}
 .pagebar .pt{flex:1;min-width:180px;font-size:15.5px;font-weight:600;line-height:1.45;
   display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
-.pagebar .pt .cnt{font-size:12.5px;color:var(--muted);font-weight:400;}
+/* 计数不许在数字中间折行：原来窄一点就断成「… 待批」/「0」，
+   看着像排版坏了。要换行就整段换。 */
+.pagebar .pt .cnt{font-size:12.5px;color:var(--muted);font-weight:400;white-space:nowrap;}
 .pagebar .acts{display:flex;gap:7px;flex-wrap:wrap;align-items:center;}
 .pagebar select,.pagebar input[type=text]{width:auto;padding:7px 11px;font-size:13px;}
 /* 记录一律单列整宽：报告块多，两列会挤成一团 */
 .records.full{grid-template-columns:1fr;gap:18px;}
+/* 从 /portal/paper/<id> 进来时，把那张卷子亮一下，否则老师不知道跳到了哪一份 */
+.rec.focus{box-shadow:0 0 0 3px #6366f1,0 12px 28px rgba(99,102,241,.20);}
+/* 「改学号」的即时预览：先告诉老师会归到谁，再让他按保存 */
+.sidhint{font-size:12px;line-height:1.65;margin-top:6px;color:var(--muted);min-height:17px;}
+.sidhint.ok{color:#047857;}
+.sidhint.warn{color:#8a5300;}
+.sidhint.bad{color:#b91c1c;}
+.sidhint .cand{margin:3px 4px 0 0;padding:2px 8px;border:1px solid var(--line);border-radius:99px;
+  background:#fff;font-size:12px;cursor:pointer;font-family:inherit;color:var(--text);}
+.sidhint .cand:hover{border-color:var(--primary);color:var(--primary);}
 /* overflow 必须放出来：.rec 默认 overflow:hidden 会让里面的 sticky 完全失效，
    卷面图就跟着页面一起滚走了。裁圆角交给 .pic 自己。 */
 .rec.wide{display:grid;grid-template-columns:minmax(250px,330px) 1fr;align-items:start;overflow:visible;}
@@ -349,7 +388,7 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
   border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--text2);cursor:pointer;
   font-family:ui-monospace,Consolas,monospace;transition:.15s;}
 .navstrip .nb:hover{border-color:var(--primary);color:var(--primary);}
-.navstrip .nb i{font-style:normal;font-family:inherit;font-size:11px;color:var(--muted);}
+.navstrip .nb i{font-style:normal;font-family:inherit;font-size:12px;color:var(--muted);}
 .navstrip .nb.done i{color:var(--ok);}
 /* 学生端：批次卡列表 */
 .batchlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;}
@@ -408,6 +447,7 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
     <div class="who" id="whoBox"></div>
     <div class="spacer"></div>
     <span class="chip gray" id="roleChip"></span>
+    <button class="btn sm" id="copyLinkBtn" title="复制当前这一页的地址，发给别人打开就是同一页">🔗 本页链接</button>
     <button class="btn sm" id="changePwdBtn">修改密码</button>
     <button class="btn sm" id="logoutBtn">退出</button>
   </div>
@@ -473,6 +513,7 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
               <option value="">全部状态</option>
               <option value="pending">待批阅</option>
               <option value="graded">已批阅</option>
+              <option value="review">待确认（学号 / 分值）</option>
             </select>
             <input type="text" id="sidSearch" placeholder="按学号筛选">
             <button class="btn sm" id="applyFilterBtn">筛选</button>
@@ -503,14 +544,16 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
     <div class="mhd"><h3 id="editTitle">评语</h3><div class="spacer"></div><button class="btn sm" id="editClose">关闭</button></div>
     <div class="mbd">
       <div id="editMeta" style="font-size:13px;color:var(--text2);margin-bottom:10px;"></div>
+      <div class="sidhint" id="editSidNow" style="margin:-6px 0 10px;"></div>
       <div id="editPending" style="display:none;font-size:12.5px;color:#8a5300;background:#fff8ec;border:1px solid #f5d9a8;border-radius:10px;padding:8px 10px;margin-bottom:12px;line-height:1.5;">
         <b>这张没认出学号</b>，暂时挂在「待确认」。填上正确学号保存，它就会自动归到对应班级。
       </div>
       <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap;">
-        <div style="flex:0 0 150px;">
+        <div style="flex:0 0 190px;">
           <div style="font-size:12.5px;color:var(--text2);margin-bottom:6px;">学号（可手改）</div>
-          <input id="editSid" placeholder="如 0101 或 260101"
+          <input id="editSid" placeholder="如 1428 或 261428"
                  style="width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:13.5px;outline:none;font-family:ui-monospace,Consolas,monospace;">
+          <div class="sidhint" id="editSidHint"></div>
         </div>
         <div style="flex:0 0 140px;">
           <div style="font-size:12.5px;color:var(--text2);margin-bottom:6px;">卷面方向</div>
@@ -563,13 +606,69 @@ textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<!-- role=status：批量批阅、认领、保存这类操作的结果只弹在屏幕上，读屏用户原本一句都听不到。
+     容器必须在插入内容之前就存在，live region 才会被播报。错误条目单独标 role=alert。 -->
+<div class="toast" id="toast" role="status" aria-live="polite" aria-relevant="additions"></div>
+
+<!-- 页面级播报口：数据加载完/加载失败 这类"没有控件承载"的状态变化写到这里。
+     视觉上不可见，只给辅助技术读。 -->
+<div id="srStatus" role="status" aria-live="polite"
+     style="position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;"></div>
+
+<!-- 勾选若干张卷子后出现的操作条 -->
+<div id="pickBar">
+  <div>已选 <b id="pickCount">0</b> 份<span id="pickGraded" class="warn"></span></div>
+  <div class="spacer"></div>
+  <button class="btn sm" id="pickClear">取消选择</button>
+  <button class="btn sm primary" id="pickGrade">✍️ 批阅选中</button>
+</div>
+
+<!-- 批量批阅：一句提示词管这一批；重复批同一份＝覆盖旧结果 -->
+<div class="mask" id="bulkMask">
+  <div class="modal" style="max-width:680px;">
+    <div class="mhd"><h3>批阅选中的卷子</h3><div class="spacer"></div>
+      <button class="btn sm" id="bulkClose">关闭</button></div>
+    <div class="mbd">
+      <div id="bulkMeta" style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.7;"></div>
+      <div style="font-size:12.5px;color:var(--text2);margin-bottom:6px;">批改提示词
+        <span style="color:var(--muted);">（可选，这一批共用；不写就按学科标准批）</span></div>
+      <textarea id="bulkPrompt" rows="3" maxlength="300"
+        placeholder="例：按中考标准评分，不扣书写分；答出「原因 + 措施」两条即可给满分"
+        style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-family:inherit;font-size:13.5px;line-height:1.6;resize:vertical;"></textarea>
+      <div style="display:flex;gap:12px;align-items:flex-end;margin-top:12px;flex-wrap:wrap;">
+        <div style="flex:0 0 200px;">
+          <div style="font-size:12.5px;color:var(--text2);margin-bottom:6px;">满分（留空＝沿用每份自己的）</div>
+          <input id="bulkMax" type="number" min="1" max="150" step="0.5" placeholder="如 10">
+        </div>
+        <div id="bulkHint" style="flex:1 1 260px;font-size:12px;color:var(--muted);line-height:1.6;"></div>
+      </div>
+      <div id="bulkProg" style="display:none;margin-top:14px;">
+        <div style="height:6px;border-radius:99px;background:#eef2f7;overflow:hidden;"
+             role="progressbar" aria-label="批量批阅进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="bulkBarBox">
+          <div id="bulkBar" style="height:100%;width:0;background:var(--primary);transition:width .3s;"></div>
+        </div>
+        <!-- 逐份更新，polite 会被读屏合并成最新一条；批完再播一次结果 -->
+        <div id="bulkProgText" role="status" aria-live="polite"
+             style="font-size:12.5px;color:var(--text2);margin-top:6px;"></div>
+      </div>
+    </div>
+    <div class="mft">
+      <button class="btn" id="bulkCancel">取消</button>
+      <button class="btn primary" id="bulkRun">开始批阅</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 let ME = null, CTX = null, VIEW = { class_name: '', status: '', student_id: '', subject: '' };
 let RECORDS = [], EDIT_ID = null, LOAD_SEQ = 0;
+// 班级网格默认只铺「有卷的班 + 前 6 个空班」，其余收起来；这个是展开状态。
+let showAllClasses = false;
+// 已勾选的卷子 id。刷新列表不清空——老师可能批完一批接着再批同一批，
+// 但列表里已经不存在的 id 会在 syncPickBar 里被剔掉。
+const PICKED = new Set();
 let SBATCH = null, SGROUPS = [];      // 学生端：当前打开的批次 / 全部批次
 
 /* 吸顶顶栏高度 → CSS 变量，让整页详情里的 .pagebar 正好贴在它下面 */
@@ -584,8 +683,18 @@ function toast(msg, type) {
   const el = document.createElement('div');
   el.className = 't ' + (type || '');
   el.textContent = msg;
+  // 失败要让读屏立刻打断当前朗读（assertive），成功排队播报（polite，由容器决定）
+  if (type === 'err') el.setAttribute('role', 'alert');
   $('#toast').appendChild(el);
   setTimeout(() => el.remove(), type === 'err' ? 5200 : 2800);
+}
+/* 播报一句走屏幕之外的状态（加载完成/失败）。同一句话连续两次要清一下，
+   否则内容没变化，live region 不会重复播报。 */
+function srSay(msg) {
+  const box = $('#srStatus');
+  if (!box) return;
+  box.textContent = '';
+  setTimeout(() => { box.textContent = msg; }, 60);
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function fmt(t) { return t ? String(t).replace('T', ' ').slice(0, 16) : ''; }
@@ -676,6 +785,12 @@ function openPwdModal() {
   setTimeout(() => { const el = $('#pwdOld'); if (el) el.focus(); }, 60);
 }
 $('#changePwdBtn').onclick = openPwdModal;
+/* 「本页链接」：老师说「就那一页有问题」时，把地址发过来比描述十句都管用 */
+$('#copyLinkBtn').onclick = async () => {
+  const u = location.origin + routePath();
+  const ok = await copyText(u);
+  toast(ok ? '本页地址已复制：' + u : '复制失败，地址是：' + u, ok ? 'ok' : 'err');
+};
 $('#pwdClose').onclick = () => $('#pwdMask').classList.remove('show');
 $('#pwdCancel').onclick = () => $('#pwdMask').classList.remove('show');
 $('#pwdSave').onclick = async () => {
@@ -700,6 +815,160 @@ $('#pwdSave').onclick = async () => {
   }
 };
 
+/* ------------ 地址栏路由：每一页都有地址，出事时能指认 ------------ */
+/* 起因：老师发现一张卷子学号认错了，却只能描述「2610 那边那张」——没法复述、
+   没法发给我、我打开也落不到同一页。现在每个视图都有地址：
+     /portal                                首页
+     /portal/class/2610                     某班的全部试卷
+     /portal/class/2610/subject/politics    某班某科（可加 ?status=graded&sid=1428）
+     /portal/all                            全校（管理员）
+     /portal/paper/<记录id>                 单张试卷（自动跳进它所在班并高亮）
+     /portal/batch/<批次key>                学生端某一批
+   服务端对 /portal/* 一律渲染同一个页面，具体落到哪一页由这里按地址还原。 */
+const RBASE = '/portal';
+
+function routePath() {
+  if (ME && (ME.role === 'student')) {
+    return SBATCH ? RBASE + '/batch/' + encodeURIComponent(SBATCH) : RBASE;
+  }
+  let p = RBASE;
+  if (VIEW.all) p += '/all';
+  else if (VIEW.class_name) {
+    p += '/class/' + encodeURIComponent(VIEW.class_name);
+    if (VIEW.subject) p += '/subject/' + encodeURIComponent(VIEW.subject);
+  }
+  const qs = new URLSearchParams();
+  if (VIEW.status) qs.set('status', VIEW.status);
+  if (VIEW.student_id) qs.set('sid', VIEW.student_id);
+  const s = qs.toString();
+  return s ? p + '?' + s : p;
+}
+
+let ROUTE_BUSY = false;    // 正在按地址还原时，别把同一个地址再压进历史
+function syncRoute(mode) {
+  if (!ME || ROUTE_BUSY) return;
+  const url = routePath();
+  if (url === location.pathname + location.search) return;
+  try {
+    if (mode === 'replace') history.replaceState({ r: url }, '', url);
+    else history.pushState({ r: url }, '', url);
+  } catch (e) { /* 不支持 History API 也不影响用，只是地址不跟着变 */ }
+}
+
+function parseRoute() {
+  const seg = location.pathname.replace(/^\/portal\/?/, '').split('/').filter(Boolean);
+  const qs = new URLSearchParams(location.search);
+  const st = { kind: 'home', class_name: '', subject: '', all: false,
+               status: qs.get('status') || '', sid: qs.get('sid') || '', key: '' };
+  if (seg[0] === 'all') { st.kind = 'all'; return st; }
+  if (seg[0] === 'class' && seg[1]) {
+    st.kind = 'class';
+    st.class_name = decodeURIComponent(seg[1]);
+    if (seg[2] === 'subject' && seg[3]) st.subject = decodeURIComponent(seg[3]);
+    return st;
+  }
+  if ((seg[0] === 'paper' || seg[0] === 'batch') && seg[1]) {
+    st.kind = seg[0];
+    st.key = decodeURIComponent(seg.slice(1).join('/'));
+  }
+  return st;
+}
+
+/* 把地址还原成页面。登录后、前进后退时都走这里 */
+async function applyRoute() {
+  if (!ME) return;
+  const st = parseRoute();
+  const isTeacher = ME.role === 'teacher' || ME.role === 'admin';
+  ROUTE_BUSY = true;
+  try {
+    if (st.kind === 'paper') { await openPaper(st.key); return; }
+    if (st.kind === 'batch' && !isTeacher) { await openBatchByKey(st.key); return; }
+    if (isTeacher && (st.kind === 'class' || st.kind === 'all')) {
+      // /portal/all 只对管理员有意义：普通教师「全校」看到的是自己那几个班，标题会撒谎
+      if (st.kind === 'all' && ME.role !== 'admin') { renderTeacher(); return; }
+      if (st.kind === 'all') await openAllPapers();
+      else await openClass(st.class_name, st.subject);
+      if (st.status || st.sid) {
+        VIEW.status = st.status; VIEW.student_id = st.sid;
+        $('#statusFilter').value = st.status;
+        $('#sidSearch').value = st.sid;
+        await loadTeacherRecords();
+        syncRoute('replace');
+      }
+      return;
+    }
+    // 首页
+    if (isTeacher) { renderTeacher(); } else { renderStudent(); }
+  } finally { ROUTE_BUSY = false; }
+}
+
+/* 跳到某张卷子并亮一下：地址里只有记录 id，得先问服务端这张归谁 */
+async function openPaper(id) {
+  if (!id) return;
+  if (ME.role === 'student') {
+    if (!SGROUPS.length) renderStudent();
+    const g = SGROUPS.find(x => x.records.some(r => r.id === id));
+    if (!g) { renderStudent(); toast('这张试卷不在你名下（或还没扫描进来）', 'err'); return; }
+    SBATCH = g.key;
+    renderStudentBatchPage(g);
+    scrollToPage();
+    highlightRecord(id);
+    return;
+  }
+  let rec = RECORDS.find(x => x.id === id);
+  if (!rec) {
+    try {
+      const d = await api('/api/portal/records/' + encodeURIComponent(id));
+      rec = d.record || d;
+    } catch (e) {
+      toast(e.message || '打不开这张试卷', 'err');
+      renderTeacher();
+      return;
+    }
+  }
+  // 不带科目筛选进班：筛过的列表可能正好把这张排除在外，那就「跳过去却看不到」
+  await openClass(rec.class_name || '', '');
+  highlightRecord(id);
+}
+
+function highlightRecord(id) {
+  const el = document.getElementById('rec-' + id);
+  if (!el) { toast('这个地址里的试卷不在当前列表（可能被删了或没权限）', 'err'); return; }
+  const tb = $('.topbar'), bar = $('.pagebar');
+  const off = ((tb && tb.offsetHeight) || 0) + ((bar && bar.offsetHeight) || 0) + 16;
+  window.scrollTo({ top: Math.max(0, el.getBoundingClientRect().top + window.scrollY - off), behavior: 'auto' });
+  el.classList.add('focus');
+  setTimeout(() => el.classList.remove('focus'), 3000);
+}
+
+/* 学生端的批次地址：batch_id 优先，老数据可能只有 task_id */
+async function openBatchByKey(key) {
+  if (!SGROUPS.length) renderStudent();
+  let g = SGROUPS.find(x => x.key === key)
+       || SGROUPS.find(x => x.batch_id === key || x.task_id === key);
+  if (!g) { renderStudent(); toast('这一批不在你名下（可能批次号变了）', 'err'); return; }
+  SBATCH = g.key;
+  renderStudentBatchPage(g);
+  scrollToPage();
+  if (key !== g.key) syncRoute('replace');
+}
+
+window.addEventListener('popstate', () => { if (ME) applyRoute(); });
+
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; }
+  catch (e) {
+    // 内网 http 下 clipboard API 不可用，退回老办法
+    const ta = document.createElement('textarea');
+    ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+}
+
 /* ------------ 进入应用 ------------ */
 async function enterApp() {
   $('#loginView').classList.add('hidden');
@@ -719,8 +988,14 @@ async function enterApp() {
   VIEW = { class_name: '', status: '', student_id: '', subject: '' };
   try {
     CTX = await api('/api/portal/overview');
-  } catch (e) { toast(e.message, 'err'); return; }
+  } catch (e) { toast(e.message, 'err'); srSay('数据加载失败：' + e.message); return; }
   if (isTeacher) renderTeacher(); else renderStudent();
+  // 页面从「加载中」变成有内容，这个变化没有任何控件承载，说一句给读屏用户
+  srSay('已加载：共 ' + (CTX.total || 0) + ' 份试卷，已批阅 ' + (CTX.graded || 0)
+    + ' 份，待批阅 ' + (CTX.pending || 0) + ' 份。');
+  // 地址栏里如果带着具体页面（/portal/class/2610/…），登录后直奔那一页
+  if (parseRoute().kind !== 'home') await applyRoute();
+  else syncRoute('replace');
 }
 
 /* ------------ 学生视图 ------------ */
@@ -1014,8 +1289,8 @@ function batchHtml(r, anon) {
       + '<div class="awardlist">' + aws.map(a => {
         const who = anon ? '同学 ' + esc((a.student_id || '').slice(-2) || '') : (esc(a.student_id || '') + ' ' + esc(a.name || ''));
         return '<div class="awarditem"><span class="who">' + who + '</span><span><span class="q">“' + esc(a.quote || '') + '”</span>'
-          + (a.why ? '<br><span style="color:var(--muted);font-size:11.5px">' + esc(a.why) + '</span>' : '')
-          + (a.takeaway ? '<br><span style="color:var(--primary-dark);font-size:11.5px">借鉴：' + esc(a.takeaway) + '</span>' : '')
+          + (a.why ? '<br><span style="color:var(--muted);font-size:12px">' + esc(a.why) + '</span>' : '')
+          + (a.takeaway ? '<br><span style="color:var(--primary-dark);font-size:12px">借鉴：' + esc(a.takeaway) + '</span>' : '')
           + '</span></div>';
       }).join('') + '</div>';
   }
@@ -1073,7 +1348,7 @@ function pointsHtml(r) {
     const pts = q.points || [];
     return '<div class="qblk">'
       + '<div class="qhd"><span>第 ' + esc(q.no) + ' 题</span>'
-      + (pts.length ? '<span style="font-weight:400;color:var(--muted);font-size:11.5px;">'
+      + (pts.length ? '<span style="font-weight:400;color:var(--muted);font-size:12px;">'
           + (q.hit_count || 0) + '/' + (q.point_count || 0) + ' 个要点</span>' : '')
       + '<span class="qsc">' + num(q.score) + ' / ' + num(q.max) + '</span></div>'
       + (q.stem ? '<div class="qstem">' + esc(q.stem).replace(/\n/g, '<br>') + '</div>' : '')
@@ -1116,6 +1391,10 @@ function recCardHtml(r, o) {
       + (r.status === 'graded' ? '已批阅' : '待批阅') + '</div></div>')
     + '<div class="bd">'
     + '<div class="head">'
+    // 勾选框：选中若干张后可以在底部操作条里一起批（可带一句批改提示词）
+    + (o.actions ? '<input type="checkbox" class="pick" data-pick="' + esc(r.id) + '"'
+        + (PICKED.has(r.id) ? ' checked' : '')
+        + ' title="勾选后可批量批阅；已批过的再批会覆盖旧结果">' : '')
     + '<span class="sid">' + esc(r.student_id || (o.anon ? '' : '未填学号')) + '</span>'
     + (o.anon ? '' : '<span class="nm">' + esc(r.student_name || '') + '</span>')
     + (o.showClass && r.class_name ? '<span class="subj">' + esc(r.class_name) + '</span>' : '')
@@ -1130,6 +1409,12 @@ function recCardHtml(r, o) {
         + '🗒 本批批改备注：' + esc(r.teacher_note) + '</div>'
       : '')
     + scoreLine(r)
+    // 卷面印的分值和本批口径不一致：分数是按卷面自己的分值给的（3/4），
+    // 不换算成 10 分制（那会凭空虚高），但必须说清楚为什么这一份和同批别人不同制
+    + (r.score_note
+      ? '<div class="tnote" style="background:#fdecec;border-color:#f5c2c0;color:#b42318;">⚠ '
+        + esc(r.score_note) + '</div>'
+      : '')
     // 整体判分（本批没给要点表）：说清楚"为什么只有总分和评语、没有逐点明细"，
     // 否则老师会以为是明细没加载出来
     + ((r.grading && r.grading.mode === 'free')
@@ -1145,9 +1430,13 @@ function recCardHtml(r, o) {
     + pointsHtml(r)
     + (o.actions
       ? '<div class="acts">'
-        + (review ? '<button class="btn sm ok" data-edit="' + esc(r.id) + '">指定学号</button>' : '')
+        // 「改学号」必须一直在：卷面认错字是常态（1428 被认成 1043），
+        // 以前只在「待确认」卷子上才给按钮，正常的卷子认错了反而没地方改。
+        + '<button class="btn sm ' + (review ? 'ok' : '') + '" data-edit="' + esc(r.id) + '">'
+        + (review ? '指定学号' : '改学号') + '</button>'
         + '<button class="btn sm primary" data-edit="' + esc(r.id) + '">评语 / 批阅</button>'
         + '<button class="btn sm" data-zoombtn="' + esc(r.image_url) + '">看原图</button>'
+        + '<button class="btn sm" data-link="' + esc(r.id) + '" title="复制这张试卷的地址，直接发出去就能打开同一张">🔗 链接</button>'
         + '<button class="btn sm danger" data-del="' + esc(r.id) + '">删除</button>'
         + '</div>'
       : '')
@@ -1190,6 +1479,7 @@ function renderStudent() {
   $('#sTotal').textContent = CTX.total || 0;
   $('#sDone').textContent = CTX.graded || 0;
   $('#sWait').textContent = (CTX.total || 0) - (CTX.graded || 0);
+  syncWaitStats();
   RECORDS = list;
   SGROUPS = groupBatches(list);
   $('#sHint').textContent = SGROUPS.length ? SGROUPS.length + ' 个批次' : '暂无';
@@ -1228,7 +1518,7 @@ function renderStudentHome() {
   }).join('');
   $$('[data-batch]', box).forEach(el => el.onclick = () => {
     const g = SGROUPS.find(x => x.key === el.dataset.batch);
-    if (g) { SBATCH = g.key; renderStudentBatchPage(g); scrollToPage(); }
+    if (g) { SBATCH = g.key; renderStudentBatchPage(g); scrollToPage(); syncRoute(); }
   });
 }
 
@@ -1329,9 +1619,11 @@ function renderTeacher() {
   $('#tTotal').textContent = CTX.total || 0;
   $('#tDone').textContent = CTX.graded || 0;
   $('#tWait').textContent = CTX.pending || 0;
+  syncWaitStats();
   const cls = CTX.classes || [];
   $('#tClassTitle').textContent = isAdmin ? '全校班级' : '我的班级';
-  $('#tClassHint').textContent = cls.length ? cls.length + ' 个班级' : '';
+  // 具体数字在下面按「有卷 / 无卷」算完再写，这里先清空，避免旧值闪一下
+  $('#tClassHint').textContent = '';
   // 管理员默认看全校：给一个跨班的「全部试卷」入口，不用先点某个班
   const allBtn = $('#allPapersBtn');
   if (allBtn) {
@@ -1347,10 +1639,22 @@ function renderTeacher() {
         ? '你还没有认领班级。请在下方「未认领班级」里认领自己负责的班，认领后这里只显示你的班级。'
         : '还没有已扫描的试卷。请到扫描端扫描并提交。') + '</div>';
   } else {
-    grid.innerHTML = cls.map(c => {
+    // 43 个班里通常只有五六个真的有卷子，其余排出来全是「0 份 / 还没有扫描件」。
+    // 按原顺序铺满首屏，等于把有信号的班埋在噪声里——先按「有卷 / 无卷」分组，
+    // 有卷的按最近提交倒序排在前面，空班级沉底并折叠。
+    const withData = cls.filter(c => c.total)
+      .sort((a, b) => String(b.last_at || '').localeCompare(String(a.last_at || '')));
+    const noData = cls.filter(c => !c.total);
+    const EMPTY_SHOW = 6;   // 空班级最多先露 6 个，够感知"这些班还没扫"，又不至于把有卷的挤下去
+    const shown = showAllClasses ? withData.concat(noData) : withData.concat(noData.slice(0, EMPTY_SHOW));
+    const hiddenEmpty = showAllClasses ? 0 : Math.max(0, noData.length - EMPTY_SHOW);
+    $('#tClassHint').textContent =
+      (withData.length ? withData.length + ' 个班有卷' : '暂无扫描件') + ' · 共 ' + cls.length + ' 个';
+    grid.innerHTML = shown.map(c => {
       const pct = c.total ? Math.round(c.graded / c.total * 100) : 0;
-      // 管理员不属于任何班，标「他人班级 / 未认领」没有意义，统一标全校
-      const pill = isAdmin ? '<span class="pill gray">全校</span>'
+      // 管理员不属于任何班，每张卡都标一次「全校」是零信息（43 张卡 43 次重复），
+      // 班级范围已经写在标题行里了，卡片上不再标。
+      const pill = isAdmin ? ''
         : '<span class="pill ' + (c.claimed_by_me ? '' : 'gray') + '">'
           + (c.claimed_by_me ? '我的班级' : (c.owners && c.owners.length ? '他人班级' : '未认领')) + '</span>';
       const empty = !c.total ? ' style="opacity:.62;"' : '';
@@ -1361,15 +1665,30 @@ function renderTeacher() {
             '<span class="subjchip' + (s.kind === 'points' ? ' pts' : '') + '">' + esc(s.name)
             + ' ' + s.total + '</span>').join('') + '</div>'
         : '';
+      // 「35 份 已批 35 待批 0 35 人」四个数字里，份和人在一人一份时完全重复，
+      // 待批 0 是永远为 0 的噪声。只留有信息量的：人数、已批、真有积压时才出现的待批。
+      const nums = [];
+      if (c.total && c.total !== c.student_count) nums.push('<span>' + c.total + ' 份</span>');
+      if (c.student_count) nums.push('<span>' + c.student_count + ' 人</span>');
+      if (c.graded) nums.push('<span>已批 ' + c.graded + '</span>');
+      if (c.pending) nums.push('<span class="waitn">待批 ' + c.pending + '</span>');
+      const numLine = nums.length ? '<div class="meta">' + nums.join('') + '</div>' : '';
       return `
       <div class="classcard" data-class="${esc(c.class_name)}"${empty}>
         <div class="t">${esc(c.class_name)} ${pill}</div>
-        <div class="meta"><span>${c.total} 份</span><span>已批 ${c.graded}</span><span>待批 ${c.pending}</span><span>${c.student_count} 人</span></div>
+        ${numLine}
         ${subjLine}
         <div class="bar"><i style="width:${pct}%"></i><i class="p" style="width:${100 - pct}%"></i></div>
-        <div class="meta" style="margin-top:6px;"><span>${c.total ? '最近提交 ' + esc(fmt(c.last_at)) : '还没有扫描件'}</span>${c.claimed_by_me ? '<button class="btn sm" data-release="' + esc(c.class_name) + '" style="margin-left:auto;padding:2px 8px;font-size:11.5px;" title="退出后会回到「未认领」，可重新认领">退出认领</button>' : ''}</div>
+        <div class="meta" style="margin-top:6px;"><span>${c.total ? '最近提交 ' + esc(fmt(c.last_at)) : '还没有扫描件'}</span>${c.claimed_by_me ? '<button class="btn sm" data-release="' + esc(c.class_name) + '" style="margin-left:auto;padding:4px 9px;font-size:12px;" title="退出后会回到「未认领」，可重新认领">退出认领</button>' : ''}</div>
       </div>`;
-    }).join('');
+    }).join('') + (hiddenEmpty || showAllClasses ? `
+      <div style="grid-column:1/-1;text-align:center;padding:6px 0 2px;">
+        <button class="btn sm" id="toggleAllCls">${showAllClasses
+          ? '收起来，只留有卷的班'
+          : '展开另外 ' + hiddenEmpty + ' 个还没有扫件的班'}</button>
+      </div>` : '');
+    const tg = $('#toggleAllCls');
+    if (tg) tg.onclick = () => { showAllClasses = !showAllClasses; renderTeacher(); };
     $$('[data-class]', grid).forEach(el => el.onclick = () => openClass(el.dataset.class));
     // 退出认领：只在自己的班级卡片上出现；退完自动刷新，班级回到「未认领」
     $$('[data-release]', grid).forEach(b => b.onclick = async (e) => {
@@ -1468,6 +1787,7 @@ function applyClassStats(cname) {
   $('#tTotal').textContent = c.total;
   $('#tDone').textContent = c.graded;
   $('#tWait').textContent = c.pending;
+  syncWaitStats();
   $('#statScopeName').textContent = cname + '（' + c.total + ' 份）';
   $('#statScope').classList.remove('hidden');
 }
@@ -1479,6 +1799,19 @@ function resetStatsScope() {
   $('#tTotal').textContent = CTX.total || 0;
   $('#tDone').textContent = CTX.graded || 0;
   $('#tWait').textContent = CTX.pending || 0;
+  syncWaitStats();
+}
+
+/* 「待批阅」是三格里唯一需要老师动手的：>0 时把那格点亮（.act），
+   两个"已完成"保持平静。只影响视觉，不碰计数逻辑。 */
+function syncWaitStats() {
+  ['sWait', 'tWait'].forEach(function (id) {
+    const n = $('#' + id);
+    if (!n || !n.closest) return;
+    const box = n.closest('.stat');
+    if (!box) return;
+    box.classList.toggle('act', (parseInt(n.textContent, 10) || 0) > 0);
+  });
 }
 
 /* 详情页现在是「整页」：格子已隐藏，进页面直接回顶部即可 */
@@ -1489,10 +1822,13 @@ function showRecordsLoading(cname) {
     '<div class="loadingbox"><span class="spin dark"></span>正在加载 ' + esc(cname) + ' 班的试卷…</div>';
 }
 
-async function openClass(cname) {
-  const same = VIEW.class_name === cname && !$('#detailBox').classList.contains('hidden');
+async function openClass(cname, subject) {
+  // subject 来自地址（/portal/class/2610/subject/politics），点卡片进来时为空
+  const subj = subject || '';
+  const same = VIEW.class_name === cname && (VIEW.subject || '') === subj
+    && !$('#detailBox').classList.contains('hidden');
   if (same) { scrollToPage(); return; }      // 已经在看这个班，点切换条只回到顶部
-  VIEW = { class_name: cname, status: '', student_id: '', subject: '' };
+  VIEW = { class_name: cname, status: '', student_id: '', subject: subj };
   $('#statusFilter').value = '';
   $('#sidSearch').value = '';
   $('#classHome').classList.add('hidden');   // 整页模式：班级网格整页让位给这一个班
@@ -1503,6 +1839,7 @@ async function openClass(cname) {
   syncClassView();
   scrollToPage();
   await loadTeacherRecords();               // 先占位再拉数据，点下去立刻有反应
+  syncRoute();
 }
 
 /* 管理员：不选班，直接看全校所有试卷（跨班按时间倒序） */
@@ -1518,6 +1855,7 @@ async function openAllPapers() {
   syncClassView();
   scrollToPage();
   await loadTeacherRecords();
+  syncRoute();
 }
 
 $('#backToClassesBtn').onclick = () => {
@@ -1527,16 +1865,22 @@ $('#backToClassesBtn').onclick = () => {
   const sf = $('#subjectFilter'); if (sf) { sf.value = ''; sf.classList.add('hidden'); }
   syncClassView();
   scrollToPage();
+  syncRoute();
 };
 $('#statScopeBack').onclick = () => $('#backToClassesBtn').click();
 $('#applyFilterBtn').onclick = () => {
   VIEW.status = $('#statusFilter').value;
   VIEW.student_id = $('#sidSearch').value.trim();
   loadTeacherRecords();
+  syncRoute('replace');                      // 筛选不占历史，按后退不该退成「上一组筛选」
 };
 $('#sidSearch').addEventListener('keydown', e => { if (e.key === 'Enter') $('#applyFilterBtn').click(); });
-$('#statusFilter').onchange = () => { VIEW.status = $('#statusFilter').value; loadTeacherRecords(); };
-$('#subjectFilter').onchange = () => { VIEW.subject = $('#subjectFilter').value; loadTeacherRecords(); };
+$('#statusFilter').onchange = () => {
+  VIEW.status = $('#statusFilter').value; loadTeacherRecords(); syncRoute('replace');
+};
+$('#subjectFilter').onchange = () => {
+  VIEW.subject = $('#subjectFilter').value; loadTeacherRecords(); syncRoute('replace');
+};
 
 async function loadTeacherRecords() {
   const seq = ++LOAD_SEQ;
@@ -1561,6 +1905,7 @@ async function loadTeacherRecords() {
   const filtered = !!(VIEW.status || VIEW.student_id || VIEW.subject);
   const titlePrefix = VIEW.all ? '全校 · 全部试卷' : (esc(VIEW.class_name || '全部班级') + ' · 已扫描试卷');
   const graded = RECORDS.filter(r => r.status === 'graded').length;
+  const reviewN = RECORDS.filter(r => r.needs_review || r.class_name === '待确认').length;
   // 一个班里混着好几科是常态：标题里把各科份数摊开，一眼看得出这批是什么卷子
   const bySubj = subjList.length > 1
     ? '　<span style="color:var(--muted);font-size:12px;">' + subjList.map(s =>
@@ -1569,6 +1914,7 @@ async function loadTeacherRecords() {
   $('#detailTitle').innerHTML = titlePrefix
     + (VIEW.subject ? '　<span class="subjchip">' + esc(subjectNameOf(VIEW.subject, subjList)) + '</span>' : '')
     + ' <span class="cnt">共 ' + RECORDS.length + ' 份 · 已批 ' + graded + ' · 待批 ' + (RECORDS.length - graded)
+    + (reviewN ? ' · <span style="color:#a15c00;font-weight:700;">待确认 ' + reviewN + '</span>' : '')
     + (filtered ? '（已筛选）' : '') + '</span>' + bySubj;
   renderNavStrip(RECORDS);
   if (!RECORDS.length) {
@@ -1600,7 +1946,16 @@ async function loadTeacherRecords() {
   bindCommon();
   $$('[data-edit]').forEach(b => b.onclick = () => openEdit(b.dataset.edit));
   $$('[data-zoombtn]').forEach(b => b.onclick = () => showZoom(b.dataset.zoombtn, '原图'));
+  $$('[data-link]').forEach(b => b.onclick = async () => {
+    const u = location.origin + RBASE + '/paper/' + encodeURIComponent(b.dataset.link);
+    const ok = await copyText(u);
+    toast(ok ? '这张试卷的地址已复制：' + u : '复制失败，地址是：' + u, ok ? 'ok' : 'err');
+  });
   $$('[data-del]').forEach(b => b.onclick = () => delRecord(b.dataset.del));
+  // 列表重绘后勾选状态要跟着回来（勾过的卡片继续是勾上的、蓝框还在），
+  // 顺手把已经不在这一页的 id 从 PICKED 里剔掉
+  applyPickedToDom();
+  syncPickBar();
 }
 
 /* 科目名查表：记录里没带 subject_name 时从统计清单里找，最后回落到 key 本身 */
@@ -1621,6 +1976,7 @@ function renderSubjectFilter(list, baseCount) {
   if (VIEW.subject && !(list || []).some(s => s.key === VIEW.subject)) {
     VIEW.subject = '';
     loadTeacherRecords();
+    syncRoute('replace');
     return;
   }
   if ((list || []).length < 2) {
@@ -1661,6 +2017,43 @@ function bindCommon() {
 }
 
 /* ------------ 评语编辑 ------------ */
+/* 改学号时的即时预览：把「1428」解析成「261428 某某（2614 班）」先给老师看，
+   别等保存完才发现归错了人。 */
+let SID_TIMER = null;
+function sidHint(html, cls) {
+  const el = $('#editSidHint');
+  if (!el) return;
+  el.className = 'sidhint' + (cls ? ' ' + cls : '');
+  el.innerHTML = html;
+}
+function editRecord() { return RECORDS.find(x => x.id === EDIT_ID) || {}; }
+async function previewSid() {
+  const q = ($('#editSid').value || '').trim();
+  const cur = String(editRecord().student_id || '');
+  if (!q) { sidHint('留空表示不改归属'); return; }
+  if (q === cur) { sidHint('和现在一致，不用改'); return; }
+  sidHint('查询中…');
+  let d;
+  try {
+    d = await api('/api/portal/roster/resolve?q=' + encodeURIComponent(q)
+                  + '&class=' + encodeURIComponent(editRecord().class_name || ''));
+  } catch (e) { sidHint(''); return; }
+  if (d.exact) {
+    sidHint('→ 会归到 <b>' + esc(d.exact.id) + ' ' + esc(d.exact.name) + '</b>'
+      + (d.exact.class_name ? '（' + esc(d.exact.class_name) + ' 班）' : '')
+      + (d.note ? '　<span style="color:#8a5300">' + esc(d.note) + '</span>' : ''), 'ok');
+  } else if ((d.candidates || []).length) {
+    sidHint('名单里有 ' + d.candidates.length + ' 个可能，点一个填进去：'
+      + d.candidates.map(c => '<button class="cand" data-pick="' + esc(c.id) + '">'
+          + esc(c.id) + ' ' + esc(c.name) + '</button>').join(''), 'warn');
+    $$('#editSidHint [data-pick]').forEach(b => b.onclick = () => {
+      $('#editSid').value = b.dataset.pick; previewSid();
+    });
+  } else {
+    sidHint('⚠ ' + esc(d.note || '名单里没有这个学号') + '，保存会被拒绝', 'bad');
+  }
+}
+
 function openEdit(id) {
   const r = RECORDS.find(x => x.id === id);
   if (!r) return;
@@ -1671,22 +2064,38 @@ function openEdit(id) {
     (r.task_title ? ' · 任务 ' + r.task_title : '') +
     ' · 提交 ' + fmt(r.submitted_at) +
     (r.graded_at ? ' · 评于 ' + fmt(r.graded_at) : '');
+  // 卷面认出来的是「1043」，系统补成「261043」——这两个值必须并排给老师看，
+  // 否则他只会看到「张紫芯」这个名字，压根不知道自己被认成了别人。
+  const seen = String(r.student_id_seen || '').replace(/\D/g, '');
+  const sid = String(r.student_id || '');
+  $('#editSidNow').innerHTML = '当前归到：<b>' + esc(sid || '未填') + '</b>'
+    + (r.student_name ? ' ' + esc(r.student_name) : '')
+    + (r.class_name ? '（' + esc(r.class_name) + ' 班）' : '')
+    + (seen ? '　·　卷面识别：<b>' + esc(seen) + '</b>' : '')
+    + (seen && sid && seen !== sid ? '　<span style="color:#b91c1c">两者不一致，确认下是不是认错了</span>' : '');
   $('#editComment').value = r.ai_comment || '';
   $('#editScore').value = r.score_text || '';
-  $('#editSid').value = r.student_id || r.student_id_seen || '';
+  $('#editSid').value = sid || seen || '';
   $('#editRot').value = String(r.rotation || 0);
   const pending = r.needs_review || (r.class_name === '待确认');
   $('#editPending').style.display = pending ? '' : 'none';
   $('#editSubj').textContent = (r.subject_name ? '方案：' + r.subject_name : '')
     + ((r.pieces || []).length ? ' · 共 ' + r.pieces.length + ' 块' : '');
   $('#editEssay').textContent = r.essay_text || '（还没有识别记录）';
+  sidHint('和现在一致，不用改');
   $('#editMask').classList.add('show');
 }
+$('#editSid').addEventListener('input', () => {
+  clearTimeout(SID_TIMER);
+  SID_TIMER = setTimeout(previewSid, 260);
+});
 $('#editClose').onclick = () => { $('#editMask').classList.remove('show'); };
 
 $('#saveCommentBtn').onclick = async () => {
   if (!EDIT_ID) return;
   const btn = $('#saveCommentBtn');
+  const beforeSid = String((editRecord() || {}).student_id || '');
+  const beforeCls = String((editRecord() || {}).class_name || '');
   btn.disabled = true;
   try {
     const r = await jpost('/api/portal/records/' + EDIT_ID + '/comment', {
@@ -1695,7 +2104,16 @@ $('#saveCommentBtn').onclick = async () => {
       student_id: ($('#editSid').value || '').trim(),
       rotation: Number($('#editRot').value || 0)
     });
-    toast('已保存', 'ok');
+    // 换人 = 换班：卷子会从当前班的列表里消失，不说清楚老师会以为被删了
+    const afterSid = String(((r || {}).record || {}).student_id || beforeSid);
+    const afterCls = String(((r || {}).record || {}).class_name || beforeCls);
+    if (afterSid && afterSid !== beforeSid) {
+      toast('已改归到 ' + afterSid
+        + (afterCls ? '（' + afterCls + ' 班）' : '')
+        + (afterCls && afterCls !== beforeCls ? '，试卷已从 ' + beforeCls + ' 班转走' : ''), 'ok');
+    } else {
+      toast('已保存', 'ok');
+    }
     $('#editMask').classList.remove('show');
     await refreshCurrent();
     return r;
@@ -1721,22 +2139,129 @@ $('#genAiBtn').onclick = async () => {
   finally { btn.disabled = false; btn.textContent = old; }
 };
 
+/* ---------- 多选 + 批量批阅 ---------- */
+function pickedRecords() {
+  return RECORDS.filter(r => PICKED.has(r.id));
+}
+
+function syncPickBar() {
+  const bar = $('#pickBar');
+  if (!bar) return;
+  // 列表换了（切班/筛选/删卷子）之后，勾选里可能留着已经不在这一页的 id：
+  // 留着不带害，只会让"已选 N 份"和眼前对不上，直接剔掉。
+  const alive = new Set(RECORDS.map(r => r.id));
+  Array.from(PICKED).forEach(id => { if (!alive.has(id)) PICKED.delete(id); });
+  const n = PICKED.size;
+  bar.classList.toggle('show', n > 0);
+  // 操作条是浮在底部的，给它让出位置，否则最后一张卷子的按钮被压住点不到
+  document.body.style.paddingBottom = n > 0 ? '58px' : '';
+  $('#pickCount').textContent = n;
+  const graded = pickedRecords().filter(r => r.status === 'graded').length;
+  // 已批过的会被覆盖 —— 这件事必须在点按钮之前说清楚，而不是事后才发现成绩变了
+  $('#pickGraded').textContent = graded ? '（其中 ' + graded + ' 份已批阅，会覆盖）' : '';
+}
+
+function applyPickedToDom() {
+  $$('[data-pick]').forEach(cb => {
+    const on = PICKED.has(cb.dataset.pick);
+    cb.checked = on;
+    const card = cb.closest('.rec');
+    if (card) card.classList.toggle('picked', on);
+  });
+}
+
+// 勾选框是随列表整体重绘的，所以用委托，别一个个绑
+document.addEventListener('change', e => {
+  const cb = e.target.closest && e.target.closest('[data-pick]');
+  if (!cb) return;
+  if (cb.checked) PICKED.add(cb.dataset.pick); else PICKED.delete(cb.dataset.pick);
+  const card = cb.closest('.rec');
+  if (card) card.classList.toggle('picked', cb.checked);
+  syncPickBar();
+});
+
+$('#pickClear').onclick = () => { PICKED.clear(); applyPickedToDom(); syncPickBar(); };
+
+$('#pickGrade').onclick = () => openBulk();
+
+function openBulk() {
+  const picked = pickedRecords();
+  if (!picked.length) { toast('先勾选要批的卷子', 'err'); return; }
+  const graded = picked.filter(r => r.status === 'graded');
+  const subjs = {};
+  picked.forEach(r => { subjs[r.subject_name || r.subject || '—'] = (subjs[r.subject_name || r.subject || '—'] || 0) + 1; });
+  $('#bulkMeta').innerHTML = '共 <b>' + picked.length + '</b> 份：'
+    + esc(Object.keys(subjs).map(k => k + ' ' + subjs[k]).join(' · '))
+    + (graded.length
+      // 覆盖不是"再来一份"，旧分数会被替换掉——说清楚，别让老师以为会保留两份
+      ? '<br><span style="color:#b45309;">其中 ' + graded.length + ' 份已经批过，'
+        + '这次的结果会<b>直接覆盖</b>原来的分数与评语。</span>'
+      : '');
+  $('#bulkHint').innerHTML = '每份卷子一次模型调用，' + picked.length
+    + ' 份大约 ' + Math.max(1, Math.round(picked.length * 18 / 60)) + ' 分钟；'
+    + '批的过程中别关这个页面。';
+  $('#bulkProg').style.display = 'none';
+  $('#bulkBar').style.width = '0';
+  setBulkPct(0);
+  $('#bulkRun').disabled = false;
+  $('#bulkRun').textContent = '开始批阅';
+  $('#bulkMask').classList.add('show');
+}
+
+function closeBulk() { $('#bulkMask').classList.remove('show'); }
+
+/* 进度条只有宽度没有语义，读屏读不出来；把百分比同步到 aria-valuenow */
+function setBulkPct(p) {
+  const box = $('#bulkBarBox');
+  if (box) box.setAttribute('aria-valuenow', String(Math.max(0, Math.min(100, Math.round(p)))));
+}
+$('#bulkClose').onclick = closeBulk;
+$('#bulkCancel').onclick = closeBulk;
+
+$('#bulkRun').onclick = async () => {
+  const ids = pickedRecords().map(r => r.id);
+  if (!ids.length) { closeBulk(); return; }
+  const prompt = ($('#bulkPrompt').value || '').trim();
+  const mxRaw = ($('#bulkMax').value || '').trim();
+  const mx = mxRaw ? Number(mxRaw) : null;
+  if (mxRaw && !(mx > 0)) { toast('满分要填大于 0 的数', 'err'); return; }
+  const btn = $('#bulkRun');
+  btn.disabled = true;
+  $('#bulkProg').style.display = 'block';
+  let ok = 0, fail = 0, lastErr = '';
+  for (let i = 0; i < ids.length; i++) {
+    // 一张一次请求：几十份放一个长连接里等，网关早断了（而且断了不知道断到哪）
+    btn.innerHTML = '<span class="spin"></span> 批阅中 ' + (i + 1) + '/' + ids.length;
+    const bbp = Math.round(i / ids.length * 100);
+    $('#bulkBar').style.width = bbp + '%';
+    setBulkPct(bbp);
+    $('#bulkProgText').textContent = '正在批第 ' + (i + 1) + ' / ' + ids.length + ' 份…';
+    try {
+      await jpost('/api/portal/records/' + ids[i] + '/grade',
+                  { prompt_template: prompt, max_score: mx });
+      ok++;
+    } catch (e) { fail++; lastErr = e.message || String(e); }
+  }
+  $('#bulkBar').style.width = '100%';
+  setBulkPct(100);
+  $('#bulkProgText').textContent = '完成：成功 ' + ok + ' 份' + (fail ? '，失败 ' + fail + ' 份' : '');
+  btn.disabled = false;
+  btn.textContent = '再批一次';
+  toast('批阅完成：成功 ' + ok + ' 份' + (fail ? '，失败 ' + fail + ' 份' + (lastErr ? '（' + lastErr + '）' : '') : ''),
+        fail ? 'err' : 'ok');
+  await refreshCurrent();
+  PICKED.clear();
+  syncPickBar();
+};
+
 $('#gradeAllBtn').onclick = async () => {
   const pend = RECORDS.filter(r => r.status !== 'graded');
   if (!pend.length) { toast('本批没有待评的试卷', 'err'); return; }
-  if (!confirm('为当前列表中的 ' + pend.length + ' 张待评试卷逐张生成 AI 评语？耗时较长，请保持页面打开。')) return;
-  const btn = $('#gradeAllBtn');
-  const old = btn.textContent;
-  btn.disabled = true;
-  let ok = 0, fail = 0;
-  for (let i = 0; i < pend.length; i++) {
-    btn.innerHTML = '<span class="spin"></span> 生成中 ' + (i + 1) + '/' + pend.length;
-    try { await jpost('/api/portal/records/' + pend[i].id + '/grade'); ok++; }
-    catch (e) { fail++; }
-  }
-  btn.disabled = false; btn.textContent = old;
-  toast('完成：成功 ' + ok + ' 张' + (fail ? '，失败 ' + fail + ' 张' : ''), fail ? 'err' : 'ok');
-  await refreshCurrent();
+  // 走同一条批量通道：先把待评的全勾上，再让老师写一句提示词（不想写直接开始就行）
+  pend.forEach(r => PICKED.add(r.id));
+  applyPickedToDom();
+  syncPickBar();
+  openBulk();
 };
 
 async function delRecord(id) {
@@ -1761,6 +2286,7 @@ $('#sBackBtn').onclick = () => {
   SBATCH = null;
   renderStudentHome();
   scrollToPage();
+  syncRoute();
 };
 
 /* 一批一张报告：按 batch_id 优先、退化到 task_id，服务端再按当前登录学生兜底过滤 */
@@ -1778,6 +2304,8 @@ $('#exportBtn').onclick = () => {
   const qs = new URLSearchParams();
   if (VIEW.class_name) qs.set('class_name', VIEW.class_name);
   if (VIEW.status) qs.set('status', VIEW.status);
+  if (VIEW.student_id) qs.set('student_id', VIEW.student_id);
+  if (VIEW.subject) qs.set('subject', VIEW.subject);
   window.open('/api/portal/export.csv?' + qs.toString(), '_blank');
 };
 
@@ -1785,6 +2313,9 @@ $('#exportBtn').onclick = () => {
 $('#exportReportBtn').onclick = () => {
   const qs = new URLSearchParams();
   if (VIEW.class_name) qs.set('class_name', VIEW.class_name);
+  if (VIEW.status) qs.set('status', VIEW.status);
+  if (VIEW.student_id) qs.set('student_id', VIEW.student_id);
+  if (VIEW.subject) qs.set('subject', VIEW.subject);
   window.open('/api/portal/export/report?' + qs.toString(), '_blank');
 };
 

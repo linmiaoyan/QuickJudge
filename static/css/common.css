@@ -9,13 +9,19 @@
     --bg-light: #f5f5f5;
     --bg-gray: #f9fafb;
     --text-primary: #111827;
-    --text-secondary: #6b7280;
-    --text-muted: #9ca3af;
+    --text-secondary: #4b5563;
+    /* 原来是 #9ca3af：白底对比度 2.54，AA 正文要求 4.5，教室投影下几乎看不见。
+       #5f6b7a 在白/浅灰底上 >=4.93，仍比正文浅，层级还在。 */
+    --text-muted: #5f6b7a;
     --border-color: #e5e7eb;
     --success-color: #10b981;
     --warning-color: #f59e0b;
     --danger-color: #ef4444;
     --info-color: #3b82f6;
+    /* 状态色当「文字」用时换深色：亮色文字对比度只有 2.1~3.8，读不清。 */
+    --success-ink: #047857;
+    --warning-ink: #b45309;
+    --danger-ink: #b91c1c;
 }
 
 /* ========== 统一菜单栏样式 ========== */
@@ -242,7 +248,7 @@ footer {
 
 .admin-sidebar .sidebar-group-title {
     padding: 0.5rem 1.5rem 0.35rem;
-    font-size: 11px;
+    font-size:12px;
     font-weight: 600;
     letter-spacing: 0.08em;
     color: var(--text-muted, #9ca3af);
@@ -296,7 +302,7 @@ footer {
 /* 流程步骤序号 */
 .admin-sidebar .sidebar-item .sidebar-step {
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size:12px;
     font-weight: 600;
     font-style: normal;
     color: var(--text-muted, #9ca3af);
@@ -318,7 +324,7 @@ footer {
     flex: 0 0 auto;
     width: 12px;
     min-width: 12px;
-    font-size: 11px;
+    font-size:12px;
     color: var(--text-muted, #9ca3af);
     opacity: 0.75;
 }

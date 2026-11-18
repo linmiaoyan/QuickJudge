@@ -9,8 +9,15 @@
 :root{
   --primary:#2563eb; --primary-dark:#1d4ed8; --primary-soft:#eff6ff;
   --bg:#f5f6f8; --card:#ffffff; --line:#e5e7eb; --line-soft:#f1f3f5;
-  --text:#111827; --text2:#6b7280; --muted:#9ca3af;
+  /* 说明文字统一到 --muted。原来是 #9ca3af，白底对比度只有 2.54（AA 要求 4.5）：
+     教室里投影、逆光、老师上了年纪，这一层灰字基本等于看不见。
+     三级文字都过 AA：#111827 17.7 / #4b5563 7.56 / #5f6b7a 5.43（白底）。
+     --text3 以前根本没定义，所有 var(--text3,#999) 都落到 #999，所以补上。 */
+  --text:#111827; --text2:#4b5563; --text3:#5f6b7a; --muted:#5f6b7a;
+  /* 状态色分两种用法：色块/圆点/进度条用亮色（--ok/--warn），
+     文字和数字用 --*-ink。亮色当文字只有 2.1~2.5 的对比度，读不清。 */
   --ok:#10b981; --warn:#f59e0b; --danger:#ef4444; --info:#3b82f6;
+  --ok-ink:#047857; --warn-ink:#b45309; --danger-ink:#b91c1c;
   --radius:12px;
 }
 *{box-sizing:border-box;}
@@ -41,8 +48,45 @@ a{color:var(--primary);text-decoration:none;}
 .badge.warn{background:#fffbeb;border-color:#fde68a;color:#b45309;}
 .badge.info{background:var(--primary-soft);border-color:#bfdbfe;color:var(--primary-dark);}
 
-.layout{display:grid;grid-template-columns:320px minmax(0,1fr);gap:20px;padding:20px 24px 60px;max-width:1680px;margin:0 auto;}
+/* 扫描端只有一列：默认流程是「扫完直接批」，页面不需要再摊一块临时区。
+   栏宽 820px 是量出来的——再窄「满分 chips + 数字框」会挤成两行，再宽按钮会拉得离谱。
+   少数需要人工确认的卷子（学号没认出来、手动框选）改成按需弹出的窗口，不再常驻占版面。 */
+/* 宽屏两栏：左「扫描 + 生效口径 + 按需展开的设置」，右「进度 + 本机信息」。
+   以前是单栏 820px，进度块堆在扫描按钮下面，扫到一半按钮会被日志顶出屏幕。 */
+.layout{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;padding:18px 24px 56px;max-width:820px;margin:0 auto;align-items:start;}
+@media (min-width:1180px){
+  .layout{grid-template-columns:minmax(0,1fr) 368px;max-width:1180px;}
+  /* 右栏跟着滚：设置展开得再长，进度也还在手边 */
+  .colside{position:sticky;top:16px;}
+}
+.colside{display:flex;flex-direction:column;gap:16px;min-width:0;}
 @media (max-width:1080px){.layout{grid-template-columns:1fr;}}
+
+/* 文字链接按钮：给「其它录入」这种次要入口用，比三个白底大按钮轻得多。
+   padding 从 2px 提到 4px：22px 的点按高度在教室一体机/触屏上太窄（WCAG 2.5.8 要 24）。 */
+.linkbtn{background:none;border:0;padding:4px 5px;margin:0;font-family:inherit;font-size:12.5px;
+  color:#2f6fd0;cursor:pointer;border-radius:5px;line-height:1.4;min-height:24px;}
+.linkbtn:hover{background:#eef4ff;text-decoration:underline;}
+.linkbtn:focus-visible{outline:2px solid #2563eb;outline-offset:1px;}
+.linkbtn:disabled{color:var(--muted);cursor:not-allowed;background:none;text-decoration:none;}
+/* 折叠区标题整行可点，但高度只有 22px；撑到 30px 更好按，也让分割线更透气 */
+summary{padding:4px 0;}
+.dotsep{color:var(--muted);}
+
+/* 左栏分段：用一条细分割线区分「其它录入 / 批阅设置 / 批改备注」，
+   而不是每块各自套一个虚线框——虚线框一多，所有块看起来一样重，就没有主次了。 */
+.sec{margin-top:15px;padding-top:14px;border-top:1px solid var(--line-soft);}
+.sec-t{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.4px;margin-bottom:8px;}
+.sec-t .sub{font-weight:400;letter-spacing:0;color:var(--text3,#9ca3af);}
+.row3{display:flex;gap:6px;}
+.row3 .btn{flex:1 1 0;justify-content:center;min-width:0;white-space:nowrap;}
+/* 「先只扫描」：一行说完，展开的两句解释挪进 title，需要的人悬停就能看到 */
+.opt{display:flex;align-items:center;gap:8px;margin-top:12px;padding:8px 10px;
+  border:1px solid var(--line);border-radius:9px;font-size:12.5px;color:var(--text2);cursor:pointer;line-height:1.4;}
+.opt input{margin:0;flex:0 0 auto;cursor:pointer;}
+summary::-webkit-details-marker{display:none;}
+.caret{display:inline-block;transition:transform .15s;color:var(--muted);}
+details[open] > summary .caret{transform:rotate(90deg);}
 
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);}
 .card .hd{padding:14px 18px;border-bottom:1px solid var(--line-soft);display:flex;align-items:center;gap:10px;}
@@ -99,7 +143,7 @@ a{color:var(--primary);text-decoration:none;}
 .kv .row:last-child{border-bottom:none;}
 .kv .row span:last-child{color:var(--text);word-break:break-all;text-align:right;max-width:65%;}
 .hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.7;}
-.hint code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:11.5px;}
+.hint code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:12px;}
 
 .urlbox{display:flex;gap:6px;align-items:center;margin-top:6px;}
 .urlbox input{flex:1;border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:12px;color:var(--text2);background:#fafafa;}
@@ -111,29 +155,35 @@ a{color:var(--primary);text-decoration:none;}
 .counter b{color:var(--text);font-size:15px;}
 
 /* 队列 */
-.queue{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;}
+/* 队列：临时区是「待整理」托盘，缩略图能认出是哪张就够，不必占半屏 */
+.queue{display:grid;grid-template-columns:repeat(auto-fill,minmax(252px,1fr));gap:12px;}
+/* 卡片缩到 250 上下以后，「识别」「字迹体检」这类按钮会被挤成竖排单字，
+   所以让它们不换行、不参与压缩，宽度由输入框让出来 */
+.item .field .inline .btn{white-space:nowrap;flex:0 0 auto;}
+.item .field .inline input{min-width:0;}
 .empty{
   border:1.5px dashed var(--line);border-radius:var(--radius);background:#fcfcfd;
-  padding:56px 24px;text-align:center;color:var(--muted);
+  padding:34px 20px;text-align:center;color:var(--muted);font-size:13px;
+  max-width:520px;margin:0 auto;   /* 空状态不该拉成一整条横幅，看着像"这里什么都没有"的告示 */
 }
-.empty .big{font-size:32px;margin-bottom:10px;opacity:.5;}
+.empty .big{font-size:28px;margin-bottom:8px;opacity:.5;}
 
 .item{background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;}
 .item .thumb{
   position:relative;background:#f3f4f6;border-bottom:1px solid var(--line-soft);
-  height:230px;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:zoom-in;
+  height:176px;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:zoom-in;
 }
 .item .thumb img{max-width:100%;max-height:100%;display:block;object-fit:contain;}
 .item .badges{position:absolute;top:8px;left:8px;display:flex;gap:6px;flex-wrap:wrap;}
-.tag{padding:2px 7px;border-radius:6px;font-size:11px;font-weight:500;background:rgba(17,24,39,.72);color:#fff;backdrop-filter:blur(3px);}
+.tag{padding:2px 7px;border-radius:6px;font-size:12px;font-weight:500;background:rgba(17,24,39,.72);color:#fff;backdrop-filter:blur(3px);}
 .tag.ok{background:rgba(16,185,129,.9);}
 .tag.warn{background:rgba(245,158,11,.92);color:#3b2a05;}
 .tag.crop{background:rgba(37,99,235,.9);}
-.item .seq{position:absolute;top:8px;right:8px;background:rgba(17,24,39,.72);color:#fff;font-size:11px;padding:2px 8px;border-radius:6px;}
+.item .seq{position:absolute;top:8px;right:8px;background:rgba(17,24,39,.72);color:#fff;font-size:12px;padding:2px 8px;border-radius:6px;}
 
 .item .body{padding:12px 14px;display:flex;flex-direction:column;gap:10px;flex:1;}
 .field{display:flex;flex-direction:column;gap:4px;}
-.field label{font-size:11.5px;color:var(--text2);font-weight:500;}
+.field label{font-size:12px;color:var(--text2);font-weight:500;}
 .field .inline{display:flex;gap:6px;align-items:center;}
 input[type=text],select{
   border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px;
@@ -143,24 +193,24 @@ input[type=text]:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0
 input.sid{font-family:ui-monospace,"SFMono-Regular",Consolas,monospace;letter-spacing:1px;}
 input.sid.match{border-color:var(--ok);background:#f0fdf4;}
 input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
-.namehint{font-size:11.5px;min-height:16px;color:var(--ok);}
+.namehint{font-size:12px;min-height:16px;color:var(--ok);}
 .namehint.bad{color:var(--warn);}
 
 .cands{display:flex;flex-wrap:wrap;gap:5px;}
-.cand{font-size:11.5px;padding:3px 8px;border-radius:999px;border:1px solid var(--line);background:#fafafa;cursor:pointer;}
+.cand{font-size:12px;padding:3px 8px;border-radius:999px;border:1px solid var(--line);background:#fafafa;cursor:pointer;}
 .cand:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-soft);}
 
 .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:4px;}
 .actions .grow{flex:1;}
 
-.ocrtxt{font-size:11.5px;color:var(--text2);background:#fafafa;border:1px solid var(--line-soft);border-radius:8px;padding:8px 10px;max-height:76px;overflow:auto;white-space:pre-wrap;}
+.ocrtxt{font-size:12px;color:var(--text2);background:#fafafa;border:1px solid var(--line-soft);border-radius:8px;padding:8px 10px;max-height:76px;overflow:auto;white-space:pre-wrap;}
 
 /* 卷面体检 */
 .qbox{display:flex;flex-direction:column;gap:4px;background:#fbfbfd;border:1px solid var(--line-soft);border-radius:8px;padding:7px 9px;}
-.qline{font-size:11.5px;color:var(--text2);}
+.qline{font-size:12px;color:var(--text2);}
 .qline.bad{color:#b45309;font-weight:600;}
 .qline.good{color:#047857;}
-.hwres{font-size:11.5px;line-height:1.7;color:var(--text2);background:#f8fafc;border:1px dashed var(--line);border-radius:8px;padding:7px 9px;width:100%;}
+.hwres{font-size:12px;line-height:1.7;color:var(--text2);background:#f8fafc;border:1px dashed var(--line);border-radius:8px;padding:7px 9px;width:100%;}
 
 /* 弹层 */
 .mask{position:fixed;inset:0;background:rgba(17,24,39,.62);z-index:200;display:none;align-items:center;justify-content:center;padding:24px;}
@@ -178,7 +228,7 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
 .croplayers{position:absolute;left:0;top:0;right:0;bottom:0;}
 .cropsel{position:absolute;box-sizing:border-box;border:2px solid #34d399;background:rgba(52,211,153,.16);cursor:move;}
 .cropsel.sel{border-color:#f59e0b;background:rgba(245,158,11,.20);}
-.cropsel .rlabel{position:absolute;left:-2px;top:-20px;font-size:11px;line-height:18px;padding:0 7px;border-radius:5px 5px 5px 0;background:#059669;color:#fff;white-space:nowrap;font-weight:500;}
+.cropsel .rlabel{position:absolute;left:-2px;top:-20px;font-size:12px;line-height:18px;padding:0 7px;border-radius:5px 5px 5px 0;background:#059669;color:#fff;white-space:nowrap;font-weight:500;}
 .cropsel.sel .rlabel{background:#b45309;}
 .cropsel .h{position:absolute;width:12px;height:12px;background:#34d399;border-radius:3px;display:none;}
 .cropsel.sel .h{display:block;background:#fbbf24;}
@@ -219,9 +269,48 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
 }
 .maxchip:hover{border-color:#c9d4e5;background:#f7f9fc;}
 .maxchip.on{border-color:#2563eb;background:#eff6ff;color:#1d4ed8;}
-.maxchip .tag{font-size:10px;font-weight:500;color:#8a5300;background:#fff8ec;
+.maxchip .tag{font-size:12px;font-weight:500;color:#8a5300;background:#fff8ec;
   border:1px solid #f5d9a8;border-radius:5px;padding:0 3px;}
 .maxchip.on .tag{color:#1d4ed8;background:#dbeafe;border-color:#bfdbfe;}
+
+/* 满分控件：数字框负责「我知道就是 8 分」的精确输入，滑轨负责「大概按 60 分算」的粗调，
+   ± 负责相邻一两分的微调。三处共用一个值，改哪边另外两处立刻跟上。 */
+.stepbtn{
+  width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;
+  border:0;border-radius:7px;background:#f2f5fa;color:#3b4a5f;
+  font-family:inherit;font-size:15px;font-weight:700;line-height:1;cursor:pointer;
+  transition:background .12s,color .12s;
+}
+.stepbtn:hover{background:#e6ecf5;color:#1d4ed8;}
+.stepbtn:active{transform:translateY(1px);}
+.stepbtn:disabled{opacity:.4;cursor:not-allowed;transform:none;}
+.stepbtn:focus-visible{outline:2px solid #2563eb;outline-offset:1px;}
+
+.rng{
+  -webkit-appearance:none;appearance:none;
+  /* 高度 22 → 28：滑轨本体的可点区域就是这个盒子，22px 在触屏/一体机上太窄
+     （WCAG 2.5.8 要求 24）。加高不影响视觉粗细，轨道仍是 6px。 */
+  width:100%;height:28px;margin:0;padding:0;background:transparent;
+  cursor:pointer;--fill:0%;
+}
+.rng:focus-visible{outline:none;}
+.rng:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 4px rgba(37,99,235,.22);}
+.rng::-webkit-slider-runnable-track{
+  height:6px;border-radius:999px;
+  background:linear-gradient(90deg,#2563eb 0 var(--fill),#e4eaf2 var(--fill) 100%);
+}
+.rng::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;
+  width:18px;height:18px;margin-top:-6px;border-radius:50%;
+  background:#fff;border:2px solid #2563eb;box-shadow:0 1px 3px rgba(15,23,42,.22);
+}
+.rng::-moz-range-track{height:6px;border-radius:999px;background:#e4eaf2;}
+.rng::-moz-range-progress{height:6px;border-radius:999px;background:#2563eb;}
+.rng::-moz-range-thumb{
+  width:16px;height:16px;border-radius:50%;
+  background:#fff;border:2px solid #2563eb;box-shadow:0 1px 3px rgba(15,23,42,.22);
+}
+.rng:disabled{opacity:.45;cursor:not-allowed;}
 </style>
 </head>
 <body>
@@ -238,92 +327,137 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
 
 <!-- 后端代码比进程新（改了 app.py 没重启）时弹出：模板是热加载的，
      页面看着是新的、后端还是老的，填了满分也会被按默认值批。 -->
-<div style="max-width:1680px;margin:16px auto -4px;padding:0 24px;">
+<div style="max-width:1440px;margin:16px auto -4px;padding:0 24px;">
   <div id="codeWarn" class="blocked" style="display:none;margin-bottom:0;"></div>
 </div>
 
 <div class="layout">
-  <!-- 左：扫描控制 -->
-  <div style="display:flex;flex-direction:column;gap:20px;">
-    <div class="card">
-      <div class="hd"><h3>① 扫描</h3></div>
+  <!-- 左栏：主操作（扫描）+ 生效口径 + 按需展开的设置。
+       宽屏时右栏放进度，扫描过程中按钮不会被日志顶到看不见的地方。 -->
+  <div class="card">
+      <div class="hd"><h3>扫描</h3></div>
       <div class="bd">
         <div id="blockedBox" class="blocked" style="display:none;">
           当前不是本机访问，扫描功能已锁定。请在连接扫描仪的这台电脑上打开本页。
         </div>
+        <!-- 口径条放在扫描按钮「上面」：老师按下按钮前，必须一眼知道这批按什么标准批。
+             具体怎么改收进下面的折叠区（#setupBox / #promptBox），平时只要这一行。 -->
+        <div id="setupBar" style="display:flex;align-items:center;gap:8px;margin:2px 0 10px;padding:8px 11px;border:1px solid var(--line);border-radius:10px;background:#f8fafc;font-size:12.5px;color:var(--text2);line-height:1.45;">
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            本次：<b id="setupText" style="color:var(--text);">—</b>
+          </span>
+          <button type="button" class="btn tiny" id="setupAdjust" style="flex:0 0 auto;">调整</button>
+        </div>
         <button class="scan-btn" id="scanBtn"><span class="ico">🖨️</span><span>开始扫描</span></button>
+        <!-- 扫完怎么处理：原来是「一个按钮 + 一个复选框」，两处都写着“只扫描”，
+             老师分不清该点哪个。现在收成一个下拉，三个选项各自说清后果。 -->
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+          <label for="scanMode" style="font-size:12.5px;color:var(--text2);flex:0 0 auto;">扫完</label>
+          <!-- 宽度跟着最长选项走，不铺满整行：下拉铺满会看着像一个输入框，
+               还把这行的重心从「开始扫描」抢过去。窄屏下允许收缩。
+               必须显式 width:auto —— 全局 select 规则是 width:100%，
+               在 flex 里会让基准宽度变成整行宽，flex:0 1 auto 也压不下来。 -->
+          <select id="scanMode" aria-label="扫完怎么处理"
+                  style="flex:0 1 auto;width:auto;max-width:100%;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;color:var(--text);">
+            <option value="auto">自动批阅并归档（默认）</option>
+            <option value="collect">只入库，稍后在用户端批</option>
+            <option value="manual">只扫描，我框选区域后再批</option>
+          </select>
+        </div>
         <!-- 卡纸 / 驱动弹窗把设备占死时的应急出口：点一下就杀掉残留扫描进程并释放锁，
              不用重启程序、不用拔插 USB。平时是隐藏的，扫描出问题时才出现。 -->
         <button id="unlockBtn" type="button"
                 style="display:none;width:100%;margin-top:8px;padding:9px 12px;border:1px dashed #d9a441;border-radius:9px;background:#fff8ec;color:#8a5300;font-size:13px;cursor:pointer;">
           🔄 强制解锁扫描仪（取出卡纸后点这里）
         </button>
-        <!-- 默认勾选状态＝全自动批阅；只有需要一页多块时才让老师主动改成「先只扫」 -->
-        <label id="manualWrap" style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;font-size:12.5px;color:var(--text2);cursor:pointer;line-height:1.45;">
-          <input type="checkbox" id="manualScan" style="margin:2px 0 0;flex:0 0 auto;cursor:pointer;">
-          <span>这次<strong>先只扫描</strong>，我要框选区域后再批<br>
-            <span style="color:var(--text3,#999);font-size:11.5px;">不勾＝扫完自动批阅并归档（默认）；勾上＝只进临时区，等你框选/改学号后手动提交</span>
-          </span>
-        </label>
-        <div style="display:flex;gap:8px;margin-top:10px;">
-          <button class="btn" style="flex:1;justify-content:center;" id="importBtn">📁 导入本地图片</button>
-          <input type="file" id="importInput" accept="image/*" multiple style="display:none;">
-        </div>
 
-        <!-- 答案：纸质直接扫，拍照就上传。答案不是学生卷子，走自己的暂存区，
-             识别结果只当草稿，改完再存，绝不直接落盘。
-             放在扫描按钮下面而不是收起的「题目」面板里——老师要扫答案时不该先展开一个面板。 -->
-        <div id="ocrWrap" style="margin-top:10px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;background:#fcfdfe;">
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <button class="btn tiny primary" type="button" id="ocrScanBtn">📠 扫描答案</button>
-            <button class="btn tiny" type="button" id="ocrBtn">📷 上传答案图片</button>
-            <span id="ocrHint" style="font-size:11.5px;color:var(--text3,#999);line-height:1.5;">
-              纸质答案点「扫描答案」，扫完在页面上框出要用的区域（一页可框多块）；拍照的走上传统一上传，一次最多 8 张
-            </span>
-            <input type="file" id="ocrInput" accept="image/*" multiple style="display:none;">
+        <!-- 其它录入压成一行文字链接：它们和「扫学生卷」这条主流程无关，
+             原来占了三行按钮＋一行说明，把下面的批阅设置整体推到折线以外。 -->
+        <div class="sec" style="margin-top:14px;">
+          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:2px;font-size:12.5px;color:var(--text2);">
+            <span style="margin-right:3px;">其它录入：</span>
+            <button type="button" class="linkbtn" id="importBtn"
+                    title="把已有图片导入临时区（补扫、手机拍的照片都行）">导入图片</button>
+            <span class="dotsep">·</span>
+            <button type="button" class="linkbtn" id="ocrScanBtn"
+                    title="用扫描仪扫答案：单独识别，不进临时区；识别后可框区域，一页能框多块">扫答案</button>
+            <span class="dotsep">·</span>
+            <button type="button" class="linkbtn" id="ocrBtn"
+                    title="上传答案照片：单独识别，不进临时区；识别后可框区域，一页能框多块">传答案</button>
           </div>
-          <div id="answerPages" style="display:none;margin-top:9px;"></div>
-          <div id="ocrResult" style="display:none;margin-top:8px;"></div>
+          <input type="file" id="importInput" accept="image/*" multiple style="display:none;">
+          <input type="file" id="ocrInput" accept="image/*" multiple style="display:none;">
+          <div id="ocrWrap">
+            <span id="ocrHint" class="hint" style="margin-top:6px;display:block;">答案图单独识别，不进临时区。</span>
+            <div id="answerPages" style="display:none;margin-top:9px;"></div>
+            <div id="ocrResult" style="display:none;margin-top:8px;"></div>
+          </div>
         </div>
-        <div style="margin-top:14px;">
-          <div style="font-size:12.5px;color:var(--text2);margin-bottom:5px;">自动批阅方案（扫完直接批，无需再点）</div>
-          <select id="subjectSel" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;background:#fff;"></select>
 
-          <!-- 满分：常见分值直接点一下，特殊分值再手填。
+        <!-- 批阅设置默认收起：95% 的批次用的是方案默认值，摊开只是占掉一屏。
+             上面那行「本次：…」已经把生效口径说清楚了，这里只在需要改时才展开。 -->
+        <details id="setupBox" class="sec" style="margin-left:0;">
+          <summary style="cursor:pointer;outline:none;display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
+            <span class="caret">▸</span>
+            <span class="sec-t" style="margin:0;">批阅设置</span>
+            <span class="sub" style="font-weight:400;letter-spacing:0;color:var(--text3,#999);font-size:12px;">（学科与满分）</span>
+          </summary>
+          <div style="margin-top:9px;">
+          <select id="subjectSel" aria-label="批阅学科" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;background:#fff;"></select>
+
+          <!-- 满分：一行四个入口，各管一段使用场景——
+               数字框（精确）/ ±（挪一两分）/ 滑轨（粗调）/ 预设（最常见的那几个）。
                数字输入必须自带默认值（Carbon/Spectrum 的硬规矩），所以这里永远是
                「当前学科默认值」打底，老师不碰也不会空着；改过的值按学科记住。 -->
-          <div id="maxRow" style="margin-top:9px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span style="font-size:12.5px;color:var(--text2);flex:0 0 auto;">本次满分</span>
-            <div id="maxChips" style="display:flex;gap:6px;flex-wrap:wrap;flex:1 1 auto;"></div>
-            <label for="maxScore" title="这一批卷子的满分；不选就用方案默认值"
-                   style="flex:0 0 auto;display:flex;align-items:center;gap:4px;padding:0 8px;border:1px solid var(--line);border-radius:9px;background:#fff;font-size:12.5px;color:var(--text2);">
-              <input type="number" id="maxScore" min="1" max="150" step="0.5" inputmode="decimal"
-                     aria-label="本次满分"
-                     style="width:52px;padding:7px 2px;border:0;font-family:inherit;font-size:14px;font-weight:700;text-align:center;color:var(--text);background:transparent;outline:none;">
-              <span style="font-size:12px;">分</span>
-            </label>
+          <div id="maxRow" style="margin-top:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+              <span style="font-size:12.5px;color:var(--text2);">本次满分</span>
+              <div style="display:flex;align-items:center;gap:2px;padding:2px;border:1px solid var(--line);border-radius:10px;background:#fff;">
+                <button type="button" class="stepbtn" id="maxMinus" aria-label="减少 1 分" title="减 1 分">−</button>
+                <label for="maxScore" style="display:flex;align-items:baseline;gap:3px;padding:0 2px;">
+                  <input type="number" id="maxScore" min="1" max="150" step="0.5" inputmode="decimal"
+                         aria-label="本次满分"
+                         style="width:56px;padding:4px 2px;border:0;font-family:inherit;font-size:15px;font-weight:700;text-align:center;color:var(--text);background:transparent;outline:none;">
+                  <span style="font-size:12px;color:var(--text2);">分</span>
+                </label>
+                <button type="button" class="stepbtn" id="maxPlus" aria-label="增加 1 分" title="加 1 分">+</button>
+              </div>
+            </div>
+            <input type="range" id="maxRange" class="rng" min="1" max="100" step="1" value="50"
+                   aria-label="拖动调整本次满分" aria-describedby="maxHint" style="display:block;margin-top:9px;">
+            <div id="maxChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;"></div>
           </div>
-          <div id="maxHint" style="font-size:11.5px;margin-top:6px;line-height:1.5;color:var(--text3,#999);"></div>
-          <div id="subjNote" style="font-size:11.5px;color:#8a5300;background:#fff8ec;border:1px solid #f5d9a8;border-radius:8px;padding:6px 9px;margin-top:7px;line-height:1.5;display:none;"></div>
-        </div>
+          <div id="maxHint" style="font-size:12px;margin-top:6px;line-height:1.5;color:var(--text3,#999);"></div>
+          <div id="subjNote" style="font-size:12px;color:#8a5300;background:#fff8ec;border:1px solid #f5d9a8;border-radius:8px;padding:6px 9px;margin-top:7px;line-height:1.5;display:none;"></div>
+          </div>
+        </details>
 
-        <!-- 批改备注默认展开：老师每次来几乎都要写一句口径，藏在折叠层里等于让他多点一次。
-             题目/练习是选配，放在备注下面——不写备注也能扫，不选题目/练习也能扫。
-             用 <details> 而不是弹窗：不想看的时候它能收起来，扫卷的主按钮位置不变。 -->
-        <details id="promptBox" open style="margin-top:12px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;background:#fbfcfd;">
-          <summary style="cursor:pointer;font-size:12.5px;color:var(--text2);outline:none;">
-            ✍️ 批改备注<span style="color:var(--text3,#999);" id="promptHint">（写一句这次怎么给分；不写就按学科标准）</span>
-            <span id="promptBadge" style="display:none;margin-left:6px;padding:1px 6px;border-radius:9px;background:#e7f6ec;color:#1a7f37;border:1px solid #b7e0c4;font-size:11px;">已设置</span>
+        <!-- 批改备注默认收起：上面那行口径会写「有/无批改备注」，写了就自动展开（见 JS），
+             没写的人不必先看一个空文本框。题目/练习是选配，放在备注里面。 -->
+        <details id="promptBox" class="sec" style="margin-left:0;">
+          <summary style="cursor:pointer;outline:none;display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:0;">
+            <span class="caret">▸</span>
+            <span class="sec-t" style="margin:0;">✍️ 批改备注</span>
+            <span class="sub" id="promptHint" style="font-weight:400;letter-spacing:0;color:var(--text3,#999);font-size:12px;">（写一句这次怎么给分；不写就按学科标准）</span>
+            <span id="promptBadge" style="display:none;margin-left:2px;padding:1px 6px;border-radius:9px;background:#e7f6ec;color:#1a7f37;border:1px solid #b7e0c4;font-size:12px;">已设置</span>
           </summary>
           <div style="margin-top:9px;">
             <textarea id="teacherNote" rows="3" maxlength="300"
                       placeholder="例：这次只看第 2 段的建议部分；按中考标准评分，不扣书写分；答案要点见下，缺一条扣 2 分"
                       style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;line-height:1.6;resize:vertical;"></textarea>
+            <!-- 备注现在直接决定判分口径（编号答案 + 分值会被拆成评分表），写给字数上限了
+                 不能只是默默截断：到顶前先亮出计数，老师才知道该收一收。 -->
+            <div id="noteCountRow" style="display:none;justify-content:flex-end;margin-top:3px;">
+              <span id="noteCount" style="font-size:12px;color:var(--text3,#999);"></span>
+            </div>
             <!-- 英语作文：题干（可选） -->
             <div id="essayTaskWrap">
-              <div style="display:flex;gap:8px;">
-                <select id="taskSel" style="flex:1 1 auto;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;"></select>
-                <button class="btn tiny" type="button" id="taskNewBtn">＋ 新建题目</button>
+              <!-- 用 grid 而不是 flex：全局 select{width:100%} 在 flex 里会按整行算基准宽度，
+                   把右边的「＋ 新建题目」挤成两行；grid 的第二列 auto 按按钮自身宽度，挤不着。 -->
+              <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;">
+                <select id="taskSel" aria-label="选择要用的作文题目"
+                        style="min-width:0;width:auto;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;"></select>
+                <button class="btn tiny" type="button" id="taskNewBtn" style="flex:0 0 auto;white-space:nowrap;">＋ 新建题目</button>
               </div>
               <div id="taskNewBox" style="display:none;margin-top:8px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#fff;">
                 <input id="taskNewTitle" type="text" maxlength="60" placeholder="题目名称，如：Unit 3 建议信（80 词）"
@@ -339,11 +473,11 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
 
             <!-- 政治/地理：练习＝参考答案 + 每题要点 + 每点分值（可选：不选就按学科标准整体判分） -->
             <div id="exerciseWrap" style="display:none;">
-              <div style="display:flex;gap:8px;">
-                <select id="exerciseSel" style="flex:1 1 auto;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;"></select>
-                <button class="btn tiny" type="button" id="exerciseNewBtn">＋ 新建练习</button>
+              <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;">
+                <select id="exerciseSel" style="min-width:0;width:auto;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;"></select>
+                <button class="btn tiny" type="button" id="exerciseNewBtn" style="flex:0 0 auto;white-space:nowrap;">＋ 添加答案要点</button>
               </div>
-              <div id="exerciseMeta" style="font-size:11.5px;color:var(--text3,#999);margin-top:5px;line-height:1.5;"></div>
+              <div id="exerciseMeta" style="font-size:12px;color:var(--text3,#999);margin-top:5px;line-height:1.5;"></div>
 
               <div id="exerciseNewBox" style="display:none;margin-top:8px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#fff;">
                 <div style="display:flex;gap:6px;">
@@ -360,7 +494,7 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
                   <button class="btn tiny primary" type="button" id="exSaveBtn">保存并使用</button>
                   <button class="btn tiny ghost" type="button" id="exCancelBtn">取消</button>
                 </div>
-                <div style="font-size:11.5px;color:var(--text3,#999);margin-top:5px;line-height:1.5;">
+                <div style="font-size:12px;color:var(--text3,#999);margin-top:5px;line-height:1.5;">
                   不用改格式：<b>整段答案原文粘进来</b>即可（①②③ 一条一个要点，认不出会自动叫 AI）。
                   想自己指定分值就写在行尾：（2分）/ 2分 / | 2；写不写都能用，不写每点按 1 分。
                 </div>
@@ -370,61 +504,53 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
 
           </div>
         </details>
+      </div>
+  </div>
 
+  <!-- 右栏：进度与信息。扫描时左边的按钮不会被日志顶走，右边只负责「看结果」。 -->
+  <div class="colside">
+    <div class="card">
+      <div class="hd"><h3>批阅进度</h3></div>
+      <div class="bd">
+        <div id="jobEmpty" class="hint" style="margin:0;">
+          还没有开始扫描。<br>点「开始扫描」后，每张卷子的处理进度会在这里逐条出现。
+        </div>
         <div id="jobPanel" class="jobpanel">
           <div class="jobhd">
-            <span id="jobStage">准备中…</span>
+            <span id="jobStage" role="status" aria-live="polite">准备中…</span>
             <span class="spacer"></span>
             <span id="jobPct">0%</span>
           </div>
           <div class="bar"><i id="jobBar"></i></div>
           <div id="jobList" class="joblist"></div>
-          <div id="jobFoot" class="jobfoot" style="display:none;"></div>
+          <div id="jobFoot" class="jobfoot" aria-live="polite" style="display:none;"></div>
         </div>
 
-        <div class="hint">
-          默认「扫完直接批」：系统自动识别学号 → 按学号分班 → 逐篇批阅 → 归档到用户端。
-          临时区用于补扫或手动修正，正常流程不需要进来。<br>
-          只有一页要拆成多块评阅（如一道题一块）时，才勾选上面那个「先只扫描」。
+        <!-- 只有真正需要人工确认的卷子（学号没认出来、手动框选）才让这条露头。
+             默认的「扫完直接批」全程不会出现它 —— 老师在扫描端不该被要求确认任何事。 -->
+        <div id="pendingBar" style="display:none;align-items:center;gap:10px;margin-top:12px;
+                    padding:9px 11px;border:1px solid #ffd8a8;background:#fff8ec;border-radius:9px;
+                    font-size:12.5px;line-height:1.5;color:#8a5300;">
+          <span id="pendingText"></span>
+          <span style="flex:1;"></span>
+          <button class="btn tiny" type="button" id="pendingOpen">去处理</button>
         </div>
       </div>
     </div>
 
+    <!-- 两张信息卡并成一张：地址是要发给老师的，放前面；设备配置是排障才看的，收进折叠层 -->
     <div class="card">
-      <div class="hd"><h3>设备配置</h3></div>
+      <div class="hd"><h3>本机信息</h3></div>
       <div class="bd">
-        <div class="kv" id="cfgBox"><div class="row"><span>加载中…</span><span></span></div></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="hd"><h3>用户端地址</h3></div>
-      <div class="bd">
-        <div class="hint" style="margin-top:0;">学生/教师在任意设备浏览器打开以下地址（同一局域网）：</div>
+        <div class="sec-t">用户端地址 <span class="sub">同一局域网内，学生/教师浏览器打开</span></div>
         <div id="urlList"></div>
-        <div class="hint">如需校外访问，请把该地址发布到公网或使用内网穿透。</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 右：临时区 -->
-  <div class="card">
-    <div class="hd">
-      <h3>② 临时区</h3>
-      <span class="counter" id="counter">共 <b>0</b> 张</span>
-      <div class="spacer"></div>
-      <button class="btn tiny" id="refreshBtn">刷新</button>
-      <button class="btn tiny primary" id="submitAllBtn">全部提交</button>
-      <button class="btn tiny danger" id="clearBtn">清空临时区</button>
-    </div>
-    <div class="bd">
-      <div class="toolbar">
-        <span class="hint" style="margin:0;">自动批阅模式下这里通常是空的；只有补扫、或需要手动改学号/框选区域时才会用到。</span>
-      </div>
-      <div id="queue" class="queue"></div>
-      <div id="emptyBox" class="empty">
-        <div class="big">🗂️</div>
-        <div>临时区是空的。点击左侧「开始扫描」把卷子放进来。</div>
+        <details style="margin-top:13px;padding-top:13px;border-top:1px solid var(--line-soft);">
+          <summary style="cursor:pointer;outline:none;display:flex;align-items:center;gap:6px;">
+            <span class="caret">▸</span>
+            <span class="sec-t" style="margin:0;">扫描设备与目录</span>
+          </summary>
+          <div class="kv" id="cfgBox" style="margin-top:9px;"><div class="row"><span>加载中…</span><span></span></div></div>
+        </details>
       </div>
     </div>
   </div>
@@ -459,6 +585,32 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
   </div>
 </div>
 
+<!-- 待确认卷子（按需弹出，不再常驻半个页面）：
+     只有「手动扫描」或学号没认出来时才会有内容，处理完自动关掉。 -->
+<div class="mask" id="queueMask">
+  <div class="modal" style="max-width:1000px;">
+    <div class="mhd">
+      <h3>待确认的卷子</h3>
+      <span class="counter" id="counter">共 <b>0</b> 张</span>
+      <div class="spacer"></div>
+      <button class="btn tiny" id="refreshBtn">刷新</button>
+      <button class="btn tiny primary" id="submitAllBtn">全部提交</button>
+      <button class="btn tiny danger" id="clearBtn">全部丢弃</button>
+      <button class="btn tiny ghost" id="queueCloseBtn">关闭</button>
+    </div>
+    <div class="mbd">
+      <div class="hint" style="margin:0 0 12px;">
+        这些卷子还没入库，确认学号（或框选区域）后提交即可；提交后自动进入档案库，不需要再回到这里。
+      </div>
+      <div id="queue" class="queue"></div>
+      <div id="emptyBox" class="empty">
+        <div class="big">✅</div>
+        <div>没有待确认的卷子，扫完的都已经自动归档了。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- 大图预览 -->
 <div class="mask" id="zoomMask">
   <div class="modal">
@@ -482,7 +634,8 @@ input.sid.unmatched{border-color:var(--warn);background:#fffbeb;}
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<!-- 扫描结果只弹在屏幕上（已扫入 3 页 / 扫描失败…），读屏用户原本收不到 -->
+<div class="toast" id="toast" role="status" aria-live="polite" aria-relevant="additions"></div>
 
 <script>
 const $ = (s, r) => (r || document).querySelector(s);
@@ -490,11 +643,15 @@ const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 
 let CTX = { classes: [], tasks: [], is_local: false };
 let QUEUE = [];
+// 正在自动批阅中的张数（后端单独计数，不计入「待整理」）
+let QUEUE_ACTIVE_COUNT = 0;
 
 function toast(msg, type) {
   const el = document.createElement('div');
   el.className = 't ' + (type || '');
   el.textContent = msg;
+  // 失败要打断当前朗读，成功排队播报（由容器的 polite 决定）
+  if (type === 'err') el.setAttribute('role', 'alert');
   $('#toast').appendChild(el);
   setTimeout(() => el.remove(), type === 'err' ? 5200 : 2800);
 }
@@ -532,6 +689,15 @@ async function api(url, opts) {
       err.jam = true;
       throw err;
     }
+    // fetch 在「根本没连上服务」时抛的是英文 TypeError: Failed to fetch。
+    // 直接把它甩到页面上，老师只会看到一句看不懂的英文；这里翻译成能照着做的中文。
+    if (e && (e.name === 'TypeError'
+        || /failed to fetch|networkerror|load failed|network request failed/i.test(String(e.message || '')))) {
+      const err = new Error('连不上服务：网络中断，或「QuickJudge 服务」刚被关闭/重启还没起来。'
+        + '请确认服务窗口还在运行，刷新本页面后再试一次。');
+      err.transport = true;
+      throw err;
+    }
     throw e;
   } finally {
     if (timer) clearTimeout(timer);
@@ -553,13 +719,14 @@ async function loadContext() {
   badge.textContent = local ? '● 本机模式 · 可扫描' : '● 远程访问 · 扫描已锁定';
   $('#blockedBox').style.display = local ? 'none' : 'block';
   $('#scanBtn').disabled = !local;
+  if ($('#scanMode')) $('#scanMode').disabled = !local;   // 同一台扫描仪，同样只能本机
   $('#importBtn').disabled = !local;
   if ($('#ocrScanBtn')) $('#ocrScanBtn').disabled = !local;   // 扫描答案同样只能在本机
 
   $('#cfgBox').innerHTML =
     row('扫描设备', CTX.naps2_path || '未配置') +
     row('输出目录', CTX.scan_output_dir || '-') +
-    row('临时区', (CTX.staging_count || 0) + ' 张待整理') +
+    row('待确认卷子', (CTX.staging_count || 0) + ' 张（扫完自动归档，通常为 0）') +
     row('当前用户', CTX.user ? (CTX.user.name || CTX.user.id) + '（' + CTX.user.role + '）' : '未登录');
 
   // 后端代码被改过但服务没重启：页面是新的、后端是旧的，会出现「填了满分却不生效」
@@ -594,8 +761,11 @@ async function loadContext() {
   const sel = $('#subjectSel');
   if (sel) {
     const saved = localStorage.getItem('qj_station_subject') || 'english_essay';
-    sel.innerHTML = gs.map(s => '<option value="' + esc(s.key) + '">' + esc(s.name) + '（满分 ' + esc(s.max_score) + '）</option>').join('')
-      || '<option value="english_essay">英语作文（满分 25）</option>';
+    // 只显示学科名。以前这里拼「（满分 xx）」，但满分本来就由右边那一行决定，
+    // 下拉里再写一遍只是噪音——而且老师改了满分之后，这里的数字还是方案的默认值，
+    // 反而会和实际用的满分对不上。
+    sel.innerHTML = gs.map(s => '<option value="' + esc(s.key) + '">' + esc(s.name) + '</option>').join('')
+      || '<option value="english_essay">英语</option>';
     sel.value = gs.some(s => s.key === saved) ? saved : (gs[0] ? gs[0].key : 'english_essay');
     sel.onchange = () => {
       localStorage.setItem('qj_station_subject', sel.value);
@@ -607,7 +777,8 @@ async function loadContext() {
 
   const urls = CTX.portal_urls || [];
   $('#urlList').innerHTML = urls.length
-    ? urls.map(u => '<div class="urlbox"><input readonly value="' + esc(u) + '"><button class="btn tiny" data-copy="' + esc(u) + '">复制</button></div>').join('')
+    ? urls.map(u => '<div class="urlbox"><input readonly aria-label="用户端地址，可复制" value="'
+        + esc(u) + '"><button class="btn tiny" data-copy="' + esc(u) + '">复制</button></div>').join('')
     : '<div class="hint">未检测到局域网地址，请确认本机已连接网络。</div>';
   $$('#urlList [data-copy]').forEach(b => b.onclick = () => {
     navigator.clipboard.writeText(b.dataset.copy).then(() => toast('已复制', 'ok'), () => toast('复制失败', 'err'));
@@ -628,11 +799,18 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ 
 // 所以这里：学科默认值打底 → 常见分值一键点 → 特殊分值手填 → 底下一行常驻
 // 「本次按 X 分制批阅」，把生效值摊在明面上，而不是藏在 50px 的小框里。
 const MAX_PRESETS = {
+  // 键是学科 key（语数英物化生政史地 + 信息 + 默写 + 通用），
+  // 值是该科最常见的几个满分；方案自带的默认值也会自动补进来（见 presetList）。
   english_essay: [15, 20, 25],
   chinese_essay: [50, 60],
-  politics: [50, 100],
-  geography: [50, 100],
   math_solution: [10, 12, 15],
+  physics: [10, 15, 20],
+  chemistry: [10, 15, 20],
+  biology: [10, 15, 20],
+  politics: [50, 100],
+  history: [50, 100],
+  geography: [50, 100],
+  information: [10, 15, 20],
   dictation: [10, 20],
   general: [100]
 };
@@ -651,7 +829,9 @@ function currentSubjectKey() {
 function currentSubjectName() {
   const gs = (CTX.grading && CTX.grading.subjects) || [];
   const cur = gs.find(s => s.key === currentSubjectKey());
-  return (cur && cur.name) || '当前方案';
+  // 拿不到学科名时返回空串：调用方会退成「方案默认值」，
+  // 不能回 '当前方案'——拼起来会变成「当前方案方案的默认分值」。
+  return (cur && cur.name) || '';
 }
 function subjectDefaultMax() {
   const gs = (CTX.grading && CTX.grading.subjects) || [];
@@ -670,8 +850,7 @@ function presetList() {
 function renderMaxChips() {
   const box = $('#maxChips');
   if (!box) return;
-  const el = $('#maxScore');
-  const cur = Number(el && el.value);
+  const cur = readMaxScore();
   const def = subjectDefaultMax();
   box.innerHTML = presetList().map(v =>
     '<button type="button" class="maxchip' + (v === cur ? ' on' : '') + '" data-v="' + v + '"'
@@ -679,33 +858,63 @@ function renderMaxChips() {
     + v + (v === def ? '<span class="tag">默认</span>' : '') + '</button>'
   ).join('');
   $$('#maxChips .maxchip').forEach(b => {
-    b.onclick = () => {
-      const v = Number(b.dataset.v);
-      if ($('#maxScore')) $('#maxScore').value = v;
-      const store = maxScoreStore();
-      if (v === def) delete store[currentSubjectKey()];
-      else store[currentSubjectKey()] = v;
-      saveMaxScoreStore(store);
-      renderMaxChips();
-      updateMaxHint();
-    };
+    b.onclick = () => applyMaxValue(Number(b.dataset.v), true);
   });
+}
+// 满分的唯一入口：数字框、±、滑轨、预设都走这里，四处显示不可能对不上。
+function applyMaxValue(v, commit) {
+  const el = $('#maxScore');
+  if (!el) return;
+  let n = Number(v);
+  if (!(n > 0 && n <= 1000)) n = subjectDefaultMax();   // 非法值退回默认，框里永不出现空值
+  n = Math.round(n * 10) / 10;
+  el.value = n;
+  if (commit) {
+    const store = maxScoreStore();
+    const def = subjectDefaultMax();
+    if (n === def) delete store[currentSubjectKey()];    // 回到默认值就不算自定义了
+    else store[currentSubjectKey()] = n;
+    saveMaxScoreStore(store);
+  }
+  renderMaxChips();
+  updateMaxHint();
+  syncRange();
+}
+function syncRange() {
+  const rng = $('#maxRange');
+  if (!rng) return;
+  const v = readMaxScore();
+  // 超过 100（150 分制）时把上限抬到 150，否则拖到底也只有 100，还得回头改数字框。
+  rng.max = v > 100 ? 150 : 100;
+  rng.value = Math.max(1, Math.min(Number(rng.max), Math.round(v)));
+  const pct = ((Number(rng.value) - 1) / (Number(rng.max) - 1)) * 100;
+  rng.style.setProperty('--fill', pct.toFixed(1) + '%');
+  rng.setAttribute('aria-valuetext', v + ' 分');
+}
+function stepMax(delta) {
+  applyMaxValue(readMaxScore() + delta, true);
 }
 function updateMaxHint() {
   const box = $('#maxHint');
   if (!box) return;
   const v = readMaxScore();
   const def = subjectDefaultMax();
-  const custom = maxScoreStore()[currentSubjectKey()];
+  const custom = Number(maxScoreStore()[currentSubjectKey()]);
+  // 「改过满分」是老师的正常操作（8 分的小练习、60 分的半卷），不是异常，
+  // 所以这里不再用警告色，只把生效值和「怎么退回默认」说清楚。
+  box.style.color = '';
   if (custom > 0 && custom !== def) {
-    box.style.color = '#8a5300';
-    box.innerHTML = '本次按 <b>' + esc(String(v)) + ' 分制</b>批阅（已自定义；' + esc(currentSubjectName())
-      + '方案默认 ' + esc(String(def)) + ' 分）';
+    box.innerHTML = '本次按 <b>' + esc(String(v)) + ' 分制</b>批阅 · '
+      + '<a href="#" id="maxResetLink" style="color:#2f6fd0;text-decoration:none;">恢复默认 '
+      + esc(String(def)) + ' 分</a>';
+    const lk = $('#maxResetLink');
+    if (lk) lk.onclick = (ev) => { ev.preventDefault(); applyMaxValue(def, true); };
   } else {
-    box.style.color = '';
-    box.innerHTML = '本次按 <b>' + esc(String(v)) + ' 分制</b>批阅（' + esc(currentSubjectName())
-      + '方案的默认分值）';
+    const name = currentSubjectName();
+    box.innerHTML = '本次按 <b>' + esc(String(v)) + ' 分制</b>批阅（'
+      + (name ? esc(name) + '方案默认值' : '方案默认值') + '）';
   }
+  syncSetupSummary();
 }
 function syncMaxScore() {
   const el = $('#maxScore');
@@ -714,6 +923,7 @@ function syncMaxScore() {
   el.value = (saved > 0 && saved <= 1000) ? saved : subjectDefaultMax();
   renderMaxChips();
   updateMaxHint();
+  syncRange();
 }
 function readMaxScore() {
   const el = $('#maxScore');
@@ -721,27 +931,41 @@ function readMaxScore() {
   if (v > 0 && v <= 1000) return v;
   return subjectDefaultMax();
 }
+// 口径条：把「这批按什么标准批、扫完怎么处理」压成一行，放在扫描按钮上方。
+// 老师按按钮之前一定看得到，但不用天天面对滑轨、预设和备注框。
+function syncSetupSummary() {
+  const el = $('#setupText');
+  if (!el) return;
+  const parts = [currentSubjectName() || '当前方案', String(readMaxScore()) + ' 分'];
+  parts.push(readTeacherNote() ? '有批改备注' : '无批改备注');
+  const ex = currentExerciseSummary();
+  if (ex) parts.push('要点表 ' + (ex.title || '已选'));
+  const mode = scanMode();
+  if (mode === 'collect') parts.push('只入库');
+  else if (mode === 'manual') parts.push('只扫描、待框选');
+  el.textContent = parts.join(' · ');
+}
 if ($('#maxScore')) {
   // 输入即生效：手填一个不在预设里的值时，输入框自身就是「自定义」的入口，
   // 不必再点一次「确定」——扫描按钮读的就是这个值。
-  const onEdit = () => {
-    const el = $('#maxScore');
-    const v = Number(el.value);
-    const store = maxScoreStore();
-    const def = subjectDefaultMax();
-    if (!(v > 0 && v <= 1000) || v === def) {
-      delete store[currentSubjectKey()];
-      if (!(v > 0 && v <= 1000)) el.value = def;   // 非法值不让它留在框里
-    } else {
-      store[currentSubjectKey()] = v;
-    }
-    saveMaxScoreStore(store);
-    renderMaxChips();
-    updateMaxHint();
-  };
-  $('#maxScore').onchange = onEdit;
-  $('#maxScore').onblur = onEdit;
-  $('#maxScore').oninput = () => { renderMaxChips(); updateMaxHint(); };
+  $('#maxScore').onchange = () => applyMaxValue($('#maxScore').value, true);
+  $('#maxScore').onblur = () => applyMaxValue($('#maxScore').value, true);
+  $('#maxScore').oninput = () => { renderMaxChips(); updateMaxHint(); syncRange(); };
+  // ± 只挪 1 分：改 8→9 这种相邻调整不该逼老师选中数字再敲键盘。
+  if ($('#maxMinus')) $('#maxMinus').onclick = () => stepMax(-1);
+  if ($('#maxPlus')) $('#maxPlus').onclick = () => stepMax(1);
+  if ($('#maxRange')) {
+    // 拖动时数字框实时跟随（老师能一直看到具体几分），松手才落盘。
+    $('#maxRange').oninput = (ev) => {
+      const el = $('#maxScore');
+      if (!el) return;
+      el.value = ev.target.value;
+      renderMaxChips();
+      updateMaxHint();
+      syncRange();
+    };
+    $('#maxRange').onchange = () => applyMaxValue($('#maxRange').value, true);
+  }
   syncMaxScore();   // 先给个默认值，别让输入框空着；loadContext 拿到方案后会再校准
 }
 
@@ -758,6 +982,11 @@ function selectedTaskId() {
 function readTeacherNote() {
   const el = $('#teacherNote');
   return el ? String(el.value || '').trim() : '';
+}
+function noteHasScoringRubric() {
+  const text = readTeacherNote();
+  const numbered = /(^|\n)\s*(?:第\s*)?[（(]?\d{1,2}[)）][.、．]?\s*\S+/m.test(text);
+  return numbered && (text.includes('分') || text.includes('答案') || text.includes('写对给分'));
 }
 function syncPromptBadge() {
   const b = $('#promptBadge');
@@ -785,12 +1014,26 @@ if ($('#taskSel')) {
 }
 if ($('#teacherNote')) {
   const el = $('#teacherNote');
+  // 字数只在真开始写之后才露面：空着的时候多一行数字纯属噪音。
+  const syncNoteCount = () => {
+    const row = $('#noteCountRow'), lab = $('#noteCount');
+    if (!row || !lab) return;
+    const n = el.value.length;
+    const max = Number(el.getAttribute('maxlength')) || 300;
+    row.style.display = n > 0 ? 'flex' : 'none';
+    lab.textContent = n + ' / ' + max + (n >= max ? '（已到上限，再写不会保存）' : '');
+    lab.style.color = n >= max ? '#b45309' : (n >= max - 30 ? '#a16207' : '');
+  };
   try { el.value = localStorage.getItem('qj_station_note') || ''; } catch (e) {}
   el.oninput = el.onchange = () => {
     try { localStorage.setItem('qj_station_note', el.value.slice(0, 300)); } catch (e) {}
     syncPromptBadge();
+    renderExerciseMeta();
+    syncNoteCount();
+    syncSetupSummary();
   };
   syncPromptBadge();
+  syncNoteCount();
 }
 // 上次填过题目/练习或备注就自动展开，别让老师以为自己的设置丢了
 if ($('#promptBox') && (taskStore() || exerciseStore() || readTeacherNote())) $('#promptBox').open = true;
@@ -886,6 +1129,7 @@ function syncExerciseMaxScore() {
     el.title = '这一批卷子的满分；默认跟着上面的方案走，改了就按你填的算';
     if (wasLocked) syncMaxScore();
   }
+  syncSetupSummary();
 }
 
 function renderExerciseMeta() {
@@ -893,10 +1137,13 @@ function renderExerciseMeta() {
   if (!el) return;
   const ex = currentExerciseSummary();
   if (!ex) {
-    // 老师问的是"我扫进去就能做吗"，这句就要先回答"能"。要点表是可选的增值项，
-    // 不该写成前置条件（原来是"就选一份练习，或点右边「＋ 新建练习」"，等于先给一道门）。
-    el.innerHTML = '不选也能扫：按<b>' + esc(currentSubjectMeta().name || '学科')
-      + '标准整体给分</b>（分数 + 评语，不逐点给分）。';
+    if (noteHasScoringRubric()) {
+      el.innerHTML = '检测到备注里有<b>编号答案和分值</b>：本批会先整理成评分表，再逐题逐点给分；'
+        + '无法可靠对齐时会停下提示，不会改成整体估分。满分以评分表合计为准。';
+    } else {
+      el.innerHTML = '不选也能扫：按<b>' + esc(currentSubjectMeta().name || '学科')
+        + '标准整体给分</b>（分数 + 评语，不逐点给分）。';
+    }
     return;
   }
   el.innerHTML = '📋 ' + esc(ex.title || '未命名练习') + ' · ' + (ex.question_count || 0) + ' 题 / '
@@ -916,7 +1163,7 @@ function renderExerciseOptions() {
   const keep = usable.some(e => e.id === sel.value) ? sel.value : exerciseStore();
   // 默认项就是"不选"：老师最常见的诉求是"扫进去就能做"，
   // 不该因为没准备要点表被挡在扫描仪前面
-  sel.innerHTML = '<option value="">— 不用要点表（按学科标准整体判分）—</option>'
+  sel.innerHTML = '<option value="">— 不添加答案要点，按学科标准整体给分 —</option>'
     + usable.map(e => '<option value="' + esc(e.id) + '">' + esc(e.title || '未命名练习')
         + '（' + esc(e.max_score) + ' 分）</option>').join('');
   sel.value = usable.some(e => e.id === keep) ? keep : '';
@@ -935,7 +1182,7 @@ function syncSubjectUi() {
   const ph = $('#promptHint');
   if (ph) {
     ph.textContent = pts
-      ? '（写一句这次怎么给分；不写就按学科标准整体给分）'
+      ? '（编号答案 + 分值会自动按点判；否则按学科标准整体给分）'
       : '（写一句这次怎么判；不写就按卷面识别题干）';
   }
   renderExerciseOptions();
@@ -957,6 +1204,13 @@ function syncMaxEnabled() {
     b.disabled = locked;
     b.style.opacity = locked ? '.45' : '';
     b.style.cursor = locked ? 'not-allowed' : 'pointer';
+  });
+  // 滑轨和 ± 也一起锁：整行虽然会收起来，但别留下一个能改值却看不见的控件
+  const rng = $('#maxRange');
+  if (rng) rng.disabled = locked;
+  ['#maxMinus', '#maxPlus'].forEach(s => {
+    const b = $(s);
+    if (b) b.disabled = locked;
   });
   // 选了要点表：满分由练习总分决定，整行收起。
   const row = $('#maxRow');
@@ -1034,7 +1288,8 @@ function renderExPreview(p) {
         + (q.answer ? '<div style="font-size:12px;color:#3a6b4a;margin-top:3px;line-height:1.55;">参考答案：'
             + esc(q.answer).replace(/\n/g, '<br>') + '</div>' : '')
         + (q.points || []).map(pt => '<div style="font-size:12px;color:var(--text2,#666);margin-top:2px;">'
-            + '· ' + esc(pt.text) + ' <span style="color:#b26a00;">' + esc(pt.score) + ' 分</span></div>').join('')
+            // 分值用深琥珀：#b26a00 在白底 4.24、在卡片灰底 4.06，都不够 4.5
+            + '· ' + esc(pt.text) + ' <span style="color:#8a5300;">' + esc(pt.score) + ' 分</span></div>').join('')
         + '</div>').join('')
     + '</div>';
   el.innerHTML = html;
@@ -1250,7 +1505,7 @@ function renderOcrResult(r) {
     + (pts ? '填入练习正文' : '填入题目要点') + '</button>'
     + '<button class="btn tiny" type="button" id="ocrNote">追加到批改备注</button>'
     + '<button class="btn tiny ghost" type="button" id="ocrClear">清空</button>'
-    + '<span style="font-size:11.5px;color:var(--text3,#999);align-self:center;">'
+    + '<span style="font-size:12px;color:var(--text3,#999);align-self:center;">'
     + '上面这段可以直接改，改完再填；填进去之后仍要「解析预览」确认一次</span>'
     + '</div>';
 
@@ -1299,6 +1554,35 @@ function renderOcrResult(r) {
   if (clr) clr.onclick = clearOcrResult;
 }
 
+// 手机/相机原图动辄 8~15MB，一次传几张学案就把请求体顶到 64MB 上限，
+// 表现为浏览器直接抛 "Failed to fetch"（连接被冲断），且识别也更慢。
+// 这里在上传前把长边压到 2200px（≈190dpi A4，视觉模型本来就会缩到这个量级），
+// 体积通常降到 1/5~1/10，识别准确率不受影响。
+async function shrinkImageForUpload(file, maxEdge, quality) {
+  maxEdge = maxEdge || 2200;
+  quality = quality || 0.86;
+  if (!file || !/^image\//i.test(file.type || '')) return file;
+  // 本来就不大，没必要二次编码（二次编码反而可能让文字变糊）
+  if (file.size <= 1.2 * 1024 * 1024) return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, maxEdge / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(bmp, 0, 0, w, h);
+    if (bmp.close) bmp.close();
+    const blob = await new Promise(function (res) { cv.toBlob(res, 'image/jpeg', quality); });
+    if (!blob || blob.size >= file.size) return file;   // 压完没变小就保留原图
+    const name = (file.name || 'answer').replace(/\.[^.\\/]+$/, '') + '.jpg';
+    return new File([blob], name, { type: 'image/jpeg' });
+  } catch (err) {
+    return file;   // 浏览器不支持解码等情况：原图上传，别把功能搞挂
+  }
+}
+
 if ($('#ocrBtn')) {
   $('#ocrBtn').onclick = () => { if ($('#ocrInput')) $('#ocrInput').click(); };
 }
@@ -1310,7 +1594,18 @@ if ($('#ocrInput')) {
     const old = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span>正在识别…'; }
     const fd = new FormData();
-    Array.from(files).forEach(f => fd.append('files', f));
+    const picked = Array.from(files);
+    // 先压缩再上传：既躲开 64MB 请求体上限（超了浏览器会直接 Failed to fetch），
+    // 也明显减少底图传输时间。压缩失败会自动回退成原图。
+    const shrunk = await Promise.all(picked.map(f => shrinkImageForUpload(f)));
+    let totalBytes = 0;
+    shrunk.forEach(f => { fd.append('files', f); totalBytes += (f.size || 0); });
+    if (totalBytes > 60 * 1024 * 1024) {
+      if (btn) { btn.disabled = false; btn.innerHTML = old; }
+      ev.target.value = '';
+      toast('这些图片合计约 ' + Math.round(totalBytes / 1048576) + 'MB，超过单次上限，请分两次上传', 'err');
+      return;
+    }
     fd.append('mode', isPointsSubject() ? 'exercise' : 'requirements');
     fd.append('subject', currentSubjectKey());
     try {
@@ -1349,13 +1644,13 @@ function renderAnswerPages() {
   box.style.display = '';
   const total = ANSWER_PAGES.reduce((n, p) => n + (p.regions || []).length, 0);
   box.innerHTML =
-    '<div style="font-size:11.5px;color:var(--text2);margin-bottom:6px;">已扫 '
+    '<div style="font-size:12px;color:var(--text2);margin-bottom:6px;">已扫 '
       + ANSWER_PAGES.length + ' 页，共框 ' + total + ' 块区域（不框就整页识别）</div>'
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
     + ANSWER_PAGES.map((p, i) => `
         <div style="width:106px;border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden;">
           <img src="${p.url}" alt="" style="width:100%;height:104px;object-fit:cover;display:block;background:#f3f4f6;">
-          <div style="padding:4px 6px;font-size:11px;color:var(--text2);">第 ${i + 1} 页 · ${(p.regions || []).length} 块</div>
+          <div style="padding:4px 6px;font-size:12px;color:var(--text2);">第 ${i + 1} 页 · ${(p.regions || []).length} 块</div>
           <button type="button" class="btn tiny" data-anscrop="${i}"
                   style="width:100%;border-radius:0;border:0;border-top:1px solid var(--line);">框选区域</button>
         </div>`).join('')
@@ -1436,6 +1731,7 @@ if ($('#ocrScanBtn')) $('#ocrScanBtn').onclick = scanAnswer;
 
 /* ---------------- 扫描 / 导入 ---------------- */
 let JOB_TIMER = null;
+let JOB_POLL_FAILURES = 0;
 
 const STAGE_TEXT = {
   queued: '已排队…', reading: '识别表头与正文', grading: '逐篇批阅',
@@ -1445,6 +1741,9 @@ const STAGE_TEXT = {
 function renderJob(j) {
   const panel = $('#jobPanel');
   panel.classList.add('show');
+  // 有活儿了就把右栏的占位说明收起来，避免「还没有开始扫描」和真实进度叠在一起
+  const emp = $('#jobEmpty');
+  if (emp) emp.style.display = 'none';
   const job = j.job || {};
   const done = job.status === 'done', err = job.status === 'error';
   panel.classList.toggle('done', done);
@@ -1453,7 +1752,13 @@ function renderJob(j) {
   const pct = done ? 100 : (total ? Math.round(dn / total * 100) : 0);
   // 要点判分批次读的是「学号 + 作答」，不是作文正文；文案要跟着换，否则老师会以为批错了
   const stx = Object.assign({}, STAGE_TEXT);
-  if (j.exercise || j.mode) {
+  if (j.collect) {
+    // 只扫描不批阅：整个阶段里没有"批"这个动作，别让文案暗示已经批过了
+    stx.reading = '识别学号';
+    stx.grading = '登记入库（不批阅）';
+    stx.committing = '登记入库';
+    stx.done = '已入库';
+  } else if (j.exercise || j.mode) {
     stx.reading = '识别学号与作答';
     stx.grading = (j.mode === 'free') ? '整体判分' : '逐点判分';
   }
@@ -1467,43 +1772,72 @@ function renderJob(j) {
     }
     // 学号没能唯一落到名单上：明确标出来，别让老师以为已经归档到位
     const warn = r.sid_note
-      ? `<span title="${esc(r.sid_note)}" style="margin-left:6px;padding:1px 6px;border-radius:9px;background:#fff4e5;color:#b26a00;border:1px solid #ffd8a8;font-size:11px;">待确认</span>`
+      ? `<span title="${esc(r.sid_note)}" style="margin-left:6px;padding:1px 6px;border-radius:9px;background:#fff4e5;color:#b26a00;border:1px solid #ffd8a8;font-size:12px;">待确认</span>`
+      : '';
+    // 卷面印的分值和本次满分对不上（整叠里混进了别的题目）：分数照留，
+    // 但同一批里 3/4 和 8/10 没法比，得当场让老师看见
+    const wmax = r.review_note
+      ? `<span title="${esc(r.review_note)}" style="margin-left:6px;padding:1px 6px;border-radius:9px;background:#fdecec;color:#b42318;border:1px solid #f5c2c0;font-size:12px;">分值不符</span>`
       : '';
     // 要点判分直接给"得分/满分"，作文还是只给等级——两种卷子的分数含义不一样
     const sc = r.score == null ? '' : (r.max_total ? (r.score + '/' + r.max_total) : String(r.score));
     const lv = (!r.max_total && r.level) ? ' · ' + r.level : '';
-    return `<div class="jobitem ok"><span class="dot"></span><span class="nm">${esc(r.student_id || '—')} ${esc(r.name || '')}${warn}</span><span>${esc(sc)}${esc(lv)}</span></div>`;
+    const reviewText = [r.sid_note, r.review_note].filter(Boolean).join('；');
+    const reviewLine = reviewText
+      ? `<div style="margin:2px 0 8px 18px;padding:6px 8px;border-left:3px solid #d9a441;background:#fff8ec;color:#8a5300;font-size:12px;line-height:1.5;">需人工核对：${esc(reviewText)}</div>`
+      : '';
+    return `<div class="jobitem ok"><span class="dot"></span><span class="nm">${esc(r.student_id || '—')} ${esc(r.name || '')}${warn}${wmax}</span><span>${esc(sc)}${esc(lv)}</span></div>${reviewLine}`;
   }).join('');
 
   const foot = $('#jobFoot');
   if (done) {
     const n = (j.record_ids || []).length;
-    const byEx = j.exercise
-      ? '<div style="margin-top:4px;color:var(--text3,#999);">判分依据：《' + esc(j.exercise.title || '练习')
-        + '》' + (j.exercise.point_count || 0) + ' 个要点 / 满分 ' + esc(j.exercise.max_score) + '</div>'
-      : (j.mode === 'free'
-        // 没给答案要点 → 说清楚"为什么只有总分"，老师会以为是明细没加载出来
-        ? '<div style="margin-top:4px;color:var(--text3,#999);">通用批阅：按学科标准整体给分'
-          + '（没给答案要点，所以只有总分和评语）</div>'
-        : '');
+    const reviewN = (j.results || []).filter(r => r.sid_note || r.review_note).length;
+    const byEx = j.collect
+      // 只扫描不批阅：明确告诉老师下一步在哪，否则他会以为批阅失败了
+      ? '<div style="margin-top:4px;color:var(--text3,#999);">这 ' + n + ' 份已入库但<b>还没有批阅</b>。'
+        + '去用户端勾选它们，写上批改提示词再批（重复批同一份会直接覆盖旧结果）。</div>'
+      : (j.exercise
+        ? '<div style="margin-top:4px;color:var(--text3,#999);">判分依据：《' + esc(j.exercise.title || '练习')
+          + '》' + (j.exercise.point_count || 0) + ' 个要点 / 满分 ' + esc(j.exercise.max_score) + '</div>'
+        : (j.mode === 'free'
+          // 没给答案要点 → 说清楚"为什么只有总分"，老师会以为是明细没加载出来
+          ? '<div style="margin-top:4px;color:var(--text3,#999);">通用批阅：按学科标准整体给分'
+            + '（没给答案要点，所以只有总分和评语）</div>'
+          : ''));
+    const rubricWarn = (j.rubric_from_note && (j.rubric_warnings || []).length)
+      ? '<div style="margin-top:4px;color:#8a5300;">评分表由批改备注整理：'
+        + (j.rubric_warnings || []).map(esc).join('；') + '</div>'
+      : '';
     foot.style.display = 'block';
-    foot.innerHTML = `已归档 <b>${n}</b> 份 · <a href="/portal" target="_blank" rel="noopener">去用户端查看 →</a>` + byEx;
+    foot.innerHTML = (j.collect ? '已登记 <b>' + n + '</b> 份' : '已归档 <b>' + n + '</b> 份')
+      + (reviewN ? ' · <b style="color:#8a5300;">待人工核对 ' + reviewN + ' 份</b>' : '')
+      + ' · <a href="/portal" target="_blank" rel="noopener">去用户端' + (reviewN ? '处理' : '查看') + ' →</a>'
+      + byEx + rubricWarn;
   } else if (err) {
+    const archivedN = (j.record_ids || []).length;
     foot.style.display = 'block';
-    foot.innerHTML = '批阅中断：' + esc(job.message || '未知原因') +
-      ` <a href="#" id="jobRetry">重试本批</a>`;
+    foot.innerHTML = (archivedN ? '部分完成：' : '批阅中断：') + esc(job.message || '未知原因')
+      + (archivedN ? ' <a href="/portal" target="_blank" rel="noopener">查看已归档 ' + archivedN + ' 份</a>' : '')
+      + ` <a href="#" id="jobRetry">重试未完成卷</a>`;
     const rb = $('#jobRetry');
     if (rb) rb.onclick = async (ev) => {
       ev.preventDefault();
       // 把当前选中的练习一起带上：要点判分的批次报「没选练习」时，
       // 老师补选完点重试就能直接判，不用把纸重新放回扫描仪。
-      await api('/api/station/jobs/' + j.id + '/retry', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ exercise_id: isPointsSubject() ? selectedExerciseId() : '' })
-      });
-      foot.style.display = 'none';
-      pollJob(j.id);
-      if (!JOB_TIMER) JOB_TIMER = setInterval(() => pollJob(j.id), 2500);
+      rb.textContent = '正在重试…';
+      try {
+        await api('/api/station/jobs/' + j.id + '/retry', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ exercise_id: isPointsSubject() ? selectedExerciseId() : '' })
+        });
+        foot.style.display = 'none';
+        pollJob(j.id);
+        if (!JOB_TIMER) JOB_TIMER = setInterval(() => pollJob(j.id), 2500);
+      } catch (e) {
+        rb.textContent = '重试未完成卷';
+        toast(e.message || '重试失败，请检查后重试', 'err');
+      }
     };
   } else {
     foot.style.display = 'none';
@@ -1512,7 +1846,19 @@ function renderJob(j) {
 
 async function pollJob(bid) {
   let j;
-  try { j = await api('/api/station/jobs/' + bid); } catch (e) { return; }
+  try {
+    j = await api('/api/station/jobs/' + bid);
+    JOB_POLL_FAILURES = 0;
+  } catch (e) {
+    JOB_POLL_FAILURES += 1;
+    if (JOB_POLL_FAILURES >= 2) {
+      $('#jobStage').textContent = '进度连接中断，正在自动重连；已完成的批阅不会受影响';
+      const foot = $('#jobFoot');
+      foot.style.display = 'block';
+      foot.innerHTML = '暂时取不到最新进度，请检查本机服务是否仍在运行。页面会自动重试。';
+    }
+    return;
+  }
   renderJob(j);
   const st = (j.job || {}).status;
   if (st === 'done' || st === 'error') {
@@ -1524,6 +1870,7 @@ async function pollJob(bid) {
 
 // 起了批次就盯进度：扫描和导入共用同一段，别让两条路的提示长得不一样
 function watchBatch(bid, label) {
+  JOB_POLL_FAILURES = 0;
   $('#jobPanel').classList.add('show');
   $('#jobList').innerHTML = '';
   $('#jobFoot').style.display = 'none';
@@ -1534,30 +1881,56 @@ function watchBatch(bid, label) {
   JOB_TIMER = setInterval(() => pollJob(bid), 2500);
 }
 
-$('#scanBtn').onclick = async () => {
+// 扫描一条链路，三种「扫完怎么办」，由 #scanMode 一个下拉决定：
+//   auto    → 扫完就批（auto=1, grade=1）
+//   collect → 读表头、认学号、入库，但不批（auto=1, grade=0）
+//   manual  → 只把图放进临时区（auto=0），要自己框区域 / 改学号再提交
+// 以前 collect 和 manual 各占一个控件、文案都写着「只扫描」，老师分不清；
+// 现在收成一个下拉，选项文字直接说后果，扫完自动回到默认。
+function scanMode() {
+  const sel = $('#scanMode');
+  return (sel && sel.value) || 'auto';
+}
+async function runScan() {
+  const mode = scanMode();
+  const collectOnly = mode === 'collect';
+  const manual = mode === 'manual';
   const btn = $('#scanBtn');
-  const manual = !!($('#manualScan') || {}).checked;
+  if (!btn) return;
+  const oldHtml = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span><span>扫描中，请把试卷放入扫描仪…</span>';
+  btn.innerHTML = '<span class="spin"></span>扫描中，请把试卷放入扫描仪…';
   try {
     const r = await api('/api/station/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      // 一叠 40 页在 300dpi 下扫描加导出要两分多钟；后端总上限 300 秒、
+      // 导出再留 180 秒，最坏约 8 分钟。前端如果还按 150 秒掐断，
+      // 会出现"界面报超时、扫描仪其实还在扫"的错位，所以放到 10 分钟。
+      timeout_ms: 600000,
       body: JSON.stringify({
-        subject: currentSubjectKey(), max_score: readMaxScore(), auto: !manual,
+        subject: currentSubjectKey(), max_score: readMaxScore(),
+        auto: collectOnly ? true : !manual,
+        // 只扫描不批阅：后端读表头 + 入库，一张都不送模型
+        grade: !collectOnly,
         task_id: selectedTaskId(), exercise_id: isPointsSubject() ? selectedExerciseId() : '',
         teacher_note: readTeacherNote()
       })
     });
     if (r.batch && r.batch.id) {
-      watchBatch(r.batch.id, '已扫描 ' + (r.count || 1) + ' 页（满分 '
-        + (r.batch.max_score != null ? r.batch.max_score : readMaxScore()) + '），开始自动批阅…');
+      watchBatch(r.batch.id, collectOnly
+        ? ('已扫描 ' + (r.count || 1) + ' 页，正在认学号并入库（不批阅）…')
+        : ('已扫描 ' + (r.count || 1) + ' 页（满分 '
+           + (r.batch.max_score != null ? r.batch.max_score : readMaxScore()) + '），开始自动批阅…'));
     } else {
+      // 没有批次＝卷子只落在待确认区（手动模式/后端降级）：直接把处理窗口弹出来，
+      // 否则老师扫完会对着「已扫入」的提示找不到那些卷子。
       await loadQueue();
       hideUnlock();
+      if (QUEUE.length) openQueue();
       toast(manual
-        ? '已扫入临时区 ' + (r.count || 1) + ' 页，请框选区域或核对学号后提交'
-        : '已扫描 ' + (r.count || 1) + ' 页，已进入临时区', 'ok');
+        ? '已扫 ' + (r.count || 1) + ' 页，请核对学号或框选区域后提交'
+        : '已扫描 ' + (r.count || 1) + ' 页，等待确认', 'ok');
     }
   } catch (e) {
     // 卡纸 / 请求卡住：弹窗里直接给「强制解锁」，老师不用回页面找按钮，也不用重启程序
@@ -1571,12 +1944,14 @@ $('#scanBtn').onclick = async () => {
     }
   } finally {
     btn.disabled = !CTX.is_local;
-    btn.innerHTML = '<span class="ico">🖨️</span><span>开始扫描</span>';
-    // 每次扫完都回到默认的全自动，避免老师忘了自己勾过而导致后续批次不批阅
-    const cb = $('#manualScan');
-    if (cb && cb.checked) { cb.checked = false; syncManualScanLook(); }
+    btn.innerHTML = oldHtml;
+    // 每次扫完都回到默认，避免老师忘了自己改过而导致后续批次不批阅
+    const sel = $('#scanMode');
+    if (sel && sel.value !== 'auto') { sel.value = 'auto'; syncScanModeLook(); }
   }
-};
+}
+
+$('#scanBtn').onclick = () => runScan();
 
 /* ---------- 卡纸自救：强制解锁 ---------- */
 const UNLOCK_BTN_HTML = '<button type="button" id="failUnlock" style="padding:8px 16px;'
@@ -1611,18 +1986,28 @@ if ($('#unlockBtn')) {
   $('#unlockBtn').onclick = doForceUnlock;
 }
 
-// 「先只扫描」勾选后视觉上要明显，防止老师以为还是全自动
-function syncManualScanLook() {
-  const wrap = $('#manualWrap');
-  const cb = $('#manualScan');
-  if (!wrap || !cb) return;
-  wrap.style.borderColor = cb.checked ? '#f0a020' : 'var(--line)';
-  wrap.style.background = cb.checked ? '#fff8ec' : 'transparent';
-  wrap.style.color = cb.checked ? '#8a5300' : 'var(--text2)';
+// 扫完方式改过之后要显眼：整行染成琥珀色，口径条里也写明后果。
+// 否则老师下次忘了自己改过，会以为卷子已经批完了。
+function syncScanModeLook() {
+  const sel = $('#scanMode');
+  if (!sel) return;
+  const custom = sel.value !== 'auto';
+  sel.style.borderColor = custom ? '#f0a020' : 'var(--line)';
+  sel.style.background = custom ? '#fff8ec' : '#fff';
+  sel.style.color = custom ? '#8a5300' : '';
+  syncSetupSummary();
 }
-if ($('#manualScan')) {
-  $('#manualScan').onchange = syncManualScanLook;
-  syncManualScanLook();
+if ($('#scanMode')) {
+  $('#scanMode').onchange = syncScanModeLook;
+  syncScanModeLook();
+}
+// 「调整」只展开批阅设置并把视线带过去；批改备注就在它下面，看得见。
+if ($('#setupAdjust')) {
+  $('#setupAdjust').onclick = () => {
+    const box = $('#setupBox');
+    if (box) box.open = true;
+    if (box) box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  };
 }
 
 // 扫描类错误信息较长（含排查步骤）。
@@ -1689,11 +2074,14 @@ $('#importBtn').onclick = () => $('#importInput').click();
 $('#importInput').onchange = async (ev) => {
   const files = ev.target.files;
   if (!files || !files.length) return;
-  // 导入和扫描走同一条流水线：默认导完直接批，勾了「先只扫描」才只进临时区。
-  const manual = !!($('#manualScan') || {}).checked;
+  // 导入和扫描走同一条流水线，所以「扫完」那个下拉对导入同样生效：
+  // 自动批阅＝auto1；只入库＝auto1+collect1；只扫描待框选＝auto0。
+  const mode = scanMode();
+  const manual = mode === 'manual';
   const fd = new FormData();
   Array.from(files).forEach(f => fd.append('files', f));
   fd.append('auto', manual ? '0' : '1');
+  if (mode === 'collect') fd.append('collect', '1');
   fd.append('subject', currentSubjectKey());
   fd.append('max_score', String(readMaxScore()));
   if (selectedTaskId()) fd.append('task_id', selectedTaskId());
@@ -1705,8 +2093,9 @@ $('#importInput').onchange = async (ev) => {
       watchBatch(r.batch.id, '已导入 ' + (r.count || 1) + ' 页（满分 '
         + (r.batch.max_score != null ? r.batch.max_score : readMaxScore()) + '），开始自动批阅…');
     } else {
-      toast('已导入 ' + r.count + ' 张到临时区，请框选区域或核对学号后提交', 'ok');
       await loadQueue();
+      if (QUEUE.length) openQueue();
+      toast('已导入 ' + r.count + ' 张，请核对学号或框选区域后提交', 'ok');
     }
   } catch (e) { toast(e.message, 'err'); }
   ev.target.value = '';
@@ -1717,11 +2106,42 @@ async function loadQueue() {
   try {
     const r = await api('/api/station/staging');
     QUEUE = r.items || [];
+    QUEUE_ACTIVE_COUNT = r.active_count || 0;
   } catch (e) {
     QUEUE = [];
+    QUEUE_ACTIVE_COUNT = 0;
   }
   renderQueue();
-  $('#counter').innerHTML = '共 <b>' + QUEUE.length + '</b> 张';
+  const cEl = $('#counter');
+  if (cEl) {
+    cEl.innerHTML = '共 <b>' + QUEUE.length + '</b> 张待确认'
+      + (QUEUE_ACTIVE_COUNT ? ' · <b>' + QUEUE_ACTIVE_COUNT + '</b> 张批阅中' : '');
+  }
+  updatePendingBar();
+}
+
+// 页面主体不再常驻列表：有待确认的卷子时，只在扫描卡里露一条窄提示。
+// 批阅中的张数不算「待确认」——那些卷子后端正在处理，老师什么都不用做。
+function updatePendingBar() {
+  const bar = $('#pendingBar');
+  if (!bar) return;
+  const n = QUEUE.length;
+  bar.style.display = n ? 'flex' : 'none';
+  if (!n) return;
+  const txt = $('#pendingText');
+  if (txt) {
+    txt.innerHTML = '有 <b>' + n + '</b> 张卷子需要你确认学号或框选区域，还没入库。';
+  }
+}
+
+function openQueue() {
+  const m = $('#queueMask');
+  if (m) m.classList.add('show');
+  loadQueue();
+}
+function closeQueue() {
+  const m = $('#queueMask');
+  if (m) m.classList.remove('show');
 }
 
 function classOptions(sel) {
@@ -1742,8 +2162,19 @@ function subjectOptions(sel) {
 
 function renderQueue() {
   const box = $('#queue');
-  $('#emptyBox').style.display = QUEUE.length ? 'none' : 'block';
-  box.innerHTML = QUEUE.map((it, i) => itemHtml(it, i)).join('');
+  const eb = $('#emptyBox');
+  if (box) box.innerHTML = QUEUE.map((it, i) => itemHtml(it, i)).join('');
+  if (eb) {
+    eb.style.display = QUEUE.length ? 'none' : 'block';
+    const msg = eb.lastElementChild;
+    if (msg) {
+      // 批阅中的卷子已经从「待整理」里剔除了，但老师要知道纸没丢：
+      // 空列表时把「正在批阅 N 张、无需确认」说明白，别让人以为卷子没了。
+      msg.textContent = QUEUE_ACTIVE_COUNT
+        ? '正在批阅 ' + QUEUE_ACTIVE_COUNT + ' 张，批完会自动归档，不需要你确认。'
+        : '没有待确认的卷子，扫完的都已经自动归档了。';
+    }
+  }
   bindQueue();
 }
 
@@ -1923,13 +2354,23 @@ async function rotateItem(id) {
   } catch (e) { toast(e.message, 'err'); }
 }
 
+// 计数和「待确认」窄提示要跟着列表一起变，统一在这里收口，
+// 免得每个动作（提交/丢弃/清空）各自记得改一次 DOM 却漏掉提示条。
+function syncQueueChrome() {
+  const cEl = $('#counter');
+  if (cEl) cEl.innerHTML = '共 <b>' + QUEUE.length + '</b> 张待确认';
+  updatePendingBar();
+  // 处理完立刻收窗：留在空白弹层上会让人以为还没处理完
+  if (!QUEUE.length) closeQueue();
+}
+
 async function removeItem(id) {
   if (!confirm('确定丢弃这张扫描件？图片将被删除。')) return;
   try {
     await api('/api/station/staging/' + id, { method: 'DELETE' });
     QUEUE = QUEUE.filter(x => x.id !== id);
     renderQueue();
-    $('#counter').innerHTML = '共 <b>' + QUEUE.length + '</b> 张';
+    syncQueueChrome();
     toast('已丢弃', 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -1944,7 +2385,7 @@ async function submitItem(id, btn) {
     await api('/api/station/staging/' + id + '/submit', { method: 'POST' });
     QUEUE = QUEUE.filter(x => x.id !== id);
     renderQueue();
-    $('#counter').innerHTML = '共 <b>' + QUEUE.length + '</b> 张';
+    syncQueueChrome();
     toast('已提交入库，用户端现在可见', 'ok');
   } catch (e) {
     toast(e.message, 'err');
@@ -1977,6 +2418,8 @@ $('#clearBtn').onclick = async () => {
 };
 
 $('#refreshBtn').onclick = loadQueue;
+$('#pendingOpen').onclick = openQueue;
+$('#queueCloseBtn').onclick = closeQueue;
 window.addEventListener('keydown', e => {
   if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r')) return;
 });

@@ -168,9 +168,13 @@
         <div class="nav-container" style="max-width: none; justify-content: space-between;">
             <div style="display: flex; align-items: center; gap: 1rem;">
                 <span id="currentUserSpan" style="color: rgba(255,255,255,0.9); font-size: 0.9rem;"></span>
-                <button id="changePwdBtn" onclick="openChangePwdModal()" class="btn" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 8px 16px;">🔑 修改密码</button>
-                <button id="configBtn" onclick="openConfigModal()" class="btn" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 8px 16px;">⚙️ 配置</button>
-                <button id="logoutBtn" onclick="doLogout()" class="btn" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 8px 16px;">退出</button>
+                <!-- 三个全局动作原来长得一样，且「修改密码」占了最左（最显眼）的位置——
+                     而它是老师一年也用不到一次的操作。按使用频率排：配置 > 退出 > 修改密码，
+                     并把最不常用的那个降成一枚不带底色的小按钮。 -->
+                <button id="configBtn" onclick="openConfigModal()" class="btn" style="background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.34); color: #fff; padding: 8px 16px;">⚙️ 配置</button>
+                <button id="logoutBtn" onclick="doLogout()" class="btn" style="background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.34); color: #fff; padding: 8px 16px;">退出</button>
+                <button id="changePwdBtn" onclick="openChangePwdModal()" class="btn" title="修改本账号密码"
+                        style="background: transparent; border: 1px solid transparent; color: #fff; padding: 8px 10px; font-weight: 400;">🔑 修改密码</button>
             </div>
         </div>
     </nav>
@@ -210,8 +214,8 @@
                  要指定题干就用扫描端的「✍️ 批改备注」（/api/tasks/quick 建轻量任务）。 -->
             <div class="sidebar-group sidebar-teacher">
                 <div class="sidebar-group-title" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
-                    <span>旧版阅卷 <span style="font-size: 10px; font-weight: 500; padding: 1px 5px; border-radius: 4px; background: rgba(128,128,128,0.25);">备用</span></span>
-                    <button type="button" id="legacyToggle" onclick="toggleLegacyFlow()" title="展开 / 收起旧版阅卷流程" style="border: 1px solid rgba(128,128,128,0.45); background: transparent; color: inherit; font-size: 11px; line-height: 1; padding: 3px 8px; border-radius: 6px; cursor: pointer;">展开</button>
+                    <span>旧版阅卷 <span style="font-size:12px; font-weight: 500; padding: 1px 5px; border-radius: 4px; background: #e6e9ee; color: #475569;">备用</span></span>
+                    <button type="button" id="legacyToggle" onclick="toggleLegacyFlow()" title="展开 / 收起旧版阅卷流程" style="border: 1px solid rgba(128,128,128,0.45); background: transparent; color: inherit; font-size:12px; line-height: 1; padding: 6px 9px; border-radius: 6px; cursor: pointer;">展开</button>
                 </div>
                 <div id="legacyFlowGroup" style="display: none;">
                     <!-- 组卷布置已从这里隐去：英语老师在别的平台组卷，这套选题/排版/答题卡对他没用。
@@ -242,7 +246,11 @@
         </aside>
 
         <main class="admin-content">
-            <div id="alertArea"></div>
+            <!-- showAlert() 是全站唯一的反馈出口（保存配置/删除/批阅/导出都走它），
+                 但它原来只是个空 div：读屏用户完全听不到"已保存"或"保存失败"。
+                 外层只声明 aria-live（不写 role="status"，避免嵌套 live region
+                 把内层 role="alert" 的"打断"语义压掉），每条消息自己带角色。 -->
+            <div id="alertArea" aria-live="polite" aria-atomic="true"></div>
 
             <!-- 首页：最新试卷与改卷情况报表 -->
             <div id="tab-home" class="tab-content active">
@@ -258,28 +266,49 @@
                     </div>
                     <!-- 老师/管理员：最新试卷 + 改卷情况报表 -->
                     <div id="homeTeacherBlock" class="home-teacher-only">
-                        <div style="margin-bottom: 1.5rem; padding: 12px 16px; background: var(--bg-white); border: 1px solid var(--border-color); border-radius: 10px; font-size: 13px; color: var(--text-secondary);">
-                            <div><strong style="color: var(--text-primary);">📌 日常就三步：</strong>在「扫描工作站」扫卷（扫完自动批阅）→ 在「试卷门户」看成绩与评语 → 在「文件管理」整理档案。</div>
-                            <div style="margin-top: 9px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                                <span style="font-size: 12.5px;">要按<b>指定题目和评分细则</b>精批？</span>
-                                <button type="button" class="btn" onclick="openLegacyFlow()" style="padding: 6px 12px; font-size: 12.5px;">旧版阅卷流程 →</button>
-                                <span style="font-size: 12px; color: var(--text-muted);">多数情况用不上，自动批阅会自己从卷面读题干</span>
+                        <div style="margin-bottom: 1.5rem; padding: 16px; background: var(--bg-white); border: 1px solid var(--border-color); border-radius: 10px; font-size: 13px; color: var(--text-secondary);">
+                            <div><strong style="color: var(--text-primary);">📌 日常就三步：</strong>选学科并填写批改备注（可附答案要点）→ 扫描或导入试卷，系统自动批阅 → 到试卷门户核对成绩与待确认项。</div>
+                            <div style="margin-top: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                <a href="/station" class="btn btn-primary" style="padding: 9px 18px; white-space: nowrap;">打开扫描工作站 →</a>
+                                <a href="/portal" class="btn" style="padding: 9px 16px; white-space: nowrap;">查看批阅结果</a>
+                                <span style="font-size: 12px; color: var(--text-muted);">指定题目、评分细则和答案图片也在扫描端添加，无需走旧版流程</span>
                             </div>
                         </div>
-                        <div style="margin-bottom: 1.5rem; padding: 12px 16px; background: var(--bg-white); border: 1px solid var(--border-color); border-radius: 10px; font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                        <div id="guideBanner" style="margin-bottom: 1.5rem; padding: 12px 16px; background: var(--bg-white); border: 1px solid var(--border-color); border-radius: 10px; font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
                             <span><strong style="color: var(--text-primary);">📘 第一次使用？</strong>教程里写了扫描、批阅、导出报告的完整步骤和常见问题，五分钟能看完。</span>
-                            <a href="/guide" target="_blank" rel="noopener" class="btn btn-primary" style="white-space: nowrap;">打开教师新手教程 ↗</a>
+                            <span style="display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+                                <a href="/guide" target="_blank" rel="noopener" class="btn">查看教师新手教程 ↗</a>
+                                <!-- 上手之后这条就是每天占地方的横幅了：给一个关掉的出口，记住选择 -->
+                                <button type="button" onclick="dismissGuideBanner()" title="不再显示这条提示"
+                                        aria-label="不再显示新手教程提示"
+                                        style="background: none; border: 0; color: var(--text-muted); font-size: 17px; line-height: 1; cursor: pointer; padding: 7px 10px; border-radius: 6px;">×</button>
+                            </span>
                         </div>
+                        <script>
+                            (function () {
+                                try {
+                                    if (localStorage.getItem('qj_hide_guide_banner') === '1') {
+                                        var b = document.getElementById('guideBanner');
+                                        if (b) b.style.display = 'none';
+                                    }
+                                } catch (e) { }
+                            })();
+                            function dismissGuideBanner() {
+                                var b = document.getElementById('guideBanner');
+                                if (b) b.style.display = 'none';
+                                try { localStorage.setItem('qj_hide_guide_banner', '1'); } catch (e) { }
+                            }
+                        </script>
                         <div class="home-dashboard-section" style="margin-bottom: 2rem;">
-                            <h3 style="margin: 0 0 12px 0; color: var(--text-primary);">📄 最新试卷</h3>
-                            <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">最近扫描的试卷批次，点击可进入文件管理查看或归档。</p>
+                            <h3 style="margin: 0 0 12px 0; color: var(--text-primary);">📄 最近扫描批次</h3>
+                            <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">每批扫进来多少张、归档了多少张，按扫描时间从新到旧。</p>
                             <div id="homeLatestPapers" class="home-report-cards">
                                 <p style="color: var(--text-muted); font-size: 13px;">加载中...</p>
                             </div>
                         </div>
                         <div class="home-dashboard-section">
-                            <h3 style="margin: 0 0 12px 0; color: var(--text-primary);">📊 改卷情况与报表</h3>
-                            <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">班级批阅概况与阅卷任务进度。</p>
+                            <h3 style="margin: 0 0 12px 0; color: var(--text-primary);">📊 服务器端批阅进度</h3>
+                            <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">正在批阅到第几张、档案库里还有多少没批。</p>
                             <div id="homeGradingReports" class="home-report-cards">
                                 <p style="color: var(--text-muted); font-size: 13px;">加载中...</p>
                             </div>
@@ -2826,37 +2855,31 @@
             const reportsEl = document.getElementById('homeGradingReports');
             if (!papersEl || !reportsEl) return;
 
+            // 扫描批次与服务器端批阅进度：直接问后端要（和扫描工作站读的是同一份批次文件）。
+            // 以前这里读 /api/folders，那是旧流程的目录，新扫的卷子不写在那儿，
+            // 「最新试卷」于是经常空着——看着像首页坏了，其实只是看错了地方。
+            let summary = null;
             try {
-                const [foldersRes, classesRes, tasksRes] = await Promise.all([
-                    fetch('/api/folders', { credentials: 'include' }),
+                const sr = await fetch('/api/home/scan-summary', { credentials: 'include' });
+                if (sr.ok) summary = await sr.json();
+            } catch (err) { summary = null; }
+            renderHomeScanBatches(papersEl, summary);
+            renderHomeGrading(reportsEl, summary);
+
+            try {
+                const [classesRes, tasksRes] = await Promise.all([
                     fetch('/api/classes', { credentials: 'include' }),
                     fetch('/api/tasks', { credentials: 'include' }).catch(function() { return { ok: false }; })
                 ]);
-                const foldersData = foldersRes.ok ? await foldersRes.json() : { folders: [] };
                 const classesData = classesRes.ok ? await classesRes.json() : { classes: [] };
                 const tasksData = tasksRes.ok ? await tasksRes.json() : { tasks: [] };
-                const folders = foldersData.folders || [];
                 const classes = classesData.classes || [];
                 const tasks = tasksData.tasks || [];
 
-                const papersHtml = folders.length === 0
-                    ? '<p style="color: var(--text-muted); font-size: 13px;">暂无扫描试卷批次，请先在「<a href="javascript:void(0)" onclick="switchTab(\'files\', event)">文件管理</a>」中扫描或导入图片。</p>'
-                    : folders.slice(0, 10).map(f => {
-                        const name = f.name || f.path || '未命名';
-                        const count = f.file_count != null ? f.file_count : '-';
-                        return `<div class="report-card-item" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                            <div>
-                                <div class="title">${name}</div>
-                                <div class="meta">${count} 张图片</div>
-                            </div>
-                            <button type="button" class="btn btn-info" onclick="switchTab('files', event)">去管理</button>
-                        </div>`;
-                    }).join('');
-                papersEl.innerHTML = papersHtml;
 
                 let reportsHtml = '';
                 if (classes.length > 0) {
-                    reportsHtml += '<p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 10px;">班级批阅概况</p>';
+                    reportsHtml += '<p style="color: var(--text-secondary); font-size: 13px; margin: 16px 0 10px 0;">班级批阅概况</p>';
                     classes.slice(0, 8).forEach(cls => {
                         const safeName = String(cls.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                         reportsHtml += `<div class="report-card-item" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -2885,15 +2908,94 @@
                     });
                 }
                 if (classes.length === 0 && tasks.length === 0) {
-                    reportsHtml = '<p style="color: var(--text-muted); font-size: 13px;">暂无班级与阅卷任务。先到「<a href="javascript:void(0)" onclick="switchTab(\'center\', event)">班级中心</a>」创建班级，再到扫描工作站扫一次卷——批阅会自动建批次并按学号分班。</p>';
+                    reportsHtml += '<p style="color: var(--text-muted); font-size: 13px; margin-top: 14px;">暂无班级与阅卷任务。先到「<a href="javascript:void(0)" onclick="switchTab(\'center\', event)">班级中心</a>」创建班级，再到扫描工作站扫一次卷——批阅会自动建批次并按学号分班。</p>';
                 } else if (tasks.length === 0) {
-                    reportsHtml += '<p style="color: var(--text-muted); font-size: 13px;">暂无阅卷任务。到扫描工作站「✍️ 批改备注」里新建一张，或直接扫卷让系统从卷面读题干。</p>';
+                    reportsHtml += '<p style="color: var(--text-muted); font-size: 13px; margin-top: 14px;">暂无阅卷任务。到扫描工作站「✍️ 批改备注」里新建一张，或直接扫卷让系统从卷面读题干。</p>';
                 }
-                reportsEl.innerHTML = reportsHtml;
+                reportsEl.insertAdjacentHTML('beforeend', reportsHtml);
             } catch (e) {
-                papersEl.innerHTML = '<p style="color: var(--text-muted); font-size: 13px;">加载失败。</p>';
-                reportsEl.innerHTML = '<p style="color: var(--text-muted); font-size: 13px;">加载失败。</p>';
+                /* 班级/任务段失败不影响上面两块主信息 */
             }
+        }
+
+        // 最近扫描批次：一眼看清「进来多少张、归档多少张、进行到哪儿」。
+        // 张数用后端给的 total（= 这一批扫进扫描仪的页数），不是文件夹里的文件数。
+        function renderHomeScanBatches(el, summary) {
+            const rows = (summary && summary.batches) || [];
+            if (!rows.length) {
+                el.innerHTML = '<p style="color: var(--text-muted); font-size: 13px;">还没有扫描批次。到「<a href="/station" target="_blank" rel="noopener">扫描工作站</a>」扫一次卷，这里就会显示这一批的张数和进度。</p>';
+                return;
+            }
+            const g = (summary && summary.grading) || {};
+            let html = '<p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 10px;">'
+                + '今日已扫 <strong style="color: var(--text-primary);">' + (g.today_papers || 0) + '</strong> 张'
+                + '（' + (g.today_batches || 0) + ' 批）</p>';
+            html += rows.map(function(b) {
+                const total = b.total || 0, archived = b.archived || 0;
+                const countLine = b.collect_only
+                    ? ('扫描 ' + total + ' 张 · 已登记入库 ' + archived + ' 份')
+                    : ('扫描 ' + total + ' 张 · 已归档 ' + archived + ' 份');
+                const when = String(b.created_at || '').replace('T', ' ').slice(5, 16);
+                return `<div class="report-card-item" style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px;">
+                    <div style="min-width: 0;">
+                        <div class="title">${escapeHtml(b.subject_name || '通用')} · ${total} 张 <span style="font-weight:400;color:var(--text-muted);font-size:12px;">${escapeHtml(when)}</span></div>
+                        <div class="meta">${escapeHtml(countLine)}${b.failed ? ' · 未完成 ' + b.failed + ' 份' : ''}</div>
+                    </div>
+                    ${batchStatusChip(b)}
+                </div>`;
+            }).join('');
+            el.innerHTML = html;
+        }
+
+        // 单个批次的状态标签：运行中带百分比；出错的批次要给出「可以续跑」的预期
+        function batchStatusChip(b) {
+            const total = b.total || 0, done = b.done || 0;
+            const pct = total ? Math.round(done / total * 100) : 0;
+            if (b.status === 'running' || b.status === 'queued') {
+                return '<span style="flex:0 0 auto;padding:3px 9px;border-radius:999px;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;font-size:12px;white-space:nowrap;">'
+                    + (b.status === 'queued' ? '排队中' : '批阅中 ' + pct + '%') + '</span>';
+            }
+            if (b.status === 'error') {
+                return '<span style="flex:0 0 auto;padding:3px 9px;border-radius:999px;background:#fff8ec;color:#8a5300;border:1px solid #ffd8a8;font-size:12px;white-space:nowrap;">未完成 · 可续跑</span>';
+            }
+            return '<span style="flex:0 0 auto;padding:3px 9px;border-radius:999px;background:#e7f6ec;color:#1a7f37;border:1px solid #b7e0c4;font-size:12px;white-space:nowrap;">已完成</span>';
+        }
+
+        // 服务器端批阅进度：先回答「现在批到哪儿」，再给档案库口径的待批/已批
+        function renderHomeGrading(el, summary) {
+            const g = (summary && summary.grading) || null;
+            if (!g) {
+                el.innerHTML = '<p style="color: var(--text-muted); font-size: 13px;">暂时取不到服务端进度，请确认本机服务仍在运行。</p>';
+                return;
+            }
+            let html = '';
+            if (g.running_count) {
+                const pct = g.running_papers ? Math.round(g.running_done / g.running_papers * 100) : 0;
+                const msg = (g.running[0] && g.running[0].message) || '正在批阅…';
+                html += `<div class="report-card-item" style="display:block;margin-bottom:10px;">
+                    <div class="title">正在批阅 · ${g.running_papers} 张 <span style="font-weight:400;color:var(--text-muted);font-size:12px;">已处理 ${g.running_done}/${g.running_papers}</span></div>
+                    <div style="height:7px;border-radius:999px;background:#eef0f3;overflow:hidden;margin:8px 0 6px;">
+                        <i style="display:block;height:100%;width:${pct}%;background:#4f46e5;border-radius:999px;transition:width .4s;"></i>
+                    </div>
+                    <div class="meta" style="font-size:12px;color:var(--text-secondary);">${escapeHtml(msg)}</div>
+                </div>`;
+            } else {
+                html += '<div class="report-card-item" style="margin-bottom:10px;"><div class="meta">当前没有正在批阅的批次。</div></div>';
+            }
+            html += `<div class="report-card-item" style="display:flex;flex-wrap:wrap;gap:18px;margin-bottom:10px;">
+                <div><div class="meta" style="font-size:12px;">档案库</div><div class="title">${g.records_total} 份</div></div>
+                <div><div class="meta" style="font-size:12px;">已批阅</div><div class="title" style="color:#1a7f37;">${g.graded} 份</div></div>
+                <!-- 待批阅要显眼但不能靠"浅"来显眼：卡片底色是 #f9fafb（不是白），
+                     原来的 #b26a00 在上面只有 4.06；#8a5300 是 6.06，同为琥珀色系。 -->
+                <div><div class="meta" style="font-size:12px;">待批阅</div><div class="title" style="color:${g.pending ? '#8a5300' : 'var(--text-primary)'};">${g.pending} 份</div></div>
+                <div><div class="meta" style="font-size:12px;">今日已批</div><div class="title">${g.today_graded} 份</div></div>
+            </div>`;
+            if (g.pending_confirm) {
+                html += `<div class="report-card-item" style="margin-bottom:10px;"><div class="meta">
+                    还有 <strong>${g.pending_confirm}</strong> 张卷子没认出学号，留在扫描端待确认——
+                    <a href="/station" target="_blank" rel="noopener">去处理</a></div></div>`;
+            }
+            el.innerHTML = html;
         }
 
         // 加载班级中心视图（显示所有班级）
@@ -6253,6 +6355,10 @@
             const alertArea = document.getElementById('alertArea');
             const alert = document.createElement('div');
             alert.className = `alert alert-${type}`;
+            // 失败要打断当前朗读（assertive），成功排队播报。容器是 polite，
+            // 这里给单条消息定语义，读屏才会区分"已保存"和"保存失败"。
+            alert.setAttribute('role', (type === 'danger' || type === 'error' || type === 'warning')
+                ? 'alert' : 'status');
             // 支持多行消息（将 \n 转换为 <br>）
             if (message.includes('\n')) {
                 alert.innerHTML = message.replace(/\n/g, '<br>');
