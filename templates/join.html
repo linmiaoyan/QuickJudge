@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>加入扫描点 · QuickJudge</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <!-- 这一页在**扫描点那台电脑**上打开，所以不能引用本机的 /static —— 它也在主机上，能取到。 -->
+    <style>
+        :root{
+            --text:#111827; --text2:#4b5563; --muted:#5f6b7a;
+            --line:#e5e7eb; --primary:#2563eb; --ok-ink:#047857; --danger-ink:#b91c1c;
+        }
+        *{box-sizing:border-box}
+        body{
+            margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+            background:#f5f7fa; color:var(--text); padding:24px;
+            font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+        }
+        .card{
+            width:100%; max-width:560px; background:#fff; border:1px solid var(--line);
+            border-radius:14px; padding:26px 26px 22px; box-shadow:0 6px 24px rgba(17,24,39,.06);
+        }
+        h1{font-size:19px; margin:0 0 6px; letter-spacing:-.3px;}
+        .sub{font-size:13px; color:var(--text2); margin:0 0 18px; line-height:1.65;}
+        .point{
+            display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:10px;
+            background:#f0f7ff; border:1px solid #cfe3ff; margin-bottom:18px; font-size:14px;
+        }
+        .point.bad{background:#fef2f2; border-color:#fecaca; color:var(--danger-ink);}
+        .dot{width:9px; height:9px; border-radius:50%; background:#22c55e; flex:none;}
+        .point.bad .dot{background:#ef4444;}
+        .btn{
+            display:inline-flex; align-items:center; justify-content:center; gap:8px;
+            width:100%; padding:13px 18px; border-radius:10px; border:0; cursor:pointer;
+            background:var(--primary); color:#fff; font-size:15px; font-weight:600;
+            font-family:inherit; text-decoration:none; min-height:46px;
+        }
+        .btn:hover{background:#1d4ed8;}
+        .btn[aria-disabled="true"]{background:#cbd5e1; cursor:not-allowed;}
+        ol{margin:20px 0 0; padding-left:20px; font-size:13px; color:var(--text2); line-height:2;}
+        ol b{color:var(--text); font-weight:600;}
+        code{background:#f3f4f6; padding:2px 6px; border-radius:5px; font-size:12px; color:#374151;}
+        .foot{margin-top:18px; font-size:12px; color:var(--muted); line-height:1.7;}
+        .warn{margin-top:14px; padding:10px 12px; border-radius:8px; background:#fffbeb;
+              border:1px solid #fde68a; color:#8a5300; font-size:12.5px; line-height:1.7;}
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>把这台电脑加入扫描点</h1>
+    <p class="sub">扫描点只负责扫描并上传；批阅、学生数据、报告都在学校那台服务器上。</p>
+
+    <div class="point" id="pointBox">
+        <span class="dot"></span>
+        <span id="pointText">正在确认安装链接…</span>
+    </div>
+
+    <a class="btn" id="dl" href="#" aria-disabled="true">下载安装包</a>
+
+    <ol>
+        <li>装好 <b>NAPS2</b>（便携版即可），记下 <code>NAPS2.Console.exe</code> 的位置</li>
+        <li>装 <b>Python 3.8+</b>，安装时勾选「Add python.exe to PATH」</li>
+        <li>解压安装包，双击 <code>install.cmd</code></li>
+        <li>浏览器会自动打开 <code>127.0.0.1:5101</code>，在里面选一次扫描仪</li>
+    </ol>
+
+    <div class="warn">
+        安装包里的令牌就是这个扫描点的钥匙，不要转发给别人。
+        换电脑时重新点上面的按钮下一次即可，旧电脑上的就失效了。
+    </div>
+
+    <div class="foot">
+        装好之后，每天开机它会自己起来，不需要再点任何东西。
+    </div>
+</div>
+
+<script>
+(function () {
+    var t = new URLSearchParams(location.search).get('t') || '';
+    var box = document.getElementById('pointBox');
+    var text = document.getElementById('pointText');
+    var dl = document.getElementById('dl');
+
+    if (!t) {
+        box.classList.add('bad');
+        text.textContent = '这个链接缺少安装码。请在主机「扫描点管理」里重新复制链接。';
+        return;
+    }
+
+    fetch('/api/ingest/whoami?t=' + encodeURIComponent(t))
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+            if (!res.ok) {
+                box.classList.add('bad');
+                text.textContent = res.j.error || '链接已失效';
+                return;
+            }
+            text.textContent = '扫描点：' + (res.j.point.name || res.j.point.id);
+            dl.href = '/api/ingest/package?t=' + encodeURIComponent(t);
+            dl.removeAttribute('aria-disabled');
+        })
+        .catch(function () {
+            box.classList.add('bad');
+            text.textContent = '连不上主机，确认这台电脑和服务器在同一个网络里。';
+        });
+})();
+</script>
+</body>
+</html>

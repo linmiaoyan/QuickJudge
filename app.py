@@ -3,6 +3,8 @@ from flask_cors import CORS
 import os
 import json
 import hashlib
+import hmac
+import secrets
 import re
 import io
 import csv
@@ -192,7 +194,10 @@ _PUBLIC_API = {'/api/login', '/api/logout', '/api/me',
                # 强制解锁是卡纸后的应急出口：扫描工作站可能未登录也要能用，
                # 所以放进白名单，但函数内部仍会对"非本机且非教师"的请求返回 403。
                '/api/scan/force_unlock'}
-_PUBLIC_PREFIXES = ('/api/station/', '/api/portal/')
+_PUBLIC_PREFIXES = ('/api/station/', '/api/portal/',
+                    # 扫描点上传：由设备令牌把关（见 _scan_point_from_request），
+                    # 不走登录会话——扫描点那台电脑上没人登录过。
+                    '/api/ingest/')
 # 学生登录后仍需用的少数据接口（其余旧版接口只给教师/管理员）
 _STUDENT_API = {'/api/my_reports', '/api/change_password'}
 
@@ -7789,34 +7794,7 @@ def station_job(batch_id):
         return jsonify({'error': '批次不存在'}), 404
     # 批阅口径：free = 没给要点表，按学科标准整体给分（扫描端据此换文案，说明为什么没有逐点明细）
     # points = 按老师要点表逐条判；essay 等其它学科为空
-    mode = ''
-    if b.get('collect_only'):
-        mode = 'collect'
-    elif b.get('exercise_id') or b.get('note_rubric'):
-        mode = PIPELINE_KIND_POINTS
-    elif subject_kind(b.get('subject') or '') == PIPELINE_KIND_POINTS:
-        mode = 'free'
-    return jsonify({
-        'id': b['id'],
-        'job': b.get('job') or {},
-        'topic': b.get('topic') or {},
-        # 只登记不批阅的批次：扫描端据此换文案（"已登记"而不是"已批阅"）
-        'collect': bool(b.get('collect_only')),
-        # 要点判分批次：把练习摘要带出来，扫描端能直接显示"按哪份标准判的"
-        'exercise': (exercise_summary(get_exercise(b.get('exercise_id')))
-                     if b.get('exercise_id') else (exercise_summary(b.get('note_rubric'))
-                                                  if b.get('note_rubric') else None)),
-        'rubric_from_note': bool(b.get('note_rubric')),
-        'rubric_warnings': (b.get('note_rubric') or {}).get('warnings') or [],
-        'mode': mode,
-        'subject_detected': b.get('subject_detected') or None,
-        'results': b.get('results') or [],
-        'record_ids': b.get('record_ids') or [],
-        'failed': b.get('failed') or [],
-        'corpus_ready': bool((b.get('corpus') or {}).get('points')
-                             or (b.get('corpus') or {}).get('phrases')),
-        'awards': (b.get('awards') or {}).get('awards') or [],
-    })
+    return jsonify(_batch_progress(b))
 
 
 @app.route('/api/station/jobs/<batch_id>/retry', methods=['POST'])
@@ -7893,6 +7871,21 @@ def station_import():
         err = _precheck_auto_batch(subject, exercise_id)
         if err:
             return jsonify({'error': err}), 400
+    resp, err = _ingest_images(files, source='upload', subject=subject, task_id=task_id,
+                               exercise_id=exercise_id, teacher_note=teacher_note,
+                               max_score=max_score, auto=auto, collect=collect)
+    if err:
+        return jsonify({'error': err}), 500
+    return jsonify(resp)
+
+
+def _ingest_images(files, source='upload', subject='english_essay', task_id='', exercise_id='',
+                   teacher_note='', max_score=None, auto=True, collect=False):
+    """把一批图片登记进临时区，需要时直接起批。返回 (响应体, 错误文案)。
+
+    扫描端的「导入图片」和远程扫描点上传共用这一段：两边只是入口不同，
+    入库与起批的口径必须完全一致，否则同一个班从两条路进来会出现两种结果。
+    """
     items = load_staging()
     added = []
     tmp_dir = os.path.join(STAGING_DIR, '_incoming')
@@ -7907,13 +7900,13 @@ def station_import():
                     ext = '.png'
                 tmp_path = os.path.join(tmp_dir, uuid.uuid4().hex + ext)
                 f.save(tmp_path)
-                item = _new_staging_item(tmp_path, source='upload', original_name=f.filename,
+                item = _new_staging_item(tmp_path, source=source, original_name=f.filename,
                                          subject=subject, max_score=max_score)
                 items.insert(0, item)
                 added.append(item)
             save_staging(items)
     except Exception as e:
-        return jsonify({'error': '导入失败：%s' % e}), 500
+        return None, '导入失败：%s' % e
     finally:
         try:
             if os.path.isdir(tmp_dir) and not os.listdir(tmp_dir):
@@ -7922,11 +7915,413 @@ def station_import():
             pass
     resp = {'ok': True, 'added': added, 'count': len(added), 'auto': auto, 'collect': collect}
     if auto and added:
-        b = _start_auto_batch([it['id'] for it in added], subject=subject, task_id=task_id,
-                              max_score=max_score, teacher_note=teacher_note,
-                              exercise_id=exercise_id, collect_only=collect)
+        try:
+            b = _start_auto_batch([it['id'] for it in added], subject=subject, task_id=task_id,
+                                  max_score=max_score, teacher_note=teacher_note,
+                                  exercise_id=exercise_id, collect_only=collect)
+        except Exception as e:
+            # 图片已经进临时区了，起批失败不能把它们一起丢掉：
+            # 告诉调用方"已入库但没批"，老师可以在后台再批。
+            resp['batch_error'] = str(e)
+            return resp, ''
         resp['batch'] = {'id': b['id'], 'job': b.get('job'), 'max_score': b.get('max_score')}
+    return resp, ''
+
+
+# ==================== 扫描点：远程扫描仪接入 ====================
+# 背景：三台扫描仪各配一台 Windows，扫描点只负责出图并上传；批阅、数据、报告都留在
+# 这一台（校内服务器）上，外网断了也不影响使用。
+#
+# 为什么不复用 /station：那边每个写接口都卡着 _is_local_request()，因为扫描必须发生在
+# 插着扫描仪的那台机器上。远程机器调 /api/station/scan 只会去驱动**主机**的扫描仪，
+# 对分机毫无意义。所以扫描点另开一条带设备令牌的入口。
+#
+# 上传协议故意做得很笨：一页一个 POST（原始字节，不拼 multipart），最后 commit 建批。
+# 断网只需重传那一页；客户端也不必实现 multipart（旧版 PowerShell 都写得出来）。
+
+SCAN_POINTS_FILE = os.path.join(CONFIG_DIR, 'scan_points.json')
+INGEST_ROOT = os.path.join(STAGING_DIR, 'ingest')
+INGEST_MAX_PAGE = 30 * 1024 * 1024   # 单页上限 30MB：300dpi 彩色 A4 约 3~8MB，超了多半是传错
+INGEST_SESSION_TTL = 12 * 3600       # 上传暂存目录超过 12 小时当垃圾清掉
+
+
+def load_scan_points():
+    raw = _read_json(SCAN_POINTS_FILE, [])
+    return raw if isinstance(raw, list) else []
+
+
+def save_scan_points(points):
+    _write_json(SCAN_POINTS_FILE, list(points))
+
+
+def _new_scan_token():
+    return secrets.token_urlsafe(24)
+
+
+def _scan_point_from_request():
+    """按请求头或 ?t= 里的令牌找扫描点，找不到返回 None。
+
+    令牌比对用 compare_digest：成本为零，没必要留时序侧信道。
+    """
+    tok = (request.headers.get('X-QJ-Scan-Token') or request.args.get('t') or '').strip()
+    if not tok:
+        return None
+    for p in load_scan_points():
+        if p.get('token') and hmac.compare_digest(str(p['token']), tok):
+            return p
+    return None
+
+
+def _touch_scan_point(point_id):
+    """记一笔"这个点还活着"。管理页据此显示在线状态。"""
+    pts = load_scan_points()
+    for p in pts:
+        if p.get('id') == point_id:
+            p['last_seen'] = _now_str()
+            save_scan_points(pts)
+            return
+
+
+def _scan_point_brief(p):
+    """对外只给这些字段：令牌本身绝不回传。"""
+    return {'id': p.get('id'), 'name': p.get('name') or '',
+            'last_seen': p.get('last_seen') or '', 'created_at': p.get('created_at') or ''}
+
+
+def _ingest_session_dir(sid, create=False):
+    """按会话号取上传暂存目录。只接受十六进制串，挡住 ../../ 这类路径穿越。"""
+    sid = (sid or '').strip().lower()
+    if not re.fullmatch(r'[0-9a-f]{8,64}', sid):
+        return None
+    p = os.path.join(INGEST_ROOT, sid)
+    if create:
+        os.makedirs(p, exist_ok=True)
+    return p
+
+
+def _cleanup_ingest_sessions():
+    """清掉过期的上传暂存。扫描到一半跑去开会的人不该把半截图片留在服务器上。"""
+    try:
+        if not os.path.isdir(INGEST_ROOT):
+            return
+        now = time.time()
+        for name in os.listdir(INGEST_ROOT):
+            p = os.path.join(INGEST_ROOT, name)
+            if not os.path.isdir(p):
+                continue
+            try:
+                stamps = [os.path.getmtime(os.path.join(p, f)) for f in os.listdir(p)]
+                newest = max(stamps) if stamps else os.path.getmtime(p)
+            except OSError:
+                continue
+            if now - newest > INGEST_SESSION_TTL:
+                shutil.rmtree(p, ignore_errors=True)
+    except Exception:
+        pass
+
+
+class _RawFile(object):
+    """给落盘文件套一层"像上传文件"的东西。
+
+    _ingest_images 只用到 .filename 和 .save()，没必要为了内部调用去构造
+    werkzeug 的 FileStorage。
+    """
+
+    def __init__(self, path, filename):
+        self.path = path
+        self.filename = filename
+
+    def save(self, dest):
+        shutil.copyfile(self.path, dest)
+
+
+def _batch_progress(b):
+    """扫描端与扫描点共用的批次进度结构。
+
+    批阅口径：free = 没给要点表，按学科标准整体给分；points = 按要点表逐条判。
+    """
+    mode = ''
+    if b.get('collect_only'):
+        mode = 'collect'
+    elif b.get('exercise_id') or b.get('note_rubric'):
+        mode = PIPELINE_KIND_POINTS
+    elif subject_kind(b.get('subject') or '') == PIPELINE_KIND_POINTS:
+        mode = 'free'
+    return {
+        'id': b['id'],
+        'job': b.get('job') or {},
+        'topic': b.get('topic') or {},
+        'collect': bool(b.get('collect_only')),
+        'exercise': (exercise_summary(get_exercise(b.get('exercise_id')))
+                     if b.get('exercise_id') else (exercise_summary(b.get('note_rubric'))
+                                                   if b.get('note_rubric') else None)),
+        'rubric_from_note': bool(b.get('note_rubric')),
+        'rubric_warnings': (b.get('note_rubric') or {}).get('warnings') or [],
+        'mode': mode,
+        'subject_detected': b.get('subject_detected') or None,
+        'results': b.get('results') or [],
+        'record_ids': b.get('record_ids') or [],
+        'failed': b.get('failed') or [],
+        'corpus_ready': bool((b.get('corpus') or {}).get('points')
+                             or (b.get('corpus') or {}).get('phrases')),
+        'awards': (b.get('awards') or {}).get('awards') or [],
+    }
+
+
+@app.route('/api/ingest/options')
+def ingest_options():
+    """扫描点开页面时拉一次：能选哪些学科/题目/练习。"""
+    p = _scan_point_from_request()
+    if not p:
+        return jsonify({'error': '扫描点令牌无效，请在主机上重新生成安装包'}), 401
+    _touch_scan_point(p['id'])
+    tasks = [{'id': t.get('id'), 'title': t.get('title'),
+              'class_names': t.get('class_names') or [],
+              'has_reqs': bool(task_requirement_lines(t)),
+              'created_at': t.get('created_at') or ''}
+             for t in load_tasks() if t.get('id')]
+    return jsonify({
+        'ok': True,
+        'point': {'id': p.get('id'), 'name': p.get('name') or ''},
+        'server_time': _now_str(),
+        'grading': grading_subject_options(),
+        'tasks': tasks,
+        'exercises': [exercise_summary(e) for e in load_exercises() if e.get('id')],
+    })
+
+
+@app.route('/api/ingest/page', methods=['POST'])
+def ingest_page():
+    """接收一页图片（原始字节）。会话号由客户端生成，同一批共用一个。"""
+    p = _scan_point_from_request()
+    if not p:
+        return jsonify({'error': '扫描点令牌无效'}), 401
+    d = _ingest_session_dir(request.headers.get('X-QJ-Session'), create=True)
+    if not d:
+        return jsonify({'error': '会话号不合法'}), 400
+    data = request.get_data(cache=False)
+    if not data:
+        return jsonify({'error': '这一页没有内容'}), 400
+    if len(data) > INGEST_MAX_PAGE:
+        return jsonify({'error': '单页超过 30MB，请检查扫描分辨率设置'}), 413
+    name = (request.headers.get('X-QJ-Filename') or '').strip()
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in IMAGE_EXTS:
+        ext = '.png'
+    idx = len([f for f in os.listdir(d) if os.path.splitext(f)[1].lower() in IMAGE_EXTS])
+    fname = '%03d%s' % (idx + 1, ext)
+    with open(os.path.join(d, fname), 'wb') as fh:
+        fh.write(data)
+    _touch_scan_point(p['id'])
+    return jsonify({'ok': True, 'saved': fname, 'count': idx + 1})
+
+
+@app.route('/api/ingest/commit', methods=['POST'])
+def ingest_commit():
+    """这一批扫完了：把暂存的页登记进临时区，需要时直接起批。"""
+    p = _scan_point_from_request()
+    if not p:
+        return jsonify({'error': '扫描点令牌无效'}), 401
+    req = request.get_json(silent=True) or {}
+    d = _ingest_session_dir(req.get('session'))
+    if not d or not os.path.isdir(d):
+        return jsonify({'error': '没有找到这次上传的图片，请重新扫描'}), 400
+    names = sorted(n for n in os.listdir(d)
+                   if os.path.splitext(n)[1].lower() in IMAGE_EXTS)
+    if not names:
+        return jsonify({'error': '这一批没有上传任何图片'}), 400
+    subject = str(req.get('subject') or 'english_essay').strip() or 'english_essay'
+    task_id = str(req.get('task_id') or '').strip()
+    exercise_id = str(req.get('exercise_id') or '').strip()
+    teacher_note = str(req.get('teacher_note') or '').strip()[:300]
+    max_score = req.get('max_score')
+    auto = req.get('auto', True) not in (False, 0, '0', 'false', 'False')
+    collect = bool(req.get('collect'))
+    if auto and not collect:
+        err = _precheck_auto_batch(subject, exercise_id)
+        if err:
+            return jsonify({'error': err}), 400
+    files = [_RawFile(os.path.join(d, n), n) for n in names]
+    resp, err = _ingest_images(files, source='scan_point', subject=subject, task_id=task_id,
+                               exercise_id=exercise_id, teacher_note=teacher_note,
+                               max_score=max_score, auto=auto, collect=collect)
+    if err:
+        return jsonify({'error': err}), 500
+    shutil.rmtree(d, ignore_errors=True)
+    _touch_scan_point(p['id'])
+    _cleanup_ingest_sessions()
     return jsonify(resp)
+
+
+@app.route('/api/ingest/batch/<batch_id>')
+def ingest_batch(batch_id):
+    """扫描点轮询这一批的批阅进度。"""
+    p = _scan_point_from_request()
+    if not p:
+        return jsonify({'error': '扫描点令牌无效'}), 401
+    b = _load_batch(batch_id)
+    if not b:
+        return jsonify({'error': '批次不存在'}), 404
+    _touch_scan_point(p['id'])
+    return jsonify(_batch_progress(b))
+
+
+@app.route('/api/ingest/whoami')
+def ingest_whoami():
+    """安装引导页用：确认这个链接对应哪个扫描点。"""
+    p = _scan_point_from_request()
+    if not p:
+        return jsonify({'error': '链接已失效，请在主机上重新生成'}), 401
+    return jsonify({'ok': True, 'point': _scan_point_brief(p),
+                    'server_time': _now_str()})
+
+
+def _agent_install_cmd(port):
+    """生成安装脚本。
+
+    一律纯 ASCII：cmd 按本地代码页解码批处理，UTF-8 中文会吞掉换行把注释当命令执行。
+    开机自启不写注册表，而是在「启动」文件夹里放一个绝对路径的小 cmd——
+    放进去的那份 %~dp0 会变成启动文件夹，所以路径必须在生成时写死。
+
+    ⚠️ 这里用 .format 而不是 % 格式化：脚本文本里到处是 %APPDATA%、%~dp0 这类
+    cmd 变量，用 % 拼接会被当成格式符直接抛 ValueError。
+    """
+    return (
+        '@echo off\r\n'
+        'cd /d "%~dp0"\r\n'
+        'echo ============================================\r\n'
+        'echo   QuickJudge scan point - install\r\n'
+        'echo ============================================\r\n'
+        'echo.\r\n'
+        'where pythonw >nul 2>&1\r\n'
+        'if errorlevel 1 (\r\n'
+        '  echo [ERROR] Python not found. Install Python 3.8+ first,\r\n'
+        '  echo         and tick "Add python.exe to PATH" during setup.\r\n'
+        '  echo.\r\n'
+        '  pause\r\n'
+        '  exit /b 1\r\n'
+        ')\r\n'
+        'set "DIR=%~dp0"\r\n'
+        'set "STARTUP=%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup"\r\n'
+        '(echo @echo off\r\n'
+        ' echo cd /d "%DIR%"\r\n'
+        ' echo start "" pythonw scan_point.py) > "%STARTUP%\\QuickJudgeScanPoint.cmd"\r\n'
+        'echo [OK] autostart registered: %STARTUP%\\QuickJudgeScanPoint.cmd\r\n'
+        'echo [OK] starting agent on http://127.0.0.1:{port}/\r\n'
+        'start "" pythonw scan_point.py\r\n'
+        'timeout /t 3 >nul 2>&1\r\n'
+        'start "" http://127.0.0.1:{port}/\r\n'
+    ).format(port=port)
+
+
+@app.route('/api/ingest/package')
+def ingest_package():
+    """生成这个扫描点的安装包（令牌已写进 config.json，解压即用）。"""
+    p = _scan_point_from_request()
+    if not p:
+        return jsonify({'error': '链接已失效，请在主机上重新生成'}), 401
+    base = os.path.dirname(os.path.abspath(__file__))
+    agent = os.path.join(base, 'scan_point.py')
+    if not os.path.isfile(agent):
+        return jsonify({'error': '服务器上缺少 scan_point.py，无法生成安装包'}), 500
+    port = 5101
+    cfg = {
+        'host': request.host_url.rstrip('/'),
+        'token': p['token'],
+        'point_id': p.get('id'),
+        'point_name': p.get('name') or '',
+        'port': port,
+        # NAPS2 的路径与扫描参数留空，首次打开页面时自动探测/由老师选一次
+        'naps2_path': '',
+        'scan': {'driver': '', 'device': '', 'source': 'feeder',
+                 'pagesize': 'a4', 'dpi': 300, 'bitdepth': 'color'},
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        with open(agent, 'rb') as fh:
+            z.writestr('scan_point.py', fh.read())
+        z.writestr('config.json', json.dumps(cfg, ensure_ascii=False, indent=2))
+        z.writestr('install.cmd', _agent_install_cmd(port))
+        z.writestr('run_agent.cmd',
+                   '@echo off\r\ncd /d "%~dp0"\r\nstart "" pythonw scan_point.py\r\n')
+        z.writestr('README.txt', (
+            'QuickJudge 扫描点安装包\r\n'
+            '=========================\r\n\r\n'
+            '1. 先装 NAPS2（便携版即可），记下 NAPS2.Console.exe 的位置。\r\n'
+            '2. 装 Python 3.8 以上，安装时勾选 "Add python.exe to PATH"。\r\n'
+            '3. 双击 install.cmd，会注册开机自启并打开 http://127.0.0.1:5101/\r\n'
+            '4. 打开页面后点「扫描仪」，选设备与分辨率，保存。\r\n'
+            '5. 以后每次只要双击 run_agent.cmd，或者开机后等它自己起来。\r\n\r\n'
+            '扫描点只负责出图并上传；批阅和数据都在主机上。\r\n'
+            '主机断开时页面会提示，恢复后重新点扫描即可。\r\n'))
+    buf.seek(0)
+    name = 'QuickJudge-Scan-%s.zip' % (p.get('id') or 'point')
+    return send_file(buf, mimetype='application/zip', as_attachment=True,
+                     download_name=name)
+
+
+@app.route('/join')
+def join_page():
+    """扫描点那台电脑打开的页面：确认身份 + 下载安装包。"""
+    return render_template('join.html')
+
+
+@app.route('/scanpoints')
+def scanpoints_page():
+    """扫描点管理（仅主机本机，页面里能看到令牌链接）。"""
+    if not _is_local_request():
+        return '扫描点管理仅限主机本机访问', 403
+    return render_template('scanpoints.html')
+
+
+@app.route('/api/scanpoints', methods=['GET'])
+def scanpoints_list():
+    if not _is_local_request():
+        return jsonify({'error': '仅限主机本机操作'}), 403
+    pts = load_scan_points()
+    return jsonify({'points': [_scan_point_brief(p) for p in pts], 'total': len(pts)})
+
+
+@app.route('/api/scanpoints', methods=['POST'])
+def scanpoints_create():
+    if not _is_local_request():
+        return jsonify({'error': '仅限主机本机操作'}), 403
+    req = request.get_json(silent=True) or {}
+    name = str(req.get('name') or '').strip()[:40]
+    if not name:
+        return jsonify({'error': '请填写扫描点名称，例如「1 号扫描点」'}), 400
+    pts = load_scan_points()
+    if len(pts) >= 12:
+        return jsonify({'error': '扫描点最多 12 个，够用且好认'}), 400
+    p = {'id': uuid.uuid4().hex[:8], 'name': name, 'token': _new_scan_token(),
+         'created_at': _now_str(), 'last_seen': ''}
+    pts.append(p)
+    save_scan_points(pts)
+    return jsonify({'ok': True, 'point': _scan_point_brief(p)})
+
+
+@app.route('/api/scanpoints/<point_id>', methods=['DELETE'])
+def scanpoints_delete(point_id):
+    if not _is_local_request():
+        return jsonify({'error': '仅限主机本机操作'}), 403
+    pts = load_scan_points()
+    left = [p for p in pts if p.get('id') != point_id]
+    if len(left) == len(pts):
+        return jsonify({'error': '没有这个扫描点'}), 404
+    save_scan_points(left)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/scanpoints/<point_id>/link')
+def scanpoints_link(point_id):
+    """给管理页复制用的安装链接（带令牌，等同于这把钥匙）。"""
+    if not _is_local_request():
+        return jsonify({'error': '仅限主机本机操作'}), 403
+    for p in load_scan_points():
+        if p.get('id') == point_id:
+            return jsonify({'ok': True,
+                            'link': '%s/join?t=%s' % (request.host_url.rstrip('/'), p['token'])})
+    return jsonify({'error': '没有这个扫描点'}), 404
 
 
 def _active_batch_item_ids():
