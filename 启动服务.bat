@@ -1,15 +1,26 @@
 @echo off
-chcp 65001 >nul
+REM ============================================================
+REM Foreground launcher: a console window stays open, and closing
+REM that window stops the service. Use the background launcher in
+REM this folder instead if you want no window at all.
+REM
+REM ASCII only on purpose. cmd decodes .bat files with the system
+REM code page (936 here), so UTF-8 Chinese in comments can swallow
+REM the line break and make the parser run the comment as a
+REM command. That is exactly what used to break this file: the
+REM "set PY" line got eaten and cmd fell through to a bare python.
+REM All Chinese output comes from app.py, which prints through the
+REM wide-char console API and never garbles.
+REM ============================================================
 cd /d "%~dp0"
-title QuickJudge 服务
+title QuickJudge - foreground
 
-REM 优先用项目自带的虚拟环境，找不到再退回系统 python
 set "PY=C:\Users\Administrator\.workbuddy\binaries\python\envs\quickjudge\Scripts\python.exe"
 if not exist "%PY%" (
   where python >nul 2>&1
   if errorlevel 1 (
     echo.
-    echo [错误] 没有找到 Python，请先安装或在脚本里改成你的 python 路径。
+    echo [ERROR] Python not found. Install it, or edit the PY path in this file.
     echo.
     pause
     exit /b 1
@@ -17,15 +28,8 @@ if not exist "%PY%" (
   set "PY=python"
 )
 
-echo ============================================
-echo    QuickJudge 服务启动中
-echo    监听 0.0.0.0:5001，同一局域网内的设备可访问
-echo    关闭此窗口即停止服务
-echo ============================================
-echo.
-
 "%PY%" app.py
 
 echo.
-echo 服务已停止。
+echo Service stopped.
 pause
