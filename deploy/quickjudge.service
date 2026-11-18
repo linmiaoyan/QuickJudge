@@ -1,0 +1,36 @@
+[Unit]
+Description=QuickJudge 试卷批阅服务（处理中心）
+Documentation=https://github.com/linmiaoyan/QuickJudge
+# 等网络真正就绪再起：手机端、扫描点都要连进来，早起了反而不通
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__RUN_USER__
+Group=__RUN_USER__
+WorkingDirectory=__APP_DIR__
+Environment=PORTAL_PORT=5001
+# 不缓冲，日志才会实时进 journal；否则出错时看不到最后那几行
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__APP_DIR__/.venv/bin/python __APP_DIR__/app.py
+
+# 退出了就拉起来。批阅高峰被 OOM 杀掉、模型接口卡死被重启，
+# 都能自己回来，不需要谁半夜去机房点一下。
+Restart=always
+RestartSec=3
+
+# 密钥文件（.env）只给这个进程自己读
+UMask=0077
+
+# 给进程一点收拾的时间：正在跑的批次会写一批 json，
+# 直接 SIGKILL 会留下半截文件。
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+# 最小加固。学校服务器上这套够用，且不会挡住正常的文件读写。
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

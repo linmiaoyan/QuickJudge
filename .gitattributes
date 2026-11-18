@@ -1,0 +1,29 @@
+# 换行符按文件类型定死，不依赖每个人本机的 core.autocrlf。
+#
+# 为什么值得单独写一份：.sh 里混进 CRLF，Linux 上执行会报
+#   bash: ./install_linux.sh: /bin/bash^M: bad interpreter
+# 这条信息完全看不出是换行符的问题，能白查半天。反过来 .bat/.cmd 必须是 CRLF，
+# cmd.exe 对 LF-only 的批处理在某些位置会跳行。
+#
+# text = 允许 Git 做换行转换；eol = 工作区里最终用哪种。
+
+/.gitattributes text eol=lf
+
+*.sh      text eol=lf
+*.service text eol=lf
+*.py      text eol=lf
+*.md      text eol=lf
+*.js      text eol=lf
+*.css     text eol=lf
+*.html    text eol=lf
+*.json    text eol=lf
+*.csv     text eol=lf
+
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+
+# 图片是二进制，别让 Git 尝试合并或转换
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.zip     binary

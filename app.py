@@ -2254,7 +2254,16 @@ def get_scan_output_dir():
 
 
 def initialize_naps2_powershell_function():
-    """初始化NAPS2 PowerShell函数"""
+    """初始化NAPS2 PowerShell函数（仅 Windows，且仅用于本机扫描）。
+
+    处理中心部署到 Linux 服务器时，扫描仪根本不在这一台上（扫描点通过局域网
+    传图进来），这里没必要、也没法执行 PowerShell。以前没加这个判断，Linux 上
+    会往 data/config 写一个用不上的 naps2_init.ps1，再打一条
+    「初始化NAPS2 PowerShell函数失败: [Errno 2] No such file or directory: 'powershell'」，
+    看着像部署出了问题。
+    """
+    if os.name != 'nt':
+        return False
     try:
         naps2_path = get_naps2_path()
         

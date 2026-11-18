@@ -236,6 +236,17 @@ def get_secret(name, default=''):
     密文优先：即便 .env 里还残留同名明文（迁移没删干净），也以保险箱为准，
     避免"以为加密了，其实一直读的是明文"。
     """
+    # 非 Windows 上没有 DPAPI，密文是**一定**解不开的。这里直接短路到明文，
+    # 而不是让它进下面的 try 里抛 SecretError 再吞掉——处理中心跑在 Linux 上时
+    # data/ 常从 Windows 拷过来，那份 secrets.dpapi.json 会跟着过来，
+    # 不短路的话每次取密钥都往告警里塞一条"解不开"，启动横幅会被刷满，
+    # 真正需要注意的告警反而看不见了。
+    if not dpapi_available():
+        plain = (os.environ.get(name) or '').strip()
+        if plain:
+            _FROM_PLAINTEXT.add(name)
+            return plain
+        return default
     try:
         items = load_store().get('items') or {}
         if name in items:
@@ -288,6 +299,17 @@ def fingerprint(value):
 
 def startup_report():
     """启动时打一行体检结论。没配加密也别吵，但要说清楚。"""
+    # 非 Windows（处理中心部署在 Linux 服务器）：没有 DPAPI，密钥只能走 .env。
+    # 这里必须单独说清楚，不能落到下面的通用分支去：
+    # 那条路会打「解密失败」和「建议运行 seal_secrets.py」——两个在 Linux 上都是死路
+    # （后者会直接拒绝执行），只会让人以为部署出了问题。
+    if not dpapi_available():
+        if _FROM_PLAINTEXT:
+            return ('  密钥：从 .env 读取（%s）；非 Windows 没有 DPAPI，'
+                    '改为靠文件权限保护（chmod 600 + 专用账户）。'
+                    % '、'.join(sorted(_FROM_PLAINTEXT)))
+        return '  密钥：未配置。请在 .env 里填 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL。'
+
     lines = []
     st = status()
     sealed_ok = [k for k, v in st['items'].items() if v.get('ok')]
